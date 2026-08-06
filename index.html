@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b2437" />
+  <title>JomKaki Motor CRM</title>
+  <link rel="icon" type="image/jpeg" href="https://jomkaki-907gwjrpv-loan-buddy-crm.vercel.app/assets/jomkaki-motor-logo.jpg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=20260805-2" />
+  <link rel="stylesheet" href="./v2.css?v=20260806" />
+</head>
+<body>
+  <div class="login-gate" id="loginGate">
+    <form class="login-card" id="loginForm">
+      <img class="brand-logo login-logo" src="https://jomkaki-907gwjrpv-loan-buddy-crm.vercel.app/assets/jomkaki-motor-logo.jpg" alt="JomKaki Motor" />
+      <div class="eyebrow">Secure internal access</div>
+      <h1>JomKaki Motor CRM</h1>
+      <p>Sign in with your assigned account. Regional managers only see leads from their own region.</p>
+      <label for="loginUsername">Username</label>
+      <input id="loginUsername" type="text" autocomplete="username" required>
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Sign in</button>
+      <small id="loginError" role="alert"></small>
+    </form>
+  </div>
+  <div class="app-shell" id="appShell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="https://jomkaki-907gwjrpv-loan-buddy-crm.vercel.app/assets/jomkaki-motor-logo.jpg" alt="JomKaki Motor" />
+        <div><strong>JomKaki</strong><span>Motor CRM</span></div>
+      </div>
+      <nav class="nav" aria-label="Primary navigation">
+        <p class="nav-label">Overview</p>
+        <button class="nav-item active" data-view="dashboard"><span>âŒ‚</span>Command Centre</button>
+        <button class="nav-item" data-view="workbench"><span>âœ“</span>My Workbench <i id="workBadge">0</i></button>
+        <button class="nav-item" data-view="reports"><span>â–¥</span>Reports & Analytics</button>
+        <p class="nav-label">Customer Operations</p>
+        <button class="nav-item" data-view="leads"><span>â—Ž</span>Lead Pipeline <b id="leadBadge">0</b></button>
+        <button class="nav-item" data-view="applications"><span>â–¤</span>Applications <b id="applicationBadge">0</b></button>
+        <button class="nav-item" data-view="inbox"><span>âœ‰</span>Customer Inbox <i id="inboxBadge">0</i></button>
+        <button class="nav-item" data-view="outbox"><span>â†—</span>Message Outbox</button>
+        <p class="nav-label">Sales Management</p>
+        <button class="nav-item" data-view="catalog"><span>â—‡</span>Motor Catalog</button>
+        <button class="nav-item" data-view="pricing"><span>RM</span>Loan Pricing</button>
+        <button class="nav-item" data-view="team"><span>â™™</span>Branches & Team</button>
+        <p class="nav-label">Administration</p>
+        <button class="nav-item" data-view="users"><span>â™§</span>Users & Access</button>
+        <button class="nav-item" data-view="activity"><span>â‰¡</span>Activity & Audit</button>
+        <button class="nav-item" data-view="settings"><span>âš™</span>System Settings</button>
+      </nav>
+      <div class="integration-card">
+        <span class="status-dot warning"></span>
+        <div><strong>WhatsApp Cloud</strong><small>Connection pending</small></div>
+        <button>Connect</button>
+      </div>
+      <div class="profile">
+        <div class="avatar" id="profileAvatar">NJ</div><div><strong id="profileName">Nick Jee</strong><span id="profileRole">Administrator</span></div><button id="logoutButton" aria-label="Sign out">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-button" id="menuButton" aria-label="Open menu">â˜°</button>
+        <div class="search"><span>âŒ•</span><input id="globalSearch" placeholder="Search lead, phone or application IDâ€¦" /><kbd>âŒ˜ K</kbd></div>
+        <div class="top-actions"><button class="icon-button" aria-label="Notifications">â™¢<em>3</em></button><button class="primary" id="newLeadButton">â†» Refresh data</button></div>
+      </header>
+      <section id="appView" class="view" aria-live="polite"></section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="./app-v2.js?v=20260806"></script>
+</body>
+</html>
