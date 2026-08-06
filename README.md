@@ -43,8 +43,16 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 - `GOOGLE_PROJECT_NUMBER`
 - `GOOGLE_WIF_POOL_ID`
 - `GOOGLE_WIF_PROVIDER_ID`
+- `SHAREPOINT_TENANT_ID`
+- `SHAREPOINT_CLIENT_ID`
+- `SHAREPOINT_CLIENT_SECRET` (Sensitive)
+- `SHAREPOINT_HOSTNAME` (defaults to `rexmgt.sharepoint.com`)
+- `SHAREPOINT_SITE_PATH` (defaults to `/sites/JomkakiMotorSecureDocuments`)
+- `SHAREPOINT_LIBRARY_NAME` (defaults to `Documents`)
 
 The Google service account must have Editor access to the CRM spreadsheet for operational write actions. Read-only views continue to work if write permission is unavailable.
+
+The Microsoft Entra application must have application permission `Sites.Selected`, with write access granted only to the JomkakiMotorSecureDocuments site. Avoid tenant-wide `Sites.ReadWrite.All` in production.
 
 ## Deployment
 
@@ -67,4 +75,3 @@ Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not u
 - Make schedules must remain OFF during development and integration testing.
 
 See `../JomKaki External Integration Activation Runbook.md` for the prepared WhatsApp Cloud and LMSPRO activation checklists.
-
