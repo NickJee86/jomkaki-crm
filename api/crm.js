@@ -21,7 +21,7 @@ async function getAccessToken(req) {
   const federatedToken = (await stsResponse.json()).access_token;
   const tokenResponse = await fetch(`https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${encodeURIComponent(CLIENT_EMAIL)}:generateAccessToken`, {
     method: 'POST', headers: { authorization: `Bearer ${federatedToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/spreadsheets.readonly'], lifetime: '3600s' })
+    body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.file'], lifetime: '3600s' })
   });
   if (!tokenResponse.ok) throw new Error(`Google service account authorization failed (${tokenResponse.status})`);
   return (await tokenResponse.json()).accessToken;
@@ -35,6 +35,73 @@ async function readRanges(req, ranges) {
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${params}`, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`Google Sheets request failed (${response.status})`);
   return (await response.json()).valueRanges.map(item => item.values || []);
+}
+
+async function appendObject(req, sheet, object) {
+  const token = await getAccessToken(req);
+  const [headerRows] = await readRanges(req, [`${sheet}!1:1`]);
+  const headers = headerRows?.[0] || [];
+  if (!headers.length) throw new Error(`${sheet} headers are missing`);
+  const values = headers.map(header => object[header] ?? '');
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] })
+  });
+  if (!response.ok) throw new Error(`Unable to write ${sheet} (${response.status})`);
+}
+
+async function getSharePointToken() {
+  const tenant = clean(process.env.SHAREPOINT_TENANT_ID), client = clean(process.env.SHAREPOINT_CLIENT_ID), secret = clean(process.env.SHAREPOINT_CLIENT_SECRET);
+  if (!tenant || !client || !secret) throw new Error('SharePoint application credentials are not configured');
+  const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: client, client_secret: secret, scope: 'https://graph.microsoft.com/.default', grant_type: 'client_credentials' })
+  });
+  if (!response.ok) throw new Error(`SharePoint authentication failed (${response.status})`);
+  return (await response.json()).access_token;
+}
+
+async function graph(token, url, options = {}) {
+  const response = await fetch(`https://graph.microsoft.com/v1.0${url}`, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+  if (!response.ok) throw new Error(`SharePoint request failed (${response.status})`);
+  return response.status === 204 ? {} : response.json();
+}
+
+async function ensureFolder(token, driveId, parentId, name) {
+  const safe = name.replace(/["*:<>?/\\|#%]/g, '-').slice(0, 120);
+  const children = await graph(token, `/drives/${driveId}/items/${parentId}/children?$select=id,name,folder`);
+  const existing = (children.value || []).find(item => item.folder && item.name.toLowerCase() === safe.toLowerCase());
+  if (existing) return existing;
+  return graph(token, `/drives/${driveId}/items/${parentId}/children`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: safe, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) });
+}
+
+async function uploadDocument(req, file, caseId) {
+  const bytes = Buffer.from(clean(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+  if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw new Error('Document must be between 1 byte and 4 MB');
+  const token = await getSharePointToken();
+  const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
+  const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
+  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
+  const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
+  const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
+  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
+  if (!drive) throw new Error('SharePoint document library was not found');
+  const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
+  const crmFolder = await ensureFolder(token, drive.id, root.id, 'CRM Customer Documents');
+  const caseFolder = await ensureFolder(token, drive.id, crmFolder.id, caseId || 'Unassigned');
+  const safeName = (clean(file.name) || `document-${Date.now()}`).replace(/["*:<>?/\\|#%]/g, '-').slice(0, 180);
+  return graph(token, `/drives/${drive.id}/items/${caseFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
+    method: 'PUT', headers: { 'content-type': clean(file.type) || 'application/octet-stream' }, body: bytes
+  });
+}
+
+const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+const now = () => new Date().toISOString();
+
+async function writeActivity(req, session, payload) {
+  await appendObject(req, 'Activity_Log', {
+    'Activity ID': makeId('ACT'), 'Activity At': now(), 'Lead ID': payload.leadId || '', 'Application ID': payload.applicationId || '',
+    'Activity Type': payload.type, Description: payload.description, 'Actor ID': session.username, 'Activity Status': 'COMPLETED'
+  });
 }
 
 function rowsToObjects(rows) {
@@ -70,7 +137,55 @@ export default async function handler(req, res) {
   res.setHeader('Vary', 'Cookie');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   if (!session) return res.status(401).json({ live: false, error: 'Authentication required.' });
-  if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'CRM is read-only.' });
+  if (req.method === 'POST') {
+    try {
+      const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+      const action = clean(body.action);
+      if (action === 'createApplication') {
+        const customerName = clean(body.customerName), phone = clean(body.phone), brand = clean(body.brand), model = clean(body.model);
+        const requestedRegion = canonicalRegion(body.region);
+        if (!customerName || !phone || !brand || !model || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region, brand and model are required');
+        if (session.role !== 'ADMIN' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
+        const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
+        await appendObject(req, 'Leads', {
+          'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
+          Region: requestedRegion, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
+          'Assigned SA ID': clean(body.saId), 'Selected Branch ID': clean(body.branchId), 'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
+        });
+        await appendObject(req, 'Applications', {
+          'Application ID': applicationId, 'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Applicant Name': customerName,
+          'Phone Number': phone, 'Product Brand': brand, 'Product Model': model, 'Product Variant': clean(body.variant), 'Loan Tenure Years': clean(body.tenure),
+          'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Assigned Branch ID': clean(body.branchId), 'Assigned SA ID': clean(body.saId),
+          'Document Status': 'PENDING', 'Minimum Documents Complete': 'FALSE', 'Missing Documents': clean(body.missingDocuments) || 'IC_FRONT, IC_BACK, INCOME_PROOF',
+          'SA Review Required': 'TRUE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username
+        });
+        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `Manual application created for ${brand} ${model}` });
+        return res.status(201).json({ live: true, leadId, applicationId });
+      }
+      if (action === 'uploadDocument') {
+        const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
+        if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+        const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
+        if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
+        const uploaded = await uploadDocument(req, body.file, applicationId || leadId);
+        const documentId = makeId('DOC'), timestamp = now();
+        await appendObject(req, 'Document_Log', {
+          'Document ID': documentId, 'Received At': timestamp, 'Updated At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId,
+          'Document Type': documentType, 'File Name': uploaded.name, 'Mime Type': clean(body.file.type), 'File URL': uploaded.webUrl || '',
+          'Classification Status': 'MANUAL', 'Quality Status': 'PENDING_REVIEW', 'Verification Status': 'PENDING', 'Duplicate Status': 'NOT_CHECKED',
+          'Manual Review Required': 'TRUE', Remarks: clean(body.remarks), 'Uploaded By': session.username
+        });
+        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for manual review` });
+        return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
+      }
+      return res.status(400).json({ live: false, error: 'Unsupported CRM action.' });
+    } catch (error) {
+      console.error(error);
+      return res.status(400).json({ live: false, error: error.message || 'Unable to save CRM data.' });
+    }
+  }
+  if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region } });
   try {
