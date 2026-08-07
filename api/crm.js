@@ -244,6 +244,36 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_DOCUMENT_REVIEWED', description: `${document['Document Type'] || 'Document'} marked ${verification}` });
         return res.status(200).json({ live: true, documentId });
       }
+      if (action === 'updateApplicantProfile') {
+        const applicationId = clean(body.applicationId);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
+        const scope = scopeData(session, leads, applications, branches);
+        const record = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        const changes = {
+          'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
+          'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
+          'Employer Address': clean(body.employerAddress), 'Employer Phone': clean(body.employerPhone),
+          'Employment Duration Months': clean(body.employmentDurationMonths), 'Job Position': clean(body.jobPosition),
+          'Basic Salary': clean(body.basicSalary), 'Salary Payment Method': clean(body.salaryPaymentMethod),
+          'Occupation Category': clean(body.occupationCategory), 'Reference 1 Name': clean(body.reference1Name),
+          'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
+          'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
+          'Reference 2 Relationship': clean(body.reference2Relationship), 'Product Category': clean(body.productCategory) || 'MOTORCYCLE',
+          'Product Brand': clean(body.productBrand), 'Product Model': clean(body.productModel), 'Loan Tenure Years': clean(body.loanTenureYears),
+          'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
+          'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
+          'Updated By': session.username
+        };
+        if (clean(body.applicantIcNumber)) changes['Applicant IC Number'] = clean(body.applicantIcNumber);
+        if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, motor brand and model are required');
+        if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Loan tenure must be 3, 4 or 5 years');
+        if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
+        await updateObject(req, 'Applications', 'Application ID', applicationId, changes);
+        await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
+        return res.status(200).json({ live: true, applicationId });
+      }
       return res.status(400).json({ live: false, error: 'Unsupported CRM action.' });
     } catch (error) {
       console.error(error);
@@ -284,12 +314,22 @@ export default async function handler(req, res) {
         const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && canonicalRegion(p['Price Zone']) === zone) || {};
         const tenure = clean(row['Loan Tenure Years']);
         const monthly = tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '';
+        const ic = clean(row['Applicant IC Number']);
         return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone,
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, deposit: customerAmount(quote['Effective Deposit (RM)'] || quote['Deposit (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'], promotion: quote['Promotion Name'],
           branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: row['Document Status'], minimumDocumentsComplete: row['Minimum Documents Complete'],
           missingDocuments: row['Missing Documents'], documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, documentUpdated: docs.latest,
+          icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
+          employerName: row['Employer Name'], employerAddress: row['Employer Address'], employerPhone: row['Employer Phone'],
+          employmentDurationMonths: row['Employment Duration Months'], jobPosition: row['Job Position'], basicSalary: row['Basic Salary'],
+          salaryPaymentMethod: row['Salary Payment Method'], occupationCategory: row['Occupation Category'], eligibilityStatus: row['Eligibility Status'], eligibilityReason: row['Eligibility Reason'],
+          reference1Name: row['Reference 1 Name'], reference1Phone: row['Reference 1 Phone'], reference1Relationship: row['Reference 1 Relationship'],
+          reference2Name: row['Reference 2 Name'], reference2Phone: row['Reference 2 Phone'], reference2Relationship: row['Reference 2 Relationship'],
+          bankAccountAvailable: row['Bank Account Available'], directDebitStatus: row['Direct Debit Status'], agreementStatus: row['Agreement Status'],
+          lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'], cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
+          missingApplicationFields: row['Missing Application Fields'], handoverReason: row['Handover Reason'], assignedSupervisorId: row['Assigned Supervisor ID'], supervisorAssignmentStatus: row['Supervisor Assignment Status'],
           updated: row['Updated At'] || row['Created At'] };
       });
       return res.status(200).json({ live: true, records });
