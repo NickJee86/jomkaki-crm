@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { authenticate, getSession, hashPassword } from './_auth.js';
+import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmentAccounts, setSession, validateSession } from './_auth.js';
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -131,6 +131,37 @@ async function accountRows(req) {
   return rowsToObjects(rows);
 }
 
+async function validatedAccountScope(req, role, region, branchId, saId) {
+  const normalizedRole = clean(role).toUpperCase();
+  const normalizedRegion = normalizedRole === 'ADMIN' ? 'ALL' : canonicalRegion(region);
+  if (normalizedRole === 'ADMIN') return { region: 'ALL', branchId: '', saId: '' };
+  if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(normalizedRegion)) throw new Error('A valid region is required');
+  if (normalizedRole === 'REGION_MANAGER') return { region: normalizedRegion, branchId: '', saId: '' };
+  const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+  const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
+  if (normalizedRole === 'BRANCH_MANAGER') {
+    const branch = branches.find(row => clean(row['Branch ID']) === clean(branchId) && clean(row.Active).toUpperCase() === 'TRUE');
+    if (!branch) throw new Error('Branch Manager requires an active Branch ID');
+    if (canonicalRegion(branch.Region) !== normalizedRegion) throw new Error('The selected branch does not belong to this region');
+    return { region: normalizedRegion, branchId: clean(branchId), saId: '' };
+  }
+  const advisor = advisors.find(row => clean(row['SA ID']) === clean(saId) && clean(row.Active).toUpperCase() === 'TRUE');
+  if (!advisor) throw new Error('Staff requires an active SA ID');
+  const advisorBranch = clean(advisor['Branch ID']);
+  const branch = branches.find(row => clean(row['Branch ID']) === advisorBranch && clean(row.Active).toUpperCase() === 'TRUE');
+  if (!branch || canonicalRegion(advisor.Region || branch.Region) !== normalizedRegion) throw new Error('The selected sales advisor does not belong to this region');
+  if (clean(branchId) && clean(branchId) !== advisorBranch) throw new Error('The selected sales advisor does not belong to this branch');
+  return { region: normalizedRegion, branchId: advisorBranch, saId: clean(saId) };
+}
+
+const humanStatuses = new Set(['HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF']);
+const managerRoles = new Set(['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER']);
+const whatsappPhone = value => {
+  let digits = clean(value).replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
+  return digits;
+};
+
 function publicAccount(row) {
   return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
 }
@@ -182,10 +213,14 @@ const documentSummary = documents => {
 };
 
 export default async function handler(req, res) {
-  const session = getSession(req);
+  let session = getSession(req);
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   res.setHeader('Vary', 'Cookie');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  if (session) {
+    try { session = await validateSession(req, session); } catch { session = false; }
+  }
+  if (!session) clearSession(res);
   if (!session) return res.status(401).json({ live: false, error: 'Authentication required.' });
   if (req.method === 'POST') {
     try {
@@ -197,50 +232,58 @@ export default async function handler(req, res) {
         if (!await authenticate(req, session.username, currentPassword)) return res.status(403).json({ live: false, error: 'Current password is incorrect.' });
         const record = (await accountRows(req)).find(row => clean(row.Username).toLowerCase() === clean(session.username).toLowerCase());
         if (!record) throw new Error('Your account must be migrated by Admin before changing its password');
-        await updateObject(req, 'CRM_User_Access', 'Account ID', record['Account ID'], { 'Password Hash': hashPassword(newPassword), 'Must Change Password': 'FALSE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now() }, 'R');
+        const timestamp = now();
+        await updateObject(req, 'CRM_User_Access', 'Account ID', record['Account ID'], { 'Password Hash': hashPassword(newPassword), 'Must Change Password': 'FALSE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': timestamp, 'Updated At': timestamp }, 'R');
         await writeActivity(req, session, { type: 'CRM_OWN_PASSWORD_CHANGED', description: `${session.username} changed their password` });
+        setSession(res, { ...session, mustChangePassword: false, authSource: 'sheet', authVersion: timestamp });
         return res.status(200).json({ live: true });
       }
-      if (['createUser', 'resetUserPassword', 'setUserEnabled', 'editUser', 'unlockUser'].includes(action)) {
+      if (['createUser', 'resetUserPassword', 'setUserEnabled', 'editUser', 'unlockUser', 'migrateLegacyAccounts'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        if (action === 'migrateLegacyAccounts') {
+          const migrated = await migrateEnvironmentAccounts(req);
+          await writeActivity(req, session, { type: 'CRM_LEGACY_ACCOUNTS_MIGRATED', description: `${migrated} legacy accounts migrated to CRM management` });
+          return res.status(200).json({ live: true, migrated });
+        }
         const users = await accountRows(req);
         if (action === 'createUser') {
           const username = clean(body.username).toLowerCase(), name = clean(body.name), role = clean(body.role).toUpperCase();
-          const region = role === 'ADMIN' ? 'ALL' : canonicalRegion(body.region);
           if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new Error('Username must be 3–40 letters, numbers, dots, dashes or underscores');
           if (!name || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Name and a valid role are required');
           if (users.some(row => clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
-          if (role !== 'ADMIN' && !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(region)) throw new Error('A valid region is required');
-          if (role === 'STAFF' && !clean(body.saId)) throw new Error('Staff accounts require an SA ID');
+          const identity = await validatedAccountScope(req, role, body.region, body.branchId, body.saId);
           const password = clean(body.password) || temporaryPassword();
           if (password.length < 10) throw new Error('Temporary password must contain at least 10 characters');
           const accountId = `${role.replace('_MANAGER', '').replace('REGION', 'REG')}-${Date.now()}`;
+          const timestamp = now();
           await appendObject(req, 'CRM_User_Access', {
-            'Account ID': accountId, Username: username, 'Display Name': name, Role: role, 'SA ID': clean(body.saId), 'Branch ID': clean(body.branchId), Region: region,
-            Status: 'ACTIVE', 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID',
-            'Login Enabled': 'TRUE', 'Last Verified': now().slice(0, 10), Notes: 'Created in CRM by Admin', 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now()
+            'Account ID': accountId, Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region,
+            Status: 'ACTIVE', 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${identity.region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID',
+            'Login Enabled': 'TRUE', 'Last Verified': timestamp.slice(0, 10), Notes: 'Created in CRM by Admin', 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': timestamp, 'Updated At': timestamp
           });
           await writeActivity(req, session, { type: 'CRM_USER_CREATED', description: `${role} account ${username} created` });
           return res.status(201).json({ live: true, accountId, temporaryPassword: password });
         }
         const accountId = clean(body.accountId), record = users.find(row => clean(row['Account ID']) === accountId);
         if (!record) throw new Error('User account was not found');
+        const activeAdmins = users.filter(row => clean(row.Role).toUpperCase() === 'ADMIN' && clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE');
         if (record.Username === session.username && action === 'setUserEnabled' && clean(body.enabled).toUpperCase() !== 'TRUE') throw new Error('You cannot disable your own signed-in account');
         if (action === 'resetUserPassword') {
           const password = clean(body.password) || temporaryPassword();
           if (password.length < 10) throw new Error('Temporary password must contain at least 10 characters');
-          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now() }, 'R');
+          const timestamp = now();
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': timestamp, 'Updated At': timestamp }, 'R');
           await writeActivity(req, session, { type: 'CRM_USER_PASSWORD_RESET', description: `Password reset for ${record.Username}` });
           return res.status(200).json({ live: true, temporaryPassword: password });
         }
         if (action === 'editUser') {
           const role = clean(body.role).toUpperCase(), name = clean(body.name), username = clean(body.username).toLowerCase();
-          const region = role === 'ADMIN' ? 'ALL' : canonicalRegion(body.region);
           if (!name || !/^[a-z0-9._-]{3,40}$/.test(username) || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Valid name, username and role are required');
           if (users.some(row => row['Account ID'] !== accountId && clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
-          if (role === 'BRANCH_MANAGER' && !clean(body.branchId)) throw new Error('Branch Manager requires a Branch ID');
-          if (role === 'STAFF' && !clean(body.saId)) throw new Error('Staff requires an SA ID');
-          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Username: username, 'Display Name': name, Role: role, 'SA ID': clean(body.saId), 'Branch ID': clean(body.branchId), Region: region, 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID', 'Updated At': now() }, 'R');
+          if (clean(record.Username).toLowerCase() === clean(session.username).toLowerCase() && role !== 'ADMIN') throw new Error('You cannot remove your own Administrator access');
+          if (clean(record.Role).toUpperCase() === 'ADMIN' && role !== 'ADMIN' && activeAdmins.length <= 1) throw new Error('At least one active Administrator must remain');
+          const identity = await validatedAccountScope(req, role, body.region, body.branchId, body.saId);
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region, 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${identity.region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID', 'Updated At': now() }, 'R');
           await writeActivity(req, session, { type: 'CRM_USER_EDITED', description: `${username} account details updated` });
           return res.status(200).json({ live: true, accountId });
         }
@@ -250,6 +293,7 @@ export default async function handler(req, res) {
           return res.status(200).json({ live: true, accountId });
         }
         const enabled = clean(body.enabled).toUpperCase() === 'TRUE';
+        if (!enabled && clean(record.Role).toUpperCase() === 'ADMIN' && activeAdmins.length <= 1) throw new Error('At least one active Administrator must remain');
         await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Status: enabled ? 'ACTIVE' : 'DISABLED', 'Login Enabled': enabled ? 'TRUE' : 'FALSE', 'Updated At': now() }, 'R');
         await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
         return res.status(200).json({ live: true, accountId, enabled });
@@ -261,7 +305,18 @@ export default async function handler(req, res) {
         if (session.role !== 'ADMIN' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
-        const assignedBranchId = session.role === 'STAFF' ? session.branchId : clean(body.branchId);
+        const assignedBranchId = ['STAFF', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
+        if (assignedSaId || assignedBranchId) {
+          const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+          const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
+          const branch = branches.find(row => clean(row['Branch ID']) === assignedBranchId && clean(row.Active).toUpperCase() === 'TRUE');
+          if (!branch || (session.role !== 'ADMIN' && canonicalRegion(branch.Region) !== requestedRegion)) throw new Error('The selected branch is outside the application region');
+          if (session.role === 'BRANCH_MANAGER' && assignedBranchId !== clean(session.branchId)) throw new Error('Branch Manager may create cases in their own branch only');
+          if (assignedSaId) {
+            const advisor = advisors.find(row => clean(row['SA ID']) === assignedSaId && clean(row.Active).toUpperCase() === 'TRUE');
+            if (!advisor || clean(advisor['Branch ID']) !== assignedBranchId || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== requestedRegion)) throw new Error('The selected sales advisor does not belong to this branch and region');
+          }
+        }
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
           Region: requestedRegion, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
@@ -311,25 +366,32 @@ export default async function handler(req, res) {
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
-        const stage = clean(body.stage).toUpperCase(), status = clean(body.status).toUpperCase();
+        const stage = session.role === 'STAFF' ? clean(record['Current Stage']).toUpperCase() : clean(body.stage).toUpperCase();
+        const status = session.role === 'STAFF' ? clean(record['Application Status']).toUpperCase() : clean(body.status).toUpperCase();
         const saId = session.role === 'STAFF' ? session.saId : clean(body.saId);
         const branchId = session.role === 'STAFF' ? session.branchId : clean(body.branchId);
         if (!stages.includes(stage) || !statuses.includes(status)) throw new Error('A valid stage and status are required');
         const branchRegion = Object.fromEntries(branches.map(row => [clean(row['Branch ID']), canonicalRegion(row.Region)]));
         if (branchId && (!branchRegion[branchId] || (session.role !== 'ADMIN' && branchRegion[branchId] !== session.region))) throw new Error('The selected branch is outside your access');
+        if (session.role === 'BRANCH_MANAGER' && branchId !== clean(session.branchId)) throw new Error('Branch Manager may assign cases inside their own branch only');
         if (saId) {
           const advisor = salesAdvisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!advisor || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== session.region)) throw new Error('The selected sales advisor is outside your access');
+          if (session.role === 'BRANCH_MANAGER' && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
+          if (branchId && clean(advisor['Branch ID']) !== branchId) throw new Error('The selected sales advisor does not belong to the selected branch');
         }
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
           'Updated At': now(), 'Current Stage': stage, 'Application Status': status, 'Assigned SA ID': saId,
           'Assigned Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Missing Documents': clean(body.missingDocuments),
-          'SA Review Required': clean(body.reviewRequired).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE', 'Handover Reason': clean(body.handoverReason), 'Updated By': session.username
+          'SA Review Required': session.role === 'STAFF' ? clean(record['SA Review Required']) : clean(body.reviewRequired).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
+          'Handover Reason': session.role === 'STAFF' ? clean(record['Handover Reason']) : clean(body.handoverReason), 'Updated By': session.username
         });
+        if (record['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Updated At': now() }, 'AF');
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICATION_UPDATED', description: `Application updated to ${stage} / ${status}` });
         return res.status(200).json({ live: true, applicationId });
       }
       if (action === 'reviewDocument') {
+        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to verify customer documents.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
@@ -373,6 +435,80 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
+      if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows);
+        const scope = scopeData(session, leads, applications, branches);
+        const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
+        const permitted = (leadId && scope.leadIds.has(leadId)) || (applicationId && scope.applicationIds.has(applicationId));
+
+        if (action === 'sendCustomerMessage') {
+          if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
+          const unassignedHandover = inboxRecords.some(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()) && clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF' && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId)));
+          if (session.role === 'STAFF' && unassignedHandover) return res.status(403).json({ live: false, error: 'This human handover is controlled by a Manager and has not been assigned to Staff.' });
+          const phone = whatsappPhone(body.phone), message = clean(body.message);
+          if (!phone || message.length < 1 || message.length > 4000) throw new Error('A valid phone number and message are required');
+          const messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT', templateName = clean(body.templateName), language = clean(body.language) || 'en_US';
+          if (messageType === 'TEMPLATE' && !templateName) throw new Error('An approved Meta template name is required');
+          const outboxId = makeId('OUT'), timestamp = now();
+          const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
+          let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '';
+          if (cloudMode) {
+            const accessToken = clean(process.env.WHATSAPP_ACCESS_TOKEN), phoneNumberId = clean(process.env.WHATSAPP_PHONE_NUMBER_ID), version = clean(process.env.WHATSAPP_GRAPH_VERSION) || 'v25.0';
+            if (!accessToken || !phoneNumberId) throw new Error('WhatsApp Cloud credentials are not configured');
+            const cloudPayload = messageType === 'TEMPLATE' ? { messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: templateName, language: { code: language } } } : { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'text', text: { preview_url: false, body: message } };
+            const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(cloudPayload) });
+            const result = await response.json().catch(() => ({}));
+            if (response.ok) { sendStatus = 'QUEUED'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
+          }
+          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'Send Routing Status': cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL' });
+          await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply` });
+          return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
+        }
+
+        if (action === 'recordManualReply' || action === 'requestHumanHandover') {
+          if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
+          const phone = whatsappPhone(body.phone), message = clean(body.message || body.reason);
+          if (!phone || !message) throw new Error('Phone number and message are required');
+          const status = action === 'requestHumanHandover' || clean(body.requiresManager).toUpperCase() === 'TRUE' ? 'HUMAN_HANDOVER_REQUIRED' : 'MANUAL_RECORDED';
+          const messageId = makeId('MSG'), timestamp = now();
+          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'Webhook Source': 'CRM', 'Number Routing Status': 'MANUAL_TEST' });
+          await writeActivity(req, session, { leadId, applicationId, type: status === 'HUMAN_HANDOVER_REQUIRED' ? 'CRM_HUMAN_HANDOVER_REQUESTED' : 'CRM_CUSTOMER_REPLY_RECORDED', description: message.slice(0, 240) });
+          return res.status(201).json({ live: true, messageId, status });
+        }
+
+        if (action === 'markOutboxSent') {
+          const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
+          if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
+          await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'MANUAL_SENT', 'Sent At': now(), 'Attempt Count': String(Number(record['Attempt Count'] || 0) + 1), 'Send Routing Status': 'WHATSAPP_BUSINESS_MANUAL' }, 'Z');
+          await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: 'CRM_MANUAL_WHATSAPP_SENT', description: `${session.username} confirmed manual WhatsApp delivery` });
+          return res.status(200).json({ live: true, outboxId: record['Outbox ID'] });
+        }
+
+        const messageId = clean(body.messageId), inboxRecord = inboxRecords.find(row => clean(row['Message ID']) === messageId);
+        if (!inboxRecord || !((inboxRecord['Lead ID'] && scope.leadIds.has(inboxRecord['Lead ID'])) || (inboxRecord['Application ID'] && scope.applicationIds.has(inboxRecord['Application ID'])))) return res.status(403).json({ live: false, error: 'This handover is outside your access.' });
+        if (action === 'assignHandover') {
+          if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to assign a human handover.' });
+          const saId = clean(body.saId), advisor = advisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
+          if (!advisor) throw new Error('Select an active sales advisor');
+          if (session.role === 'BRANCH_MANAGER' && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('This sales advisor is outside your branch');
+          if (session.role === 'REGION_MANAGER' && canonicalRegion(advisor.Region) !== session.region) throw new Error('This sales advisor is outside your region');
+          const assignedBranchId = clean(advisor['Branch ID']);
+          if (inboxRecord['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now() }, 'AF');
+          if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BG');
+          await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': 'ASSIGNED_TO_STAFF', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
+          await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: 'CRM_HANDOVER_ASSIGNED', description: `Human handover assigned to ${saId}` });
+          return res.status(200).json({ live: true, messageId, saId });
+        }
+
+        const status = clean(body.status).toUpperCase();
+        if (!['MANAGER_IN_PROGRESS', 'RESOLVED'].includes(status)) throw new Error('A valid handover status is required');
+        if (status === 'MANAGER_IN_PROGRESS' && !managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to take over this conversation.' });
+        if (session.role === 'STAFF' && clean(inboxRecord['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF') return res.status(403).json({ live: false, error: 'This handover has not been assigned to you.' });
+        await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': status, 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
+        await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: status === 'RESOLVED' ? 'CRM_HANDOVER_RESOLVED' : 'CRM_MANAGER_TAKEOVER', description: `${session.username} updated human handover to ${status}` });
+        return res.status(200).json({ live: true, messageId, status });
+      }
       return res.status(400).json({ live: false, error: 'Unsupported CRM action.' });
     } catch (error) {
       console.error(error);
@@ -381,7 +517,7 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
-  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword } });
+  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
   try {
     if (resource === 'users') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -471,7 +607,10 @@ export default async function handler(req, res) {
       const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:Z1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:Z1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
       const [rows] = await readRanges(req, [cfg[0]]);
       const visible = rowsToObjects(rows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']) || scope.applicationIds.has(row['Application ID'])).slice(-300).reverse();
-      const records = visible.map(row => resource === 'inbox' ? ({ id: row['Message ID'], customer: row['Phone Number'], leadId: row['Lead ID'], phone: row['Phone Number'], message: row['Customer Message'], status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'] }) : resource === 'outbox' ? ({ id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'], status: row['Send Status'], time: row['Sent At'] || row['Created At'] }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));
+      const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Customer Name']]));
+      const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
+      const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
+      const records = visible.map(row => resource === 'inbox' ? ({ id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'], status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase()) }) : resource === 'outbox' ? ({ id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'], status: row['Send Status'], time: row['Sent At'] || row['Created At'], manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING' }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));
       return res.status(200).json({ live: true, records });
     }
 
@@ -479,8 +618,9 @@ export default async function handler(req, res) {
     const inbox = rowsToObjects(inboxRows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']) || scope.applicationIds.has(row['Application ID']));
     const completed = count(scope.applications, 'Application Status', 'COMPLETED');
-    const needsAttention = count(scope.applications, 'Application Status', 'MANUAL_REVIEW') + count(scope.applications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED');
-    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), summary: { leads: scope.leads.length, applications: scope.applications.length, conversion: scope.leads.length ? scope.applications.length / scope.leads.length : 0, needsAttention, completed, unreadInbox: inbox.filter(row => ['NEW', 'ERROR'].includes(clean(row['Process Status']).toUpperCase())).length } });
+    const humanHandovers = inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())).length;
+    const needsAttention = count(scope.applications, 'Application Status', 'MANUAL_REVIEW') + count(scope.applications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
+    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), summary: { leads: scope.leads.length, applications: scope.applications.length, conversion: scope.leads.length ? scope.applications.length / scope.leads.length : 0, needsAttention, completed, humanHandovers, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
   } catch (error) {
     console.error(error);
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });

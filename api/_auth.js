@@ -44,9 +44,9 @@ const environmentAccounts = () => [
   { username: process.env.CRM_EAST_MANAGER_USERNAME, password: process.env.CRM_EAST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'EAST_MALAYSIA', name: process.env.CRM_EAST_MANAGER_NAME || 'East Malaysia Manager' },
   { username: process.env.CRM_WEST_MANAGER_USERNAME, password: process.env.CRM_WEST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'WEST_MALAYSIA', name: process.env.CRM_WEST_MANAGER_NAME || 'West Malaysia Manager' },
   ...staffAccounts()
-].filter(account => account.username && (account.password || account.passwordHash));
+].filter(account => account.username && (account.password || account.passwordHash)).map(account => ({ ...account, authSource: 'environment', authVersion: 'environment' }));
 
-async function getAccessToken(req) {
+export async function getAccessToken(req) {
   const oidcToken = req.headers['x-vercel-oidc-token'] || process.env.VERCEL_OIDC_TOKEN;
   if (!oidcToken || !CLIENT_EMAIL || !PROJECT_NUMBER || !SHEET_ID) return '';
   const providerResource = `projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}`;
@@ -71,8 +71,8 @@ async function dynamicAccounts(req) {
     const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}`, { headers: { authorization: `Bearer ${token}` } });
     if (!response.ok) return [];
     const [headers = [], ...rows] = (await response.json()).values || [];
-    return rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE' && row.Username && row['Password Hash']).map(row => ({
-      username: row.Username, passwordHash: row['Password Hash'], role: clean(row.Role).toUpperCase(), region: normaliseRegion(row.Region), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], rowNumber: row.rowNumber
+    return rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => row.Username).map(row => ({
+      id: row['Account ID'], username: row.Username, passwordHash: row['Password Hash'], role: clean(row.Role).toUpperCase(), region: normaliseRegion(row.Region), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], rowNumber: row.rowNumber, active: clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE', authSource: 'sheet', authVersion: clean(row['Updated At'])
     }));
   } catch { return []; }
 }
@@ -94,6 +94,7 @@ export async function authenticate(req, username, password) {
   const dynamic = await dynamicAccounts(req);
   const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted);
   if (dynamicAccount) {
+    if (!dynamicAccount.active || !dynamicAccount.passwordHash) return false;
     if (dynamicAccount.lockedUntil && new Date(dynamicAccount.lockedUntil).getTime() > Date.now()) return false;
     const token = await getAccessToken(req);
     if (verifyPassword(password, dynamicAccount.passwordHash)) {
@@ -107,6 +108,50 @@ export async function authenticate(req, username, password) {
   return environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password))) || false;
 }
 
+export async function validateSession(req, session) {
+  if (!session?.username) return false;
+  const account = (await dynamicAccounts(req)).find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
+  if (account) {
+    if (!account.active || !account.passwordHash || (account.lockedUntil && new Date(account.lockedUntil).getTime() > Date.now())) return false;
+    if (clean(session.authSource) !== 'sheet' || clean(session.authVersion) !== clean(account.authVersion)) return false;
+    return { ...session, name: account.name, role: account.role, region: account.region, saId: account.saId || '', branchId: account.branchId || '', mustChangePassword: account.mustChangePassword };
+  }
+  if (clean(session.authSource) === 'sheet') return false;
+  const environment = environmentAccounts().find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
+  return environment ? session : false;
+}
+
+export async function migrateEnvironmentAccounts(req) {
+  const token = await getAccessToken(req);
+  if (!token) throw new Error('Google Sheets authorization is unavailable');
+  const range = encodeURIComponent('CRM_User_Access!A1:R1000');
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}`, { headers: { authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error('Unable to read CRM accounts');
+  const [headers = [], ...rows] = (await response.json()).values || [];
+  const existing = new Set(rows.map(row => clean(row[headers.indexOf('Username')]).toLowerCase()).filter(Boolean));
+  let migrated = 0;
+  for (const account of environmentAccounts()) {
+    if (existing.has(clean(account.username).toLowerCase())) continue;
+    const timestamp = new Date().toISOString();
+    const placeholderIndex = rows.findIndex(row => !clean(row[headers.indexOf('Password Hash')]) && clean(row[headers.indexOf('Role')]).toUpperCase() === clean(account.role).toUpperCase() && normaliseRegion(row[headers.indexOf('Region')]) === normaliseRegion(account.region));
+    const object = {
+      'Account ID': placeholderIndex >= 0 ? clean(rows[placeholderIndex][headers.indexOf('Account ID')]) || `MIG-${account.role}-${Date.now()}-${migrated + 1}` : `MIG-${account.role}-${Date.now()}-${migrated + 1}`, Username: clean(account.username).toLowerCase(), 'Display Name': account.name, Role: account.role,
+      'SA ID': account.saId || '', 'Branch ID': account.branchId || '', Region: account.region, Status: 'ACTIVE',
+      'Access Scope': account.role === 'ADMIN' ? 'All CRM customers, accounts and settings' : account.role === 'REGION_MANAGER' ? `All ${String(account.region).replace('_', ' ')} branches, staff and customers` : 'Customers and follow-ups assigned to own SA ID',
+      'Login Enabled': 'TRUE', 'Last Verified': timestamp.slice(0, 10), Notes: 'Migrated from Vercel environment by Admin',
+      'Password Hash': account.passwordHash || hashPassword(account.password), 'Must Change Password': 'FALSE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': timestamp, 'Updated At': timestamp
+    };
+    const values = headers.map(header => object[header] ?? '');
+    const write = placeholderIndex >= 0
+      ? await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`CRM_User_Access!A${placeholderIndex + 2}:R${placeholderIndex + 2}`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) })
+      : await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent('CRM_User_Access!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
+    if (!write.ok) throw new Error(`Unable to migrate ${account.username}`);
+    existing.add(clean(account.username).toLowerCase());
+    migrated += 1;
+  }
+  return migrated;
+}
+
 async function updateLoginSecurity(token, rowNumber, attempts, lockedUntil) {
   if (!token) return;
   const data = [{ range: `CRM_User_Access!O${rowNumber}`, values: [[String(attempts)]] }, { range: `CRM_User_Access!P${rowNumber}`, values: [[lockedUntil]] }];
@@ -114,7 +159,7 @@ async function updateLoginSecurity(token, rowNumber, attempts, lockedUntil) {
 }
 
 export function setSession(res, account) {
-  const payload = encode({ username: account.username, name: account.name, role: account.role, region: account.region, saId: account.saId || '', branchId: account.branchId || '', mustChangePassword: !!account.mustChangePassword, exp: Date.now() + 28800000 });
+  const payload = encode({ username: account.username, name: account.name, role: account.role, region: account.region, saId: account.saId || '', branchId: account.branchId || '', mustChangePassword: !!account.mustChangePassword, authSource: account.authSource || 'environment', authVersion: account.authVersion || 'environment', iat: Date.now(), exp: Date.now() + 28800000 });
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(`${payload}.${sign(payload)}`)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800`);
 }
 
