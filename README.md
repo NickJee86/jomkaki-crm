@@ -1,11 +1,11 @@
-# JomKaki Motor CRM 2.0 â€” Production Release
+# JomKaki Motor CRM 2.0 — Production Release
 
 Production CRM for JomKaki Motor, deployed on Vercel and connected to the existing Google Sheets operational database.
 
 ## Included
 
 - Secure multi-user login with signed HTTP-only session cookies
-- Administrator access across all regions, plus isolated East and West Malaysia manager access
+- Role-scoped access for company Admin, Regional Manager, Branch Manager and assigned Staff
 - Live dashboard, leads, applications, inbox, outbox, motor catalog, approved loan pricing and team directory
 - Create leads and update lead ownership, status, notes and follow-up date
 - Update application stage, status, branch, SA, review requirement and follow-up date
@@ -58,12 +58,23 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 
 Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
 
+## AI-first document, assignment and LMS flow
+
+- Normal Leads remain unassigned while AI follows up and collects the required documents.
+- AI-verified complete cases become `READY_FOR_LMS` without Staff or Manager handling.
+- Incomplete document collection or failed AI follow-up becomes `AI_TO_SA_HANDOVER` and is round-robin assigned to eligible Staff.
+- Explicit customer requests for a human enter the Manager handover queue.
+- Staff can only see and work on exception cases assigned to their own SA ID.
+- Branch Managers can only see Leads assigned to their own branch.
+- Regional Managers can see every Lead in their own region; Administrators can see all company Leads.
+- Automatic LMSPRO submission remains gated off until the official API contract, sandbox endpoint and secured test credentials are supplied.
+
 ## Human handover and account control
 
-- Human handovers enter the Branch/Regional Manager queue first.
+- Explicit human handovers enter the Branch/Regional Manager queue first.
 - Managers may take over or assign a customer to an active Staff SA ID in their permitted scope.
-- Staff can only read and act on customers assigned to their own SA ID.
-- Staff cannot approve/reject applications or verify documents; those actions require Manager or Admin access.
+- Staff can only read and act on AI exceptions assigned to their own SA ID.
+- Staff cannot approve/reject applications or resolve AI document exceptions; those actions require Manager or Admin access.
 - Manual WhatsApp Business replies are recorded in the same Outbox used by future Meta Cloud sending.
 - Disabling, resetting or changing an account immediately invalidates its older sessions.
 - The final active Administrator cannot be disabled or demoted.
@@ -76,7 +87,7 @@ The Microsoft Entra application must have application permission `Sites.Selected
 
 Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not upload a ZIP. Confirm the `api` directory and `vercel.json` are listed correctly before deploying to Production.
 
-## Production verification â€” 5 August 2026
+## Production verification — 5 August 2026
 
 - Signed-out state shows only the secure login page; the CRM application shell is hidden with `display: none`.
 - West Malaysia Manager login passed and loaded 31 regional Leads.
