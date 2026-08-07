@@ -49,6 +49,32 @@ async function appendObject(req, sheet, object) {
   if (!response.ok) throw new Error(`Unable to write ${sheet} (${response.status})`);
 }
 
+const columnName = index => {
+  let name = '';
+  for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
+  return name;
+};
+
+async function updateObject(req, sheet, idHeader, id, changes, maxColumn = 'BG') {
+  const token = await getAccessToken(req);
+  const [rows] = await readRanges(req, [`${sheet}!A1:${maxColumn}2000`]);
+  const headers = rows?.[0] || [];
+  const idIndex = headers.indexOf(idHeader);
+  if (idIndex < 0) throw new Error(`${sheet} identifier column is missing`);
+  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(id));
+  if (rowIndex < 1) throw new Error(`${sheet} record was not found`);
+  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({
+    range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`,
+    values: [[value ?? '']]
+  }));
+  if (!data.length) throw new Error('No supported fields were supplied');
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data })
+  });
+  if (!response.ok) throw new Error(`Unable to update ${sheet} (${response.status})`);
+}
+
 async function getSharePointToken() {
   const tenant = clean(process.env.SHAREPOINT_TENANT_ID), client = clean(process.env.SHAREPOINT_CLIENT_ID), secret = clean(process.env.SHAREPOINT_CLIENT_SECRET);
   if (!tenant || !client || !secret) throw new Error('SharePoint application credentials are not configured');
@@ -178,6 +204,45 @@ export default async function handler(req, res) {
         });
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for manual review` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
+      }
+      if (action === 'updateApplication') {
+        const applicationId = clean(body.applicationId);
+        const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
+        const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
+        const scope = scopeData(session, leads, applications, branches);
+        const record = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        const stage = clean(body.stage).toUpperCase(), status = clean(body.status).toUpperCase(), saId = clean(body.saId), branchId = clean(body.branchId);
+        if (!stages.includes(stage) || !statuses.includes(status)) throw new Error('A valid stage and status are required');
+        const branchRegion = Object.fromEntries(branches.map(row => [clean(row['Branch ID']), canonicalRegion(row.Region)]));
+        if (branchId && (!branchRegion[branchId] || (session.role !== 'ADMIN' && branchRegion[branchId] !== session.region))) throw new Error('The selected branch is outside your access');
+        if (saId) {
+          const advisor = salesAdvisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
+          if (!advisor || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== session.region)) throw new Error('The selected sales advisor is outside your access');
+        }
+        await updateObject(req, 'Applications', 'Application ID', applicationId, {
+          'Updated At': now(), 'Current Stage': stage, 'Application Status': status, 'Assigned SA ID': saId,
+          'Assigned Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Missing Documents': clean(body.missingDocuments),
+          'SA Review Required': clean(body.reviewRequired).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE', 'Handover Reason': clean(body.handoverReason), 'Updated By': session.username
+        });
+        await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICATION_UPDATED', description: `Application updated to ${stage} / ${status}` });
+        return res.status(200).json({ live: true, applicationId });
+      }
+      if (action === 'reviewDocument') {
+        const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
+        if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
+        const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
+        const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
+        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        await updateObject(req, 'Document_Log', 'Document ID', documentId, {
+          'Updated At': now(), 'Quality Status': quality, 'Verification Status': verification,
+          'Manual Review Required': verification === 'PENDING' ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': now()
+        }, 'Y');
+        await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_DOCUMENT_REVIEWED', description: `${document['Document Type'] || 'Document'} marked ${verification}` });
+        return res.status(200).json({ live: true, documentId });
       }
       return res.status(400).json({ live: false, error: 'Unsupported CRM action.' });
     } catch (error) {
