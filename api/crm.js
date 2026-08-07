@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { getSession, hashPassword } from './_auth.js';
+import { authenticate, getSession, hashPassword } from './_auth.js';
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -132,7 +132,7 @@ async function accountRows(req) {
 }
 
 function publicAccount(row) {
-  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
+  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
 }
 
 async function writeActivity(req, session, payload) {
@@ -154,6 +154,12 @@ function scopeData(session, leads, applications, branches) {
     const scopedLeads = leads.filter(row => clean(row['Assigned SA ID']) === clean(session.saId));
     const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
     const scopedApplications = applications.filter(row => clean(row['Assigned SA ID']) === clean(session.saId) || leadIds.has(row['Lead ID']));
+    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+  }
+  if (session.role === 'BRANCH_MANAGER') {
+    const scopedLeads = leads.filter(row => clean(row['Selected Branch ID']) === clean(session.branchId));
+    const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
+    const scopedApplications = applications.filter(row => clean(row['Assigned Branch ID']) === clean(session.branchId) || leadIds.has(row['Lead ID']));
     return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
   }
   const scopedLeads = leads.filter(row => canonicalRegion(row.Region) === session.region);
@@ -185,7 +191,17 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
-      if (['createUser', 'resetUserPassword', 'setUserEnabled'].includes(action)) {
+      if (action === 'changeOwnPassword') {
+        const currentPassword = clean(body.currentPassword), newPassword = clean(body.newPassword);
+        if (newPassword.length < 10) throw new Error('New password must contain at least 10 characters');
+        if (!await authenticate(req, session.username, currentPassword)) return res.status(403).json({ live: false, error: 'Current password is incorrect.' });
+        const record = (await accountRows(req)).find(row => clean(row.Username).toLowerCase() === clean(session.username).toLowerCase());
+        if (!record) throw new Error('Your account must be migrated by Admin before changing its password');
+        await updateObject(req, 'CRM_User_Access', 'Account ID', record['Account ID'], { 'Password Hash': hashPassword(newPassword), 'Must Change Password': 'FALSE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now() }, 'R');
+        await writeActivity(req, session, { type: 'CRM_OWN_PASSWORD_CHANGED', description: `${session.username} changed their password` });
+        return res.status(200).json({ live: true });
+      }
+      if (['createUser', 'resetUserPassword', 'setUserEnabled', 'editUser', 'unlockUser'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         const users = await accountRows(req);
         if (action === 'createUser') {
@@ -216,6 +232,22 @@ export default async function handler(req, res) {
           await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now() }, 'R');
           await writeActivity(req, session, { type: 'CRM_USER_PASSWORD_RESET', description: `Password reset for ${record.Username}` });
           return res.status(200).json({ live: true, temporaryPassword: password });
+        }
+        if (action === 'editUser') {
+          const role = clean(body.role).toUpperCase(), name = clean(body.name), username = clean(body.username).toLowerCase();
+          const region = role === 'ADMIN' ? 'ALL' : canonicalRegion(body.region);
+          if (!name || !/^[a-z0-9._-]{3,40}$/.test(username) || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Valid name, username and role are required');
+          if (users.some(row => row['Account ID'] !== accountId && clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
+          if (role === 'BRANCH_MANAGER' && !clean(body.branchId)) throw new Error('Branch Manager requires a Branch ID');
+          if (role === 'STAFF' && !clean(body.saId)) throw new Error('Staff requires an SA ID');
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Username: username, 'Display Name': name, Role: role, 'SA ID': clean(body.saId), 'Branch ID': clean(body.branchId), Region: region, 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID', 'Updated At': now() }, 'R');
+          await writeActivity(req, session, { type: 'CRM_USER_EDITED', description: `${username} account details updated` });
+          return res.status(200).json({ live: true, accountId });
+        }
+        if (action === 'unlockUser') {
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { 'Failed Login Attempts': '0', 'Locked Until': '', 'Updated At': now() }, 'R');
+          await writeActivity(req, session, { type: 'CRM_USER_UNLOCKED', description: `${record.Username} unlocked` });
+          return res.status(200).json({ live: true, accountId });
         }
         const enabled = clean(body.enabled).toUpperCase() === 'TRUE';
         await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Status: enabled ? 'ACTIVE' : 'DISABLED', 'Login Enabled': enabled ? 'TRUE' : 'FALSE', 'Updated At': now() }, 'R');
@@ -349,7 +381,7 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
-  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '' } });
+  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword } });
   try {
     if (resource === 'users') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -431,7 +463,7 @@ export default async function handler(req, res) {
     if (resource === 'team') {
       const [saRows] = await readRanges(req, ['SA_Master!A1:L1000']);
       const branchNames = Object.fromEntries(branches.map(row => [row['Branch ID'], row['Branch Name']]));
-      const records = rowsToObjects(saRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || (session.role === 'STAFF' ? clean(row['SA ID']) === clean(session.saId) : canonicalRegion(row.Region) === session.region))).map(row => ({ id: row['SA ID'], name: row['SA Name'], branch: branchNames[row['Branch ID']] || row['Branch ID'], branchId: row['Branch ID'], region: row.Region, accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] }));
+      const records = rowsToObjects(saRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || (session.role === 'STAFF' ? clean(row['SA ID']) === clean(session.saId) : session.role === 'BRANCH_MANAGER' ? clean(row['Branch ID']) === clean(session.branchId) : canonicalRegion(row.Region) === session.region))).map(row => ({ id: row['SA ID'], name: row['SA Name'], branch: branchNames[row['Branch ID']] || row['Branch ID'], branchId: row['Branch ID'], region: row.Region, accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] }));
       return res.status(200).json({ live: true, records, branches: branches.filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || canonicalRegion(row.Region) === session.region)).length });
     }
 
