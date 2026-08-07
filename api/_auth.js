@@ -71,8 +71,8 @@ async function dynamicAccounts(req) {
     const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}`, { headers: { authorization: `Bearer ${token}` } });
     if (!response.ok) return [];
     const [headers = [], ...rows] = (await response.json()).values || [];
-    return rows.map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? '']))).filter(row => clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE' && row.Username && row['Password Hash']).map(row => ({
-      username: row.Username, passwordHash: row['Password Hash'], role: clean(row.Role).toUpperCase(), region: normaliseRegion(row.Region), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE'
+    return rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE' && row.Username && row['Password Hash']).map(row => ({
+      username: row.Username, passwordHash: row['Password Hash'], role: clean(row.Role).toUpperCase(), region: normaliseRegion(row.Region), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], rowNumber: row.rowNumber
     }));
   } catch { return []; }
 }
@@ -92,9 +92,25 @@ export function getSession(req) {
 export async function authenticate(req, username, password) {
   const wanted = clean(username || 'admin').toLowerCase();
   const dynamic = await dynamicAccounts(req);
-  const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted && verifyPassword(password, account.passwordHash));
-  if (dynamicAccount) return dynamicAccount;
+  const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted);
+  if (dynamicAccount) {
+    if (dynamicAccount.lockedUntil && new Date(dynamicAccount.lockedUntil).getTime() > Date.now()) return false;
+    const token = await getAccessToken(req);
+    if (verifyPassword(password, dynamicAccount.passwordHash)) {
+      if (dynamicAccount.failedAttempts || dynamicAccount.lockedUntil) await updateLoginSecurity(token, dynamicAccount.rowNumber, 0, '');
+      return dynamicAccount;
+    }
+    const attempts = dynamicAccount.failedAttempts + 1;
+    await updateLoginSecurity(token, dynamicAccount.rowNumber, attempts, attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : '');
+    return false;
+  }
   return environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password))) || false;
+}
+
+async function updateLoginSecurity(token, rowNumber, attempts, lockedUntil) {
+  if (!token) return;
+  const data = [{ range: `CRM_User_Access!O${rowNumber}`, values: [[String(attempts)]] }, { range: `CRM_User_Access!P${rowNumber}`, values: [[lockedUntil]] }];
+  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
 }
 
 export function setSession(res, account) {
