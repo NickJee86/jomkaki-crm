@@ -49,6 +49,24 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 - `SHAREPOINT_HOSTNAME` (defaults to `rexmgt.sharepoint.com`)
 - `SHAREPOINT_SITE_PATH` (defaults to `/sites/JomkakiMotorSecureDocuments`)
 - `SHAREPOINT_LIBRARY_NAME` (defaults to `Documents`)
+- `WHATSAPP_SEND_MODE` (`MANUAL` now; change to `CLOUD` after Meta authorization)
+- `WHATSAPP_ACCESS_TOKEN` (Sensitive; required only for Cloud mode)
+- `WHATSAPP_PHONE_NUMBER_ID` (required only for Cloud mode)
+- `WHATSAPP_GRAPH_VERSION` (optional; defaults to `v25.0`)
+- `WHATSAPP_VERIFY_TOKEN` (Sensitive; used to verify the Meta webhook)
+- `META_APP_SECRET` (Sensitive; used to verify webhook signatures)
+
+Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
+
+## Human handover and account control
+
+- Human handovers enter the Branch/Regional Manager queue first.
+- Managers may take over or assign a customer to an active Staff SA ID in their permitted scope.
+- Staff can only read and act on customers assigned to their own SA ID.
+- Staff cannot approve/reject applications or verify documents; those actions require Manager or Admin access.
+- Manual WhatsApp Business replies are recorded in the same Outbox used by future Meta Cloud sending.
+- Disabling, resetting or changing an account immediately invalidates its older sessions.
+- The final active Administrator cannot be disabled or demoted.
 
 The Google service account must have Editor access to the CRM spreadsheet for operational write actions. Read-only views continue to work if write permission is unavailable.
 

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css?v=20260805-2" />
-  <link rel="stylesheet" href="./v2.css?v=20260807-newapp360" />
+  <link rel="stylesheet" href="./v2.css?v=20260807-handover" />
 </head>
 <body>
   <div class="login-gate" id="loginGate">
@@ -53,9 +53,9 @@
         <button class="nav-item" data-view="settings"><span>SS</span>System Settings</button>
       </nav>
       <div class="integration-card">
-        <span class="status-dot warning"></span>
-        <div><strong>WhatsApp Cloud</strong><small>Connection pending</small></div>
-        <button>Connect</button>
+        <span class="status-dot"></span>
+        <div><strong>WhatsApp Business</strong><small>Manual ready · Cloud pending</small></div>
+        <button id="openMessageQueue">Open</button>
       </div>
       <div class="profile">
         <div class="avatar" id="profileAvatar">NJ</div><div><strong id="profileName">Nick Jee</strong><span id="profileRole">Administrator</span></div><button id="logoutButton" aria-label="Sign out">Sign out</button>
@@ -72,6 +72,6 @@
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="./app-v2.js?v=20260807-newapp360"></script>
+  <script src="./app-v2.js?v=20260807-handover"></script>
 </body>
 </html>
