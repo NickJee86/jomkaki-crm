@@ -1,4 +1,5 @@
-import { getSession } from './_auth.js';
+import crypto from 'node:crypto';
+import { getSession, hashPassword } from './_auth.js';
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -122,6 +123,17 @@ async function uploadDocument(req, file, caseId) {
 
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 const now = () => new Date().toISOString();
+const temporaryPassword = () => `JK!${crypto.randomBytes(6).toString('base64url')}9a`;
+const userSheetRange = 'CRM_User_Access!A1:R1000';
+
+async function accountRows(req) {
+  const [rows] = await readRanges(req, [userSheetRange]);
+  return rowsToObjects(rows);
+}
+
+function publicAccount(row) {
+  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
+}
 
 async function writeActivity(req, session, payload) {
   await appendObject(req, 'Activity_Log', {
@@ -173,6 +185,43 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
+      if (['createUser', 'resetUserPassword', 'setUserEnabled'].includes(action)) {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const users = await accountRows(req);
+        if (action === 'createUser') {
+          const username = clean(body.username).toLowerCase(), name = clean(body.name), role = clean(body.role).toUpperCase();
+          const region = role === 'ADMIN' ? 'ALL' : canonicalRegion(body.region);
+          if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new Error('Username must be 3–40 letters, numbers, dots, dashes or underscores');
+          if (!name || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Name and a valid role are required');
+          if (users.some(row => clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
+          if (role !== 'ADMIN' && !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(region)) throw new Error('A valid region is required');
+          if (role === 'STAFF' && !clean(body.saId)) throw new Error('Staff accounts require an SA ID');
+          const password = clean(body.password) || temporaryPassword();
+          if (password.length < 10) throw new Error('Temporary password must contain at least 10 characters');
+          const accountId = `${role.replace('_MANAGER', '').replace('REGION', 'REG')}-${Date.now()}`;
+          await appendObject(req, 'CRM_User_Access', {
+            'Account ID': accountId, Username: username, 'Display Name': name, Role: role, 'SA ID': clean(body.saId), 'Branch ID': clean(body.branchId), Region: region,
+            Status: 'ACTIVE', 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID',
+            'Login Enabled': 'TRUE', 'Last Verified': now().slice(0, 10), Notes: 'Created in CRM by Admin', 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now()
+          });
+          await writeActivity(req, session, { type: 'CRM_USER_CREATED', description: `${role} account ${username} created` });
+          return res.status(201).json({ live: true, accountId, temporaryPassword: password });
+        }
+        const accountId = clean(body.accountId), record = users.find(row => clean(row['Account ID']) === accountId);
+        if (!record) throw new Error('User account was not found');
+        if (record.Username === session.username && action === 'setUserEnabled' && clean(body.enabled).toUpperCase() !== 'TRUE') throw new Error('You cannot disable your own signed-in account');
+        if (action === 'resetUserPassword') {
+          const password = clean(body.password) || temporaryPassword();
+          if (password.length < 10) throw new Error('Temporary password must contain at least 10 characters');
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': now(), 'Updated At': now() }, 'R');
+          await writeActivity(req, session, { type: 'CRM_USER_PASSWORD_RESET', description: `Password reset for ${record.Username}` });
+          return res.status(200).json({ live: true, temporaryPassword: password });
+        }
+        const enabled = clean(body.enabled).toUpperCase() === 'TRUE';
+        await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Status: enabled ? 'ACTIVE' : 'DISABLED', 'Login Enabled': enabled ? 'TRUE' : 'FALSE', 'Updated At': now() }, 'R');
+        await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
+        return res.status(200).json({ live: true, accountId, enabled });
+      }
       if (action === 'createApplication') {
         const customerName = clean(body.customerName), phone = clean(body.phone), brand = clean(body.brand), model = clean(body.model);
         const requestedRegion = canonicalRegion(body.region);
@@ -302,6 +351,10 @@ export default async function handler(req, res) {
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '' } });
   try {
+    if (resource === 'users') {
+      if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+      return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
+    }
     const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
