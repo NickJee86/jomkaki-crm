@@ -1,35 +1,53 @@
-# JomKaki Motor CRM 2.0 â€” Completion Record
+# JomKaki Motor CRM 2.0 — Completion Record
 
-Release date: 5 August 2026  
+Updated: 7 August 2026  
 Production: https://jomkaki-crm.vercel.app/
 
-## Completed
+## Current production flow
 
-- Professional Command Centre with live regional metrics and action centre.
-- Manager Workbench and Reports & Analytics.
-- Lead Pipeline with regional visibility, ownership, follow-up, details and activity drawer.
-- Application workspace with stage-based management.
-- Customer Inbox, Message Outbox and safe outbound queue controls.
-- Motor Catalog with approved-image handling.
-- Customer-safe Loan Pricing; Cash Price is not returned or displayed.
-- Branches & Team workload visibility.
-- Users & Access, Activity & Audit and System Settings.
-- JomKaki Motor branding and responsive desktop/mobile layout.
-- Secure signed-out state, HTTP-only sessions and regional server authorization.
-- West Malaysia Manager scope verified: 31 leads, 93 approved price rows and 3 active advisors.
-- East Malaysia Manager scope verified: 0 leads, 49 approved price rows and 17 active advisors.
-- All 13 CRM workspaces opened successfully in production with no browser console errors.
-- Lead details drawer opened and closed without saving or changing CRM data.
+1. New WhatsApp Leads start as `AI_MANAGED` and remain unassigned.
+2. AI follows up with the customer and collects IC front, IC back and an accepted income document.
+3. AI-verified complete cases become `READY_FOR_LMS` without Staff or Manager handling.
+4. If AI cannot collect all required documents or cannot complete follow-up after three attempts, the Application becomes `AI_TO_SA_HANDOVER`.
+5. Make S02 assigns only those AI exceptions to eligible Staff by branch/region round-robin and updates both the Lead and Application.
+6. Explicit customer requests for a human enter the Manager handover queue.
 
-## Safety status
+## Role visibility
 
-- Make scenario schedules remain OFF.
-- No Make scenario was run.
-- No Make module was modified during CRM 2.0 release work.
-- WhatsApp Business Cloud remains pending Meta verification and connection.
-- LMSPRO remains disabled pending vendor API contract and sandbox access.
+- Administrator: all company Leads, Applications, accounts, reports and audit records.
+- Regional Manager: all Leads and Applications in the Manager's own region.
+- Branch Manager: only Leads assigned to the Manager's own branch.
+- Staff: only AI exceptions or explicit cases assigned to the Staff member's own SA ID.
 
-## Final package
+## CRM capabilities completed
 
-Final Production deployment verified on 5 August 2026. The deployed build loads `app-v2.js?v=20260805-2`; customer-safe pricing normalization is active, Cash Price remains excluded, and the browser reported zero runtime errors during final verification.
+- Command Centre includes AI Exceptions and Ready for LMS metrics.
+- Applications show motorcycle, pricing, required documents, missing documents, AI status and LMS readiness.
+- Staff can manually submit an applicant and securely upload documents to SharePoint.
+- Uploaded documents enter `AI_QUEUED` / `PENDING_AI`; routine Staff verification is not required.
+- Managers can resolve AI document exceptions and all decisions are recorded in Activity & Audit.
+- Admin can create, edit, enable, disable, unlock and reset CRM accounts without exposing stored passwords.
+- Manual WhatsApp Business replies remain available while Meta Cloud authorization is pending.
+- Login, page asset version and browser console were verified on the final production deployment.
 
+## Automation and data configuration
+
+- Make S02 is named `S02 — AI Exception Staff Round Robin` and remains `Inactive`.
+- No Make scenario was run during this change.
+- `ASSIGNED_SA_REQUIRED_FOR_EVERY_LEAD=FALSE`.
+- `HANDOVER_AFTER_ATTEMPTS=3`.
+- Automatic LMS production submission remains disabled.
+
+## Verification completed
+
+- JavaScript syntax checks passed for the frontend and both production APIs.
+- Authentication/session tests passed.
+- Role-scope tests passed for Admin, Regional Manager, Branch Manager and Staff.
+- AI document-readiness tests passed for complete, missing and exception cases.
+- Character-encoding checks passed for the frontend, index and README.
+- Vercel reported the final deployment `Ready` in Production.
+
+## External activation blockers
+
+- LMSPRO: official API contract, sandbox endpoint and secured test credentials are still required before real case submission can be enabled.
+- WhatsApp Cloud: Meta authorization and production credentials are still required; Manual WhatsApp Business mode remains usable for testing.
