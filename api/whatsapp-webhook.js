@@ -77,13 +77,21 @@ export default async function handler(req, res) {
         if (!lead) {
           const route = routes.find(row => clean(row['Phone Number ID']) === clean(numberId)) || {}, branchId = clean(route['Branch ID']);
           const branch = branches.find(row => clean(row['Branch ID']) === branchId) || {}, timestamp = new Date().toISOString();
-          lead = { 'Lead ID': makeId('LEAD'), 'Customer Name': `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, Region: clean(branch.Region) || 'UNASSIGNED', 'Selected Branch ID': branchId, 'Assigned SA ID': clean(route['Default Team / SA']) };
-          await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Lead Source': 'WHATSAPP_CLOUD', Notes: 'Automatically created from first inbound WhatsApp message', 'Created By': 'META_WEBHOOK' });
+          lead = { 'Lead ID': makeId('LEAD'), 'Customer Name': `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, Region: clean(branch.Region) || 'UNASSIGNED', 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
+          await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK' });
           leads.push(lead);
         }
         const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
         const human = requiresManager(text);
-        await appendObject(token, 'Customer_Inbox', { 'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Phone Number': phone, 'Customer Message': text, 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': clean(lead.Region) === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED' });
+        await appendObject(token, 'Customer_Inbox', { 'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': clean(lead.Region) === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED' });
+        const media = message.document || message.image;
+        if (media?.id) await appendObject(token, 'Document_Log', {
+          'Document ID': makeId('DOC'), 'Application ID': application['Application ID'] || '', 'Lead ID': lead['Lead ID'] || '',
+          'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Message ID': message.id || '',
+          'Document Type': 'UNCLASSIFIED', 'Media ID': media.id, 'Mime Type': media.mime_type || '', 'File Name': message.document?.filename || '',
+          'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
+          'Manual Review Required': 'FALSE', Remarks: 'Received from WhatsApp and queued for automatic AI validation', 'Updated At': new Date().toISOString()
+        });
         if (message.id) existingMessageIds.add(clean(message.id));
       }
       for (const status of value.statuses || []) await updateOutboxStatus(token, status.id, status.status, status.errors?.[0]?.title || '');

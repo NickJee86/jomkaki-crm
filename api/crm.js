@@ -178,7 +178,7 @@ function rowsToObjects(rows) {
   return data.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
 }
 
-function scopeData(session, leads, applications, branches) {
+export function scopeData(session, leads, applications, branches) {
   if (session.role === 'ADMIN') return { leads, applications, leadIds: new Set(leads.map(x => x['Lead ID'])), applicationIds: new Set(applications.map(x => x['Application ID'])) };
   const branchRegion = Object.fromEntries(branches.map(row => [row['Branch ID'], canonicalRegion(row.Region)]));
   if (session.role === 'STAFF') {
@@ -205,11 +205,30 @@ const latestApplicationByLead = applications => {
   applications.forEach(row => { const id = row['Lead ID']; if (id && !map.has(id)) map.set(id, row); });
   return map;
 };
+const acceptedVerification = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'ACCEPTED']);
+const acceptedQuality = new Set(['GOOD', 'PASS', 'PASSED', 'ACCEPTED']);
+const incomeDocumentTypes = new Set(['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT']);
+
+export function deriveDocumentReadiness(documents = []) {
+  const accepted = documents.filter(row => {
+    const verification = clean(row['Verification Status'] || row.verification).toUpperCase();
+    const quality = clean(row['Quality Status'] || row.quality).toUpperCase();
+    return acceptedVerification.has(verification) && (!quality || acceptedQuality.has(quality)) && clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() !== 'TRUE';
+  });
+  const types = new Set(accepted.map(row => clean(row['Document Type'] || row.type).toUpperCase()));
+  const missing = [];
+  if (!types.has('IC_FRONT')) missing.push('IC_FRONT');
+  if (!types.has('IC_BACK')) missing.push('IC_BACK');
+  if (![...types].some(type => incomeDocumentTypes.has(type))) missing.push('INCOME_PROOF');
+  const exception = documents.some(row => clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() === 'TRUE' || ['POOR', 'BLURRY', 'FAILED', 'REJECTED'].includes(clean(row['Quality Status'] || row.quality || row['Verification Status'] || row.verification).toUpperCase()));
+  return { complete: missing.length === 0 && !exception, missing, exception };
+}
+
 const documentSummary = documents => {
   const received = documents.filter(row => clean(row['Document Type']));
   const types = [...new Set(received.map(row => row['Document Type']).filter(Boolean))];
-  const needsReview = received.some(row => clean(row['Manual Review Required']).toUpperCase() === 'TRUE' || ['POOR', 'BLURRY', 'FAILED'].includes(clean(row['Quality Status']).toUpperCase()));
-  return { count: received.length, types, needsReview, latest: received.map(x => x['Updated At'] || x['Received At']).filter(Boolean).sort().at(-1) || '' };
+  const readiness = deriveDocumentReadiness(received);
+  return { count: received.length, types, needsReview: readiness.exception, aiComplete: readiness.complete, missing: readiness.missing, latest: received.map(x => x['Updated At'] || x['Received At']).filter(Boolean).sort().at(-1) || '' };
 };
 
 export default async function handler(req, res) {
@@ -320,7 +339,8 @@ export default async function handler(req, res) {
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
           Region: requestedRegion, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
-          'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
+          'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED',
+          'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
         });
         await appendObject(req, 'Applications', {
           'Application ID': applicationId, 'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Applicant Name': customerName,
@@ -333,9 +353,9 @@ export default async function handler(req, res) {
           'Product Category': 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': clean(body.variant), 'Loan Tenure Years': clean(body.tenure),
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
-          'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
+          'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
           'Document Status': 'PENDING', 'Minimum Documents Complete': 'FALSE', 'Missing Documents': clean(body.missingDocuments) || 'IC_FRONT, IC_BACK, INCOME_PROOF',
-          'SA Review Required': 'TRUE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username, 'Updated By': session.username
+          'SA Review Required': 'FALSE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username, 'Updated By': session.username
         });
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `Manual application created for ${brand} ${model}` });
         return res.status(201).json({ live: true, leadId, applicationId });
@@ -351,10 +371,10 @@ export default async function handler(req, res) {
         await appendObject(req, 'Document_Log', {
           'Document ID': documentId, 'Received At': timestamp, 'Updated At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId,
           'Document Type': documentType, 'File Name': uploaded.name, 'Mime Type': clean(body.file.type), 'File URL': uploaded.webUrl || '',
-          'Classification Status': 'MANUAL', 'Quality Status': 'PENDING_REVIEW', 'Verification Status': 'PENDING', 'Duplicate Status': 'NOT_CHECKED',
-          'Manual Review Required': 'TRUE', Remarks: clean(body.remarks), 'Uploaded By': session.username
+          'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
+          'Manual Review Required': 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username
         });
-        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for manual review` });
+        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
       }
       if (action === 'updateApplication') {
@@ -391,7 +411,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ live: true, applicationId });
       }
       if (action === 'reviewDocument') {
-        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to verify customer documents.' });
+        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
@@ -402,7 +422,7 @@ export default async function handler(req, res) {
           'Updated At': now(), 'Quality Status': quality, 'Verification Status': verification,
           'Manual Review Required': verification === 'PENDING' ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': now()
         }, 'Y');
-        await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_DOCUMENT_REVIEWED', description: `${document['Document Type'] || 'Document'} marked ${verification}` });
+        await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_AI_DOCUMENT_EXCEPTION_RESOLVED', description: `${document['Document Type'] || 'Document'} exception marked ${verification}` });
         return res.status(200).json({ live: true, documentId });
       }
       if (action === 'updateApplicantProfile') {
@@ -558,8 +578,8 @@ export default async function handler(req, res) {
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, deposit: customerAmount(quote['Effective Deposit (RM)'] || quote['Deposit (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'], promotion: quote['Promotion Name'],
-          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: row['Document Status'], minimumDocumentsComplete: row['Minimum Documents Complete'],
-          missingDocuments: row['Missing Documents'], documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, documentUpdated: docs.latest,
+          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.aiComplete ? 'AI_VERIFIED_COMPLETE' : docs.needsReview ? 'AI_EXCEPTION' : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
+          missingDocuments: docs.aiComplete ? '' : (row['Missing Documents'] || docs.missing.join(', ')), documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
           employerName: row['Employer Name'], employerAddress: row['Employer Address'], employerPhone: row['Employer Phone'],
           employmentDurationMonths: row['Employment Duration Months'], jobPosition: row['Job Position'], basicSalary: row['Basic Salary'],
@@ -567,7 +587,7 @@ export default async function handler(req, res) {
           reference1Name: row['Reference 1 Name'], reference1Phone: row['Reference 1 Phone'], reference1Relationship: row['Reference 1 Relationship'],
           reference2Name: row['Reference 2 Name'], reference2Phone: row['Reference 2 Phone'], reference2Relationship: row['Reference 2 Relationship'],
           bankAccountAvailable: row['Bank Account Available'], directDebitStatus: row['Direct Debit Status'], agreementStatus: row['Agreement Status'],
-          lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'], cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
+          lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (docs.aiComplete ? 'READY_FOR_LMS' : 'WAITING_FOR_AI_DOCUMENTS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
           missingApplicationFields: row['Missing Application Fields'], handoverReason: row['Handover Reason'], assignedSupervisorId: row['Assigned Supervisor ID'], supervisorAssignmentStatus: row['Supervisor Assignment Status'],
           updated: row['Updated At'] || row['Created At'] };
       });
@@ -614,13 +634,21 @@ export default async function handler(req, res) {
       return res.status(200).json({ live: true, records });
     }
 
-    const [inboxRows, outboxRows] = await readRanges(req, ['Customer_Inbox!A1:Z1000', 'Message_Outbox!A1:Z1200']);
+    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:Z1000', 'Message_Outbox!A1:Z1200', 'Document_Log!A1:Y1500']);
     const inbox = rowsToObjects(inboxRows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']) || scope.applicationIds.has(row['Application ID']));
+    const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID']));
+    const documentsByApplication = new Map();
+    dashboardDocuments.forEach(row => { const key = row['Application ID']; if (key) documentsByApplication.set(key, [...(documentsByApplication.get(key) || []), row]); });
     const completed = count(scope.applications, 'Application Status', 'COMPLETED');
+    const aiExceptions = scope.applications.filter(row => {
+      const mode = clean(row['Processing Mode']).toUpperCase();
+      return clean(row['Application Status']).toUpperCase() === 'MANUAL_REVIEW' || clean(row['SA Review Required']).toUpperCase() === 'TRUE' || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL'].includes(mode);
+    }).length;
+    const lmsReady = scope.applications.filter(row => ['READY_FOR_LMS', 'READY', 'QUEUED'].includes(clean(row['LMS Submission Status']).toUpperCase()) || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' || documentSummary(documentsByApplication.get(row['Application ID']) || []).aiComplete).length;
     const humanHandovers = inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())).length;
-    const needsAttention = count(scope.applications, 'Application Status', 'MANUAL_REVIEW') + count(scope.applications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
-    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), summary: { leads: scope.leads.length, applications: scope.applications.length, conversion: scope.leads.length ? scope.applications.length / scope.leads.length : 0, needsAttention, completed, humanHandovers, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
+    const needsAttention = aiExceptions + count(scope.applications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
+    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), summary: { leads: scope.leads.length, applications: scope.applications.length, conversion: scope.leads.length ? scope.applications.length / scope.leads.length : 0, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
   } catch (error) {
     console.error(error);
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
