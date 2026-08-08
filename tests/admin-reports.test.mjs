@@ -36,6 +36,6 @@ test('Administrator report supports filters and aggregate export',()=>{
 });
 
 test('Report deployment uses a fresh cache version',()=>{
-  assert.match(html,/v2\.css\?v=20260808-admin-reports/);
+  assert.match(html,/v2\.css\?v=20260808-admin-reports-layout/);
   assert.match(html,/app-v2\.js\?v=20260808-admin-reports/);
 });
