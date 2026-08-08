@@ -696,10 +696,23 @@ export default async function handler(req, res) {
     const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
+    const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
+    const businessApplications = scope.applications.filter(row => !isSyntheticApplicationRow(row));
+    const businessLeadIds = new Set(businessLeads.map(row => row['Lead ID']));
+    const businessApplicationIds = new Set(businessApplications.map(row => row['Application ID']));
+
+    if (resource === 'qa') {
+      if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+      const records = [
+        ...scope.leads.filter(isSyntheticLeadRow).map(row => ({ type: 'Lead', name: row['Customer Name'] || 'Synthetic lead', id: row['Lead ID'] })),
+        ...scope.applications.filter(isSyntheticApplicationRow).map(row => ({ type: 'Application', name: row['Applicant Name'] || 'Synthetic application', id: row['Application ID'] }))
+      ];
+      return res.status(200).json({ live: true, records });
+    }
 
     if (resource === 'leads') {
-      const latest = latestApplicationByLead(scope.applications);
-      const records = scope.leads.slice(-300).reverse().map(row => {
+      const latest = latestApplicationByLead(businessApplications);
+      const records = businessLeads.slice(-300).reverse().map(row => {
         const app = latest.get(row['Lead ID']) || {};
         return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region, synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
           source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
@@ -718,7 +731,7 @@ export default async function handler(req, res) {
       const pricing = rowsToObjects(pricingRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const docsByApplication = new Map(); documents.forEach(row => { const key = row['Application ID']; if (key) docsByApplication.set(key, [...(docsByApplication.get(key) || []), row]); });
       const leadRegion = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], canonicalRegion(row.Region)]));
-      const records = scope.applications.slice(-300).reverse().map(row => {
+      const records = businessApplications.slice(-300).reverse().map(row => {
         const docs = documentSummary(docsByApplication.get(row['Application ID']) || []);
         const zone = leadRegion[row['Lead ID']];
         const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && canonicalRegion(p['Price Zone']) === zone) || {};
@@ -751,7 +764,7 @@ export default async function handler(req, res) {
 
     if (resource === 'documents') {
       const [rows] = await readRanges(req, ['Document_Log!A1:Y1500']);
-      const records = rowsToObjects(rows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID'])).slice(-500).reverse().map(row => ({
+      const records = rowsToObjects(rows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID'])).slice(-500).reverse().map(row => ({
         id: row['Document ID'], applicationId: row['Application ID'], leadId: row['Lead ID'], type: row['Document Type'], received: row['Received At'], fileName: row['File Name'], mimeType: row['Mime Type'],
         classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, updated: row['Updated At']
       }));
@@ -789,7 +802,7 @@ export default async function handler(req, res) {
     if (['inbox', 'outbox', 'activity'].includes(resource)) {
       const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:Z1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:Z1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
       const [rows] = await readRanges(req, [cfg[0]]);
-      const visible = rowsToObjects(rows).filter(row => session.role === 'ADMIN' || scope.leadIds.has(row['Lead ID']) || scope.applicationIds.has(row['Application ID'])).slice(-300).reverse();
+      const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID'])).slice(-300).reverse();
       const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Customer Name']]));
       const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
       const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
@@ -808,10 +821,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ live: true, records });
     }
 
-    const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
-    const businessApplications = scope.applications.filter(row => !isSyntheticApplicationRow(row));
-    const businessLeadIds = new Set(businessLeads.map(row => row['Lead ID']));
-    const businessApplicationIds = new Set(businessApplications.map(row => row['Application ID']));
     const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:Z1000', 'Message_Outbox!A1:Z1200', 'Document_Log!A1:Y1500']);
     const inbox = rowsToObjects(inboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
