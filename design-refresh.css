@@ -376,6 +376,23 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .integration-placeholder strong{display:block;margin-bottom:7px;color:#153d49;font:800 13px Manrope}
 .integration-placeholder p{margin:0 0 7px;color:#5e7781;font-size:11px;line-height:1.55}
 .integration-placeholder small{color:#718791;font-size:9.5px}
+.go-live-panel{margin:16px 0;padding-bottom:18px;overflow:hidden}
+.go-live-panel>.panel-head{align-items:center}
+.go-live-panel>.panel-head p{margin:5px 0 0;color:#6b818b;font-size:10px}
+.readiness-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:11px;padding:0 18px 18px}
+.readiness-item{min-height:170px;padding:15px;border:1px solid #dce7e8;border-radius:14px;background:#fff;box-shadow:var(--shadow-xs)}
+.readiness-item.attention{border-color:#ecd3aa;background:linear-gradient(180deg,#fffaf2,#fff)}
+.readiness-item.complete{border-color:#cfe6df;background:linear-gradient(180deg,#f7fcfa,#fff)}
+.readiness-item>div{display:flex;align-items:flex-start;justify-content:space-between;gap:7px;flex-direction:column}
+.readiness-item h4{margin:7px 0 12px;color:#49646f;font:800 10px Manrope;text-transform:uppercase;letter-spacing:.5px}
+.readiness-item>strong{display:block;margin-bottom:8px;color:#123848;font:800 16px Manrope;line-height:1.25}
+.readiness-item>p{margin:0;color:#6d838c;font-size:9.5px;line-height:1.5}
+.quality-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:0 18px}
+.quality-detail-grid .report-card{padding:16px;box-shadow:none}
+.quality-detail-grid .report-card h3{margin-bottom:12px}
+.quality-detail-grid .data-table{min-width:560px}
+.quality-detail-grid .data-table td{height:auto;min-height:44px;padding:10px 12px;font-size:10px}
+.readiness-actions{display:flex;justify-content:flex-end;gap:8px;padding:16px 18px 0}
 
 /* Users, forms and drawers */
 .user-grid{gap:16px}
@@ -441,6 +458,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 /* Responsive behavior */
 @media(max-width:1250px){
   .metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .readiness-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media(max-width:1050px){
   .sidebar{width:286px;box-shadow:16px 0 44px rgba(5,26,39,.24)}
@@ -472,6 +490,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .report-card{padding:16px}.hbar-row{grid-template-columns:100px minmax(0,1fr) 34px;gap:8px}.report-split{grid-template-columns:1fr}
   .integration-readiness-grid{grid-template-columns:1fr}
   .integration-readiness-card dl{grid-template-columns:1fr}
+  .readiness-grid,.quality-detail-grid{grid-template-columns:1fr}
+  .readiness-actions{align-items:stretch;flex-direction:column}
   .smart-toolbar{align-items:stretch}.smart-toolbar button{min-height:40px}
   .data-table{min-width:940px}
   .drawer-head,.drawer-body{padding-left:18px;padding-right:18px}
