@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmentAccounts, setSession, validateSession } from './_auth.js';
+import { FUTURE_REPORTING_FIELDS, integrationReadiness, publicIntegrationRecords } from './_integrations.js';
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -684,6 +685,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
+  if (resource === 'integrations') return res.status(200).json({ live: true, records: publicIntegrationRecords(process.env), readiness: integrationReadiness(process.env), reportingFields: FUTURE_REPORTING_FIELDS });
   try {
     if (resource === 'users') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -735,6 +737,8 @@ export default async function handler(req, res) {
           reference2Name: row['Reference 2 Name'], reference2Phone: row['Reference 2 Phone'], reference2Relationship: row['Reference 2 Relationship'],
           bankAccountAvailable: row['Bank Account Available'], directDebitStatus: row['Direct Debit Status'], agreementStatus: row['Agreement Status'],
           lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (docs.aiComplete ? 'READY_FOR_LMS' : 'WAITING_FOR_AI_DOCUMENTS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
+          financier: row.Financier || row['Bank Name'] || row.Lender, lmsDecisionAt: row['LMS Decision At'] || row['Decision At'], rejectedAt: row['Rejected At'],
+          lmsErrorCode: row['LMS Error Code'], lmsErrorMessage: row['LMS Error Message'],
           missingApplicationFields: row['Missing Application Fields'], handoverReason: row['Handover Reason'], assignedSupervisorId: row['Assigned Supervisor ID'], supervisorAssignmentStatus: row['Supervisor Assignment Status'],
           processingMode: row['Processing Mode'], rejectionReason: row['Rejection Reason'] || row['Eligibility Reason'] || row['CAD Remarks'],
           created: row['Created At'], submittedAt: row['Submitted At'] || row['LMS Submitted At'], approvedAt: row['Approved At'], completedAt: row['Completed At'],
@@ -787,7 +791,18 @@ export default async function handler(req, res) {
       const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Customer Name']]));
       const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
       const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
-      const records = visible.map(row => resource === 'inbox' ? ({ id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'], status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase()) }) : resource === 'outbox' ? ({ id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'], status: row['Send Status'], time: row['Sent At'] || row['Created At'], manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING' }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));
+      const records = visible.map(row => resource === 'inbox' ? ({
+        id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'],
+        assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'],
+        status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'], messageType: row['Message Type'], channel: row.Channel,
+        source: row.Source || row['Webhook Source'], aiProcessed: truth(row['AI Processed']), aiProcessedAt: row['AI Processed At'],
+        humanHandoverAt: row['Human Handover At'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase())
+      }) : resource === 'outbox' ? ({
+        id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'],
+        status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'],
+        attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
+        manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING'
+      }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));
       return res.status(200).json({ live: true, records });
     }
 

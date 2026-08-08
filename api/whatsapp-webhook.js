@@ -43,7 +43,11 @@ async function updateOutboxStatus(token, providerId, status, errorMessage = '') 
   const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId));
   if (rowIndex < 1) return;
-  const changes = { 'Send Status': clean(status).toUpperCase(), 'Error Message': errorMessage, 'Sent At': ['SENT', 'DELIVERED', 'READ'].includes(clean(status).toUpperCase()) ? new Date().toISOString() : '' };
+  const normalizedStatus = clean(status).toUpperCase(), timestamp = new Date().toISOString();
+  const changes = { 'Send Status': normalizedStatus, 'Error Message': errorMessage };
+  if (normalizedStatus === 'SENT') changes['Sent At'] = timestamp;
+  if (normalizedStatus === 'DELIVERED') changes['Delivered At'] = timestamp;
+  if (normalizedStatus === 'READ') changes['Read At'] = timestamp;
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value]] }));
   await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
 }
