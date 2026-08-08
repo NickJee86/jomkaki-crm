@@ -26,7 +26,55 @@ function workbench(){const needsDocs=state.data.applications.filter(a=>!a.docume
 function documentTable(rows){const canReview=state.user?.role!=='STAFF';return `<div class="table-card"><table class="data-table"><thead><tr><th>Customer / Application</th><th>Document</th><th>Received</th><th>AI status</th><th>Remarks</th><th>Actions</th></tr></thead><tbody>${rows.map(d=>{const a=state.data.applications.find(x=>x.id===d.applicationId||x.leadId===d.leadId);return `<tr><td><strong>${esc(a?.customer||d.leadId||'Customer')}</strong><small>${esc(d.applicationId||a?.id||d.leadId)}</small></td><td><strong>${pretty(d.type||'Unclassified')}</strong><small>${esc(d.fileName||d.mimeType||'File recorded')}</small></td><td>${esc(when(d.received||d.updated))}</td><td>${pill(d.verification||d.quality||d.classification||'AI queued',String(d.reviewRequired).toUpperCase()!=='TRUE')}</td><td>${esc(d.remarks||'—')}</td><td><div class="row-actions">${canReview?`<button class="row-action" data-review="${esc(d.id)}">Resolve AI exception</button>`:'<span class="pill">Manager decision required</span>'}${a?`<button class="row-action secondary" data-app="${esc(a.id)}">Open application</button>`:''}</div></td></tr>`}).join('')||empty(6)}</tbody></table></div>`}
 function documents(){const badge=document.getElementById('documentBadge');if(badge)badge.textContent=state.data.documents.length;const pending=state.data.documents.filter(d=>String(d.reviewRequired).toUpperCase()==='TRUE'||['PENDING','PENDING_AI','AI_QUEUED'].includes(String(d.verification||d.classification||'').toUpperCase()));app.innerHTML=head('Documents','Secure SharePoint records with AI processing and exception status.')+`<div class="metric-grid">${metric('Files received',state.data.documents.length,'Secure SharePoint records')}${metric('AI processing / exceptions',pending.length,'No routine Staff review')}${metric('Applications covered',new Set(state.data.documents.map(d=>d.applicationId).filter(Boolean)).size,'With at least one file')}</div><div class="smart-toolbar"><input id="search" placeholder="Search customer, application, type or filename"><div class="toolbar-spacer"></div><button class="primary" data-new-upload>Upload document</button></div><section class="panel" id="results">${documentTable(state.data.documents)}</section>`;document.getElementById('search').oninput=e=>{const q=e.target.value.toLowerCase();document.getElementById('results').innerHTML=documentTable(state.data.documents.filter(d=>{const a=state.data.applications.find(x=>x.id===d.applicationId);return `${Object.values(d).join(' ')} ${a?.customer||''}`.toLowerCase().includes(q)}));bind()};document.querySelector('[data-new-upload]').onclick=chooseUpload;bind()}
 function chooseUpload(){formModal('Select an application',`<div class="smart-toolbar"><input id="uploadApplicationSearch" placeholder="Search customer, application or motorcycle"></div><div id="uploadApplicationResults">${applicationTable(state.data.applications)}</div>`);const input=document.getElementById('uploadApplicationSearch');input.oninput=e=>{const q=e.target.value.toLowerCase();document.getElementById('uploadApplicationResults').innerHTML=applicationTable(state.data.applications.filter(a=>Object.values(a).join(' ').toLowerCase().includes(q)));bind()};bind()}
-function reportsScoped(){const apps=state.data.applications,docs=state.data.documents,group=(rows,key)=>rows.reduce((o,x)=>{const k=pretty(x[key]||'Unassigned');o[k]=(o[k]||0)+1;return o},{}),bars=o=>{const max=Math.max(1,...Object.values(o));return `<div class="hbars">${Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="hbar-row"><span>${esc(k)}</span><div class="hbar"><i style="width:${Math.round(v/max*100)}%"></i></div><strong>${v}</strong></div>`).join('')||'<p class="notice">No live data yet.</p>'}</div>`};app.innerHTML=head('Reports & Analytics','Live operational totals calculated from the CRM records you are permitted to see.')+`<div class="metric-grid">${metric('Leads',state.data.leads.length,'Current scope')}${metric('Applications',apps.length,'Financing cases')}${metric('Documents',docs.length,'Files received')}${metric('Document coverage',apps.length?Math.round(apps.filter(a=>a.documentsReceived).length/apps.length*100)+'%':'0%','Applications with files')}</div><div class="report-grid"><section class="report-card"><h3>Applications by stage</h3>${bars(group(apps,'stage'))}</section><section class="report-card"><h3>Applications by region</h3>${bars(group(apps,'region'))}</section><section class="report-card wide"><h3>Motorcycle demand</h3>${bars(group(apps,'product'))}</section></div>`}
+function reportsScoped(){
+  const period=state.reportPeriod||'30';
+  const leads=state.data.leads.filter(lead=>reportWithin(lead,period,['created','time']));
+  const applications=state.data.applications.filter(application=>reportWithin(application,period,['created','updated']));
+  const applicationIds=new Set(applications.map(application=>application.id));
+  const leadIds=new Set(leads.map(lead=>lead.id));
+  const documents=state.data.documents.filter(document=>(applicationIds.has(document.applicationId)||leadIds.has(document.leadId))&&reportWithin(document,period,['received','updated']));
+  const openApplications=applications.filter(reportIsOpen);
+  const overdueFollowups=openApplications.filter(reportIsOverdue);
+  const stalled=openApplications.filter(application=>reportAgeDays(application,['updated','created'])>=3);
+  const documentComplete=applications.filter(reportDocumentComplete);
+  const readyForLms=applications.filter(reportReadyForLms);
+  const missingDocuments=reportMissingDocumentGroups(applications);
+  const aging=reportAgingGroups(openApplications);
+  const trendDays=period==='ALL'?30:Number(period);
+  const trend=reportTrendGroups(leads,['created','time'],trendDays);
+  const summary={
+    'Leads':leads.length,
+    'Applications':applications.length,
+    'Files received':documents.length,
+    'Document completion':reportPercent(documentComplete.length,applications.length),
+    'Ready for LMS':readyForLms.length,
+    'Overdue follow-ups':overdueFollowups.length,
+    'Stalled 3+ days':stalled.length
+  };
+  const report={period,region:state.user?.region||'Permitted scope',summary,trendRows:reportObjectRows(trend),agingRows:reportObjectRows(aging),documentGapRows:reportObjectRows(missingDocuments)};
+  app.innerHTML=head('Reports & Analytics','Operational performance, ageing and document progress inside your permitted scope.')+
+    '<div class="smart-toolbar report-toolbar"><label>Report period<select id="reportPeriod">'+
+      reportOption('7','Last 7 days',period)+reportOption('30','Last 30 days',period)+reportOption('90','Last 90 days',period)+reportOption('ALL','All time',period)+
+    '</select></label><div class="toolbar-spacer"></div><button class="secondary" data-export-scoped-report>Download report CSV</button></div>'+
+    '<div class="metric-grid">'+
+      metric('Leads',leads.length,'Created in selected period')+
+      metric('Applications',applications.length,reportPercent(applications.length,leads.length)+' lead conversion')+
+      metric('Files received',documents.length,'Secure document records')+
+      metric('Documents complete',documentComplete.length,reportPercent(documentComplete.length,applications.length)+' of applications')+
+      metric('Ready for LMS',readyForLms.length,'Verified and ready')+
+      metric('Overdue follow-ups',overdueFollowups.length,'Follow-up date has passed')+
+      metric('Stalled 3+ days',stalled.length,'No application update')+
+    '</div><div class="report-grid">'+
+      '<section class="report-card"><h3>Lead trend</h3>'+adminBars(trend,period==='90'?13:31)+'</section>'+
+      '<section class="report-card"><h3>Open-case ageing</h3>'+adminBars(aging,10)+'</section>'+
+      '<section class="report-card"><h3>Missing document types</h3>'+adminBars(missingDocuments,10)+'</section>'+
+      '<section class="report-card"><h3>Applications by stage</h3>'+adminBars(adminGroup(applications,application=>application.stage),20)+'</section>'+
+      '<section class="report-card"><h3>Loan application status</h3>'+adminBars(adminGroup(applications,application=>application.status),20)+'</section>'+
+      '<section class="report-card wide"><h3>Motorcycle demand</h3>'+adminBars(adminGroup(applications,application=>application.product),20)+'</section>'+
+    '</div>';
+  document.getElementById('reportPeriod').onchange=event=>{state.reportPeriod=event.target.value;reportsScoped()};
+  document.querySelector('[data-export-scoped-report]').onclick=()=>downloadOperationalReport(report);
+}
 function users(){const permissions=state.user?.role==='ADMIN'?['View every company lead and application','Manage all CRM accounts and access','Oversee AI exceptions, LMS readiness and audit activity','Assign or reassign any permitted case']:state.user?.role==='REGION_MANAGER'?['View every lead in own region','Handle regional human handovers and AI exceptions','Assign cases to branches and Staff','View regional reports and activity']:state.user?.role==='BRANCH_MANAGER'?['View leads assigned to own branch only','Handle branch human handovers and AI exceptions','Assign branch cases to eligible Staff','View branch activity and document status']:['View only AI exceptions assigned to own SA ID','Follow up assigned customers and missing documents','Upload documents for assigned customers','No access to approval, verification or other Staff cases'];app.innerHTML=head('Users & Access','Role visibility follows the AI-first exception workflow without exposing passwords or secret credentials.')+`<div class="security-banner"><div><strong>Signed in as ${esc(state.user?.name)}</strong><p>${pretty(state.user?.role)} · ${pretty(state.user?.region||'All regions')} access. Passwords and integration secrets are never shown here.</p></div></div><div class="user-grid"><article class="user-card"><div class="user-top"><div class="user-avatar">${esc((state.user?.name||'U').split(' ').map(x=>x[0]).join('').slice(0,2))}</div><div><h3>${esc(state.user?.name)}</h3><p>${pretty(state.user?.role)} · ${pretty(state.user?.region||'All regions')}</p></div></div><div class="permission-list">${permissions.map(x=>`<span>${esc(x)}</span>`).join('')}</div></article>${state.data.team.map(t=>`<article class="user-card"><div class="user-top"><div class="user-avatar">${esc((t.name||'SA').split(' ').map(x=>x[0]).join('').slice(0,2))}</div><div><h3>${esc(t.name)}</h3><p>${esc(t.id)} · ${esc(t.branch||'Branch pending')}</p></div></div><div class="permission-list"><span>${pretty(t.region)} sales scope</span><span>${String(t.accepting).toUpperCase()==='TRUE'?'Accepting AI exceptions':'Not accepting new exceptions'}</span></div></article>`).join('')}</div>`}
 function usersAdmin(){if(state.user?.role!=='ADMIN'){users();return}const rows=state.data.users;app.innerHTML=head('Users & Access','Create accounts, assign access, reset passwords and disable departed staff directly in CRM.')+`<div class="smart-toolbar"><input id="userSearch" placeholder="Search username, name, role, branch or SA ID"><div class="toolbar-spacer"></div><button class="secondary" data-migrate-users>Import legacy accounts</button><button class="primary" data-new-user>+ Add account</button></div><div class="security-banner"><div><strong>${rows.filter(x=>x.loginEnabled).length} enabled accounts</strong><p>Passwords are never displayed or stored as readable text. Resetting creates a one-time temporary password and immediately invalidates the old login session.</p></div></div><section class="panel" id="userResults">${userTable(rows)}</section>`;document.querySelector('[data-new-user]').onclick=newUser;document.querySelector('[data-migrate-users]').onclick=migrateLegacyUsers;document.getElementById('userSearch').oninput=e=>{const q=e.target.value.toLowerCase();document.getElementById('userResults').innerHTML=userTable(rows.filter(x=>Object.values(x).join(' ').toLowerCase().includes(q)));bindUsers()};bindUsers()}
 function userTable(rows){return `<div class="table-card"><table class="data-table"><thead><tr><th>User</th><th>Role & scope</th><th>Branch / SA</th><th>Status</th><th>Security</th><th>Actions</th></tr></thead><tbody>${rows.map(u=>`<tr><td><strong>${esc(u.name)}</strong><small>${esc(u.username)} · ${esc(u.id)}</small></td><td>${pretty(u.role)}<small>${esc(u.access||pretty(u.region))}</small></td><td>${esc(u.branchId||'—')}<small>${esc(u.saId||'No SA ID')}</small></td><td>${pill(u.loginEnabled?'Enabled':'Disabled',u.loginEnabled)}</td><td>${u.lockedUntil?pill('Locked'):u.mustChangePassword?pill('Change required'):'Protected'}<small>${u.failedAttempts?`${u.failedAttempts} failed attempts`:u.lastPasswordReset?'Reset '+esc(when(u.lastPasswordReset)):''}</small></td><td><div class="row-actions"><button class="row-action" data-edit-user="${esc(u.id)}">Edit</button><button class="row-action" data-reset-user="${esc(u.id)}">Reset password</button>${u.failedAttempts||u.lockedUntil?`<button class="row-action" data-unlock-user="${esc(u.id)}">Unlock</button>`:''}<button class="row-action secondary" data-toggle-user="${esc(u.id)}">${u.loginEnabled?'Disable':'Enable'}</button></div></td></tr>`).join('')||empty(6)}</tbody></table></div>`}
@@ -119,13 +167,135 @@ function reportPercent(value,total){
   return total?Math.round(value/total*100)+'%':'0%';
 }
 
+function reportDate(row,fields){
+  const value=fields.map(field=>row[field]).find(Boolean);
+  if(!value)return null;
+  const date=new Date(value);
+  return Number.isNaN(date.valueOf())?null:date;
+}
+
+function reportAgeDays(row,fields=['updated','created']){
+  const date=reportDate(row,fields);
+  return date?Math.max(0,Math.floor((Date.now()-date.valueOf())/86400000)):0;
+}
+
+function reportIsOpen(application){
+  return !['APPROVED','COMPLETED','REJECTED','CANCELLED','CLOSED'].includes(String(application.status||application.stage).toUpperCase());
+}
+
+function reportIsOverdue(application){
+  if(!reportIsOpen(application)||!application.nextFollowUp)return false;
+  const followUp=new Date(application.nextFollowUp);
+  return !Number.isNaN(followUp.valueOf())&&followUp.valueOf()<Date.now();
+}
+
+function reportDocumentComplete(application){
+  return !!application.aiDocumentsComplete||String(application.minimumDocumentsComplete).toUpperCase()==='TRUE';
+}
+
+function reportReadyForLms(application){
+  return ['READY_FOR_LMS','READY','QUEUED','SUBMITTED'].includes(String(application.lmsSubmissionStatus).toUpperCase())||reportDocumentComplete(application);
+}
+
+function reportAgingGroups(applications){
+  const groups={'Today':0,'1–2 days':0,'3–7 days':0,'8–14 days':0,'15+ days':0};
+  applications.forEach(application=>{
+    const days=reportAgeDays(application,['updated','created']);
+    if(days===0)groups['Today']++;
+    else if(days<=2)groups['1–2 days']++;
+    else if(days<=7)groups['3–7 days']++;
+    else if(days<=14)groups['8–14 days']++;
+    else groups['15+ days']++;
+  });
+  return groups;
+}
+
+function reportMissingDocumentGroups(applications){
+  const groups={};
+  applications.filter(application=>!reportDocumentComplete(application)).forEach(application=>{
+    const missing=String(application.missingDocuments||'').split(/[,;|]/).map(value=>value.trim()).filter(Boolean);
+    (missing.length?missing:['Not recorded']).forEach(type=>{
+      const key=pretty(type);
+      groups[key]=(groups[key]||0)+1;
+    });
+  });
+  return groups;
+}
+
+function reportTrendGroups(rows,fields,days=30){
+  const safeDays=Math.max(1,Number(days)||30);
+  const weekly=safeDays>31;
+  const groups={};
+  rows.forEach(row=>{
+    const date=reportDate(row,fields);
+    if(!date)return;
+    const age=(Date.now()-date.valueOf())/86400000;
+    if(age<0||age>safeDays)return;
+    const label=weekly?`Week ${Math.floor(age/7)+1}`:new Intl.DateTimeFormat('en-MY',{day:'2-digit',month:'short',timeZone:'Asia/Kuala_Lumpur'}).format(date);
+    groups[label]=(groups[label]||0)+1;
+  });
+  return groups;
+}
+
+function reportPeriodComparison(rows,period,fields){
+  const days=period==='ALL'?30:Math.max(1,Number(period)||30);
+  const now=Date.now(),currentStart=now-days*86400000,previousStart=now-days*2*86400000;
+  let current=0,previous=0;
+  rows.forEach(row=>{
+    const date=reportDate(row,fields);
+    if(!date)return;
+    const value=date.valueOf();
+    if(value>=currentStart&&value<=now)current++;
+    else if(value>=previousStart&&value<currentStart)previous++;
+  });
+  const change=previous?Math.round((current-previous)/previous*100):current?100:0;
+  return{current,previous,change,label:`${change>0?'+':''}${change}% vs previous ${days} days`};
+}
+
+function reportObjectRows(groups){
+  return Object.entries(groups).map(([label,value])=>[label,value]);
+}
+
+function reportNumber(value){
+  const number=Number(String(value??'').replace(/[^0-9.-]/g,''));
+  return Number.isFinite(number)?number:0;
+}
+
+function reportAverage(values){
+  const numbers=values.map(reportNumber).filter(value=>value>0);
+  return numbers.length?Math.round(numbers.reduce((sum,value)=>sum+value,0)/numbers.length):0;
+}
+
+function downloadOperationalReport(report){
+  const rows=[
+    ['JomKaki Motor CRM Operational Report'],
+    ['Generated',new Intl.DateTimeFormat('en-MY',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kuala_Lumpur'}).format(new Date())],
+    ['Period',report.period==='ALL'?'All time':'Last '+report.period+' days'],
+    ['Scope',report.region||'Permitted scope'],[],
+    ['Executive summary'],['Metric','Value'],...Object.entries(report.summary||{}),[],
+    ['Lead trend'],['Period','Leads'],...(report.trendRows||[]),[],
+    ['Open-case ageing'],['Age','Applications'],...(report.agingRows||[]),[],
+    ['Missing documents'],['Document type','Applications'],...(report.documentGapRows||[])
+  ];
+  downloadReportCsv(rows,'jomkaki-operational-report');
+}
+
+function downloadReportCsv(rows,fileName){
+  const csv=rows.map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
+  const blob=new Blob([new Uint8Array([0xEF,0xBB,0xBF]),csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=fileName+'-'+new Date().toISOString().slice(0,10)+'.csv';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function reportWithin(row,period,fields){
   if(period==='ALL')return true;
   const days=Number(period);
-  const value=fields.map(field=>row[field]).find(Boolean);
-  if(!value)return false;
-  const date=new Date(value);
-  if(Number.isNaN(date.valueOf()))return false;
+  const date=reportDate(row,fields);
+  if(!date)return false;
   return Date.now()-date.valueOf()<=days*86400000;
 }
 
@@ -157,31 +327,51 @@ function downloadAdminReport(report){
     ['Generated',new Intl.DateTimeFormat('en-MY',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kuala_Lumpur'}).format(new Date())],
     ['Period',report.period==='ALL'?'All time':'Last '+report.period+' days'],
     ['Region',report.region==='ALL'?'All regions':pretty(report.region)],
+    ['Branch',report.branch==='ALL'?'All branches':report.branch],
+    ['Staff',report.staff==='ALL'?'All Staff':report.staff],
+    ['Stage',report.stage==='ALL'?'All stages':pretty(report.stage)],
     [],
     ['Executive summary'],
     ['Metric','Value'],
     ...Object.entries(report.summary),
     [],
+    ['Lead and application trend'],
+    ['Period','Leads','Applications'],
+    ...report.trendRows,
+    [],
+    ['Open-case ageing'],
+    ['Age','Applications'],
+    ...report.agingRows,
+    [],
+    ['Missing document types'],
+    ['Document type','Applications'],
+    ...report.documentGapRows,
+    [],
+    ['Lead sources'],
+    ['Source','Leads'],
+    ...report.sourceRows,
+    [],
+    ['Loan application status'],
+    ['Status','Applications'],
+    ...report.loanStatusRows,
+    [],
+    ['Rejection and exception reasons'],
+    ['Reason','Applications'],
+    ...report.rejectionRows,
+    [],
     ['Regional performance'],
-    ['Region','Leads','Applications','Conversion','Documents complete','Ready for LMS','Approved','Completed'],
+    ['Region','Leads','Applications','Conversion','Documents complete','Ready for LMS','Overdue','Approved','Completed'],
     ...report.regionRows,
     [],
     ['Branch performance'],
-    ['Branch','Region','Leads','Applications','Staff','Ready for LMS','Approved','Completed'],
+    ['Branch','Region','Leads','Applications','Conversion','Staff','Documents complete','Ready for LMS','Overdue','Approved','Completed'],
     ...report.branchRows,
     [],
     ['Staff performance'],
-    ['Staff','SA ID','Branch','Accepting leads','Leads','Applications','AI exceptions','Approved','Completed'],
+    ['Staff','SA ID','Branch','Accepting leads','Leads','Applications','Documents complete','Ready for LMS','AI exceptions','Overdue','Approved','Completed','Conversion'],
     ...report.staffRows
   ];
-  const csv=rows.map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
-  const blob=new Blob([new Uint8Array([0xEF,0xBB,0xBF]),csv],{type:'text/csv;charset=utf-8'});
-  const url=URL.createObjectURL(blob);
-  const link=document.createElement('a');
-  link.href=url;
-  link.download='jomkaki-admin-report-'+new Date().toISOString().slice(0,10)+'.csv';
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadReportCsv(rows,'jomkaki-admin-report');
 }
 
 function reports(){
@@ -200,15 +390,28 @@ function reports(){
 
   const period=state.reportPeriod||'ALL';
   const region=state.reportRegion||'ALL';
+  const branch=state.reportBranch||'ALL';
+  const staff=state.reportStaff||'ALL';
+  const stage=state.reportStage||'ALL';
   const regionAllowed=value=>region==='ALL'||reportRegionKey(value)===region;
+  const branchAllowed=value=>branch==='ALL'||value===branch;
+  const staffAllowed=value=>staff==='ALL'||value===staff;
+  const stageAllowed=value=>stage==='ALL'||String(value||'UNASSIGNED')===stage;
   const allLeadRegions=Object.fromEntries(state.data.leads.map(lead=>[lead.id,reportRegionKey(lead.region)]));
   const allAppRegions=Object.fromEntries(state.data.applications.map(application=>[application.id,reportRegionKey(application.region||allLeadRegions[application.leadId])]));
-  const leads=state.data.leads.filter(lead=>regionAllowed(lead.region)&&reportWithin(lead,period,['time','created']));
-  const applications=state.data.applications.filter(application=>regionAllowed(application.region||allLeadRegions[application.leadId])&&reportWithin(application,period,['updated']));
-  const documents=state.data.documents.filter(document=>regionAllowed(allAppRegions[document.applicationId]||allLeadRegions[document.leadId])&&reportWithin(document,period,['received','updated']));
-  const inbox=state.data.inbox.filter(message=>regionAllowed(allAppRegions[message.applicationId]||allLeadRegions[message.leadId])&&reportWithin(message,period,['time']));
-  const outbox=state.data.outbox.filter(message=>regionAllowed(allAppRegions[message.applicationId]||allLeadRegions[message.leadId])&&reportWithin(message,period,['time']));
-  const activity=state.data.activity.filter(event=>regionAllowed(allAppRegions[event.applicationId]||allLeadRegions[event.leadId])&&reportWithin(event,period,['time']));
+  const baseApplications=state.data.applications.filter(application=>regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)&&stageAllowed(application.stage));
+  const applications=baseApplications.filter(application=>reportWithin(application,period,['created','updated']));
+  const baseApplicationIds=new Set(baseApplications.map(application=>application.id));
+  const applicationLeadIds=new Set(applications.map(application=>application.leadId).filter(Boolean));
+  const baseApplicationLeadIds=new Set(baseApplications.map(application=>application.leadId).filter(Boolean));
+  const baseLeads=state.data.leads.filter(lead=>regionAllowed(lead.region)&&(branch==='ALL'||branchAllowed(lead.branch)||baseApplicationLeadIds.has(lead.id))&&(staff==='ALL'||staffAllowed(lead.sa)||baseApplicationLeadIds.has(lead.id))&&(stage==='ALL'||baseApplicationLeadIds.has(lead.id)));
+  const leads=baseLeads.filter(lead=>reportWithin(lead,period,['created','time']));
+  const baseLeadIds=new Set(baseLeads.map(lead=>lead.id));
+  const recordAllowed=record=>(baseApplicationIds.has(record.applicationId)||baseLeadIds.has(record.leadId))&&regionAllowed(allAppRegions[record.applicationId]||allLeadRegions[record.leadId]);
+  const documents=state.data.documents.filter(document=>recordAllowed(document)&&reportWithin(document,period,['received','updated']));
+  const inbox=state.data.inbox.filter(message=>recordAllowed(message)&&reportWithin(message,period,['time']));
+  const outbox=state.data.outbox.filter(message=>recordAllowed(message)&&reportWithin(message,period,['time']));
+  const activity=state.data.activity.filter(event=>recordAllowed(event)&&reportWithin(event,period,['time']));
   const lmsReadyStatuses=new Set(['READY_FOR_LMS','READY','QUEUED','SUBMITTED']);
   const approvedApplications=applications.filter(application=>String(application.status).toUpperCase()==='APPROVED');
   const completedApplications=applications.filter(application=>String(application.status).toUpperCase()==='COMPLETED'||String(application.stage).toUpperCase()==='COMPLETED');
@@ -218,6 +421,28 @@ function reports(){
   const humanHandovers=inbox.filter(message=>message.humanRequired);
   const failedMessages=outbox.filter(message=>['FAILED','ERROR'].includes(String(message.status).toUpperCase()));
   const unassigned=applications.filter(application=>!application.sa||application.sa==='Unassigned');
+  const openApplications=applications.filter(reportIsOpen);
+  const overdueFollowups=openApplications.filter(reportIsOverdue);
+  const stalledApplications=openApplications.filter(application=>reportAgeDays(application,['updated','created'])>=3);
+  const agingGroups=reportAgingGroups(openApplications);
+  const missingDocumentGroups=reportMissingDocumentGroups(applications);
+  const leadSourceGroups=adminGroup(leads,lead=>lead.source||'Not recorded');
+  const rejectionReasonGroups=adminGroup(applications.filter(application=>['REJECTED','CANCELLED'].includes(String(application.status).toUpperCase())||application.rejectionReason),application=>application.rejectionReason||application.status);
+  const trendDays=period==='ALL'?30:Number(period);
+  const leadTrendGroups=reportTrendGroups(leads,['created','time'],trendDays);
+  const applicationTrendGroups=reportTrendGroups(applications,['created','updated'],trendDays);
+  const leadComparison=reportPeriodComparison(baseLeads,period,['created','time']);
+  const applicationComparison=reportPeriodComparison(baseApplications,period,['created','updated']);
+  const quotedApplications=applications.filter(application=>reportNumber(application.deposit)>0||reportNumber(application.monthly)>0);
+  const quotedDepositTotal=quotedApplications.reduce((sum,application)=>sum+reportNumber(application.deposit),0);
+  const averageDeposit=reportAverage(quotedApplications.map(application=>application.deposit));
+  const averageMonthly=reportAverage(quotedApplications.map(application=>application.monthly));
+  const promotionApplications=applications.filter(application=>application.promotion).length;
+  const collectionDurations=documentComplete.map(application=>{
+    const created=reportDate(application,['created']),completed=reportDate(application,['documentUpdated','updated']);
+    return created&&completed?Math.max(0,(completed.valueOf()-created.valueOf())/86400000):0;
+  }).filter(Boolean);
+  const averageDocumentDays=collectionDurations.length?Math.round(collectionDurations.reduce((sum,value)=>sum+value,0)/collectionDurations.length*10)/10:0;
   const activeCatalog=state.data.catalog.filter(item=>item.active);
   const catalogImageIssues=state.data.catalog.filter(item=>!item.imageApproved||!item.imageUrl);
   const activePricing=state.data.pricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED');
@@ -239,14 +464,16 @@ function reports(){
       reportPercent(regionalApplications.length,regionalLeads.length),
       regionalComplete.length,
       regionalReady.length,
+      regionalApplications.filter(reportIsOverdue).length,
       regionalApplications.filter(application=>String(application.status).toUpperCase()==='APPROVED').length,
       regionalApplications.filter(application=>String(application.status).toUpperCase()==='COMPLETED'||String(application.stage).toUpperCase()==='COMPLETED').length
     ];
   });
 
-  const team=state.data.team.filter(member=>regionAllowed(member.region));
-  const branchNames=Object.fromEntries(team.map(member=>[member.branchId,member.branch||member.branchId]));
-  const branchRegions=Object.fromEntries(team.map(member=>[member.branchId,reportRegionKey(member.region)]));
+  const reportTeam=state.data.team.filter(member=>regionAllowed(member.region));
+  const team=reportTeam.filter(member=>branchAllowed(member.branchId)&&staffAllowed(member.id));
+  const branchNames=Object.fromEntries(state.data.team.map(member=>[member.branchId,member.branch||member.branchId]));
+  const branchRegions=Object.fromEntries(state.data.team.map(member=>[member.branchId,reportRegionKey(member.region)]));
   const branchIds=[...new Set([...leads.map(lead=>lead.branch),...applications.map(application=>application.branch),...team.map(member=>member.branchId)].filter(Boolean))];
   const branchRows=branchIds.map(branchId=>{
     const branchLeads=leads.filter(lead=>lead.branch===branchId);
@@ -256,8 +483,11 @@ function reports(){
       pretty(branchRegions[branchId]||branchApplications[0]?.region||'Unassigned'),
       branchLeads.length,
       branchApplications.length,
+      reportPercent(branchApplications.length,branchLeads.length),
       team.filter(member=>member.branchId===branchId).length,
-      branchApplications.filter(application=>lmsReadyStatuses.has(String(application.lmsSubmissionStatus).toUpperCase())||application.aiDocumentsComplete).length,
+      branchApplications.filter(reportDocumentComplete).length,
+      branchApplications.filter(reportReadyForLms).length,
+      branchApplications.filter(reportIsOverdue).length,
       branchApplications.filter(application=>String(application.status).toUpperCase()==='APPROVED').length,
       branchApplications.filter(application=>String(application.status).toUpperCase()==='COMPLETED'||String(application.stage).toUpperCase()==='COMPLETED').length
     ];
@@ -273,9 +503,13 @@ function reports(){
       String(member.accepting).toUpperCase()==='TRUE'?'Yes':'No',
       staffLeads.length,
       staffApplications.length,
+      staffApplications.filter(reportDocumentComplete).length,
+      staffApplications.filter(reportReadyForLms).length,
       staffApplications.filter(application=>application.documentNeedsReview||String(application.reviewRequired).toUpperCase()==='TRUE').length,
+      staffApplications.filter(reportIsOverdue).length,
       staffApplications.filter(application=>String(application.status).toUpperCase()==='APPROVED').length,
-      staffApplications.filter(application=>String(application.status).toUpperCase()==='COMPLETED'||String(application.stage).toUpperCase()==='COMPLETED').length
+      staffApplications.filter(application=>String(application.status).toUpperCase()==='COMPLETED'||String(application.stage).toUpperCase()==='COMPLETED').length,
+      reportPercent(staffApplications.length,staffLeads.length)
     ];
   }).sort((a,b)=>Number(b[5])-Number(a[5])||String(a[0]).localeCompare(String(b[0])));
 
@@ -291,10 +525,24 @@ function reports(){
     'AI exceptions':aiExceptions.length,
     'Human handovers':humanHandovers.length,
     'Unassigned applications':unassigned.length,
+    'Overdue follow-ups':overdueFollowups.length,
+    'Stalled 3+ days':stalledApplications.length,
+    'Average document collection days':averageDocumentDays,
+    'Quoted deposit total':`RM ${quotedDepositTotal.toLocaleString('en-MY')}`,
+    'Average monthly instalment':`RM ${averageMonthly.toLocaleString('en-MY')}`,
     'Failed messages':failedMessages.length
   };
-  const report={period,region,summary,regionRows,branchRows,staffRows};
+  const trendRows=[...new Set([...Object.keys(leadTrendGroups),...Object.keys(applicationTrendGroups)])].map(label=>[label,leadTrendGroups[label]||0,applicationTrendGroups[label]||0]);
+  const agingRows=reportObjectRows(agingGroups);
+  const documentGapRows=reportObjectRows(missingDocumentGroups);
+  const sourceRows=reportObjectRows(leadSourceGroups);
+  const loanStatusRows=reportObjectRows(adminGroup(applications,application=>application.status));
+  const rejectionRows=reportObjectRows(rejectionReasonGroups);
+  const report={period,region,branch,staff,stage,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows};
   const accountRoleRows=Object.entries(adminGroup(state.data.users,user=>user.role)).map(entry=>[entry[0],entry[1]]);
+  const branchOptions=[...new Map(reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const staffOptions=reportTeam.filter(member=>branch==='ALL'||member.branchId===branch).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+  const stageOptions=[...new Set(state.data.applications.filter(application=>regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)).map(application=>application.stage).filter(Boolean))].sort();
   const auditRows=activity.slice(0,15).map(event=>[when(event.time),pretty(event.type),event.applicationId||event.leadId||'—',event.description||'—',event.actor||'System']);
 
   app.innerHTML=head('Company Reports & Analytics','Administrator view across every region, branch, customer workflow, team and control record.')+
@@ -302,11 +550,14 @@ function reports(){
       reportOption('ALL','All time',period)+reportOption('7','Last 7 days',period)+reportOption('30','Last 30 days',period)+reportOption('90','Last 90 days',period)+
     '</select></label><label>Region<select id="reportRegion">'+
       reportOption('ALL','All regions',region)+reportOption('EAST_MALAYSIA','East Malaysia',region)+reportOption('WEST_MALAYSIA','West Malaysia',region)+
-    '</select></label><div class="toolbar-spacer"></div><button class="secondary" data-export-admin-report>Download report CSV</button></div>'+
+    '</select></label><label>Branch<select id="reportBranch">'+reportOption('ALL','All branches',branch)+branchOptions.map(option=>reportOption(option[0],option[1],branch)).join('')+
+    '</select></label><label>Staff<select id="reportStaff">'+reportOption('ALL','All Staff',staff)+staffOptions.map(member=>reportOption(member.id,member.name+' · '+member.id,staff)).join('')+
+    '</select></label><label>Stage<select id="reportStage">'+reportOption('ALL','All stages',stage)+stageOptions.map(value=>reportOption(value,pretty(value),stage)).join('')+
+    '</select></label><div class="toolbar-spacer"></div><button class="secondary" data-export-admin-report>Download complete CSV</button></div>'+
     '<div class="security-banner admin-report-banner"><div><strong>Administrator company-wide visibility</strong><p>This report includes every permitted company record. Customer IC numbers, original document links, passwords and integration secrets remain protected.</p></div><span class="pill green">ALL COMPANY DATA</span></div>'+
     '<div class="metric-grid">'+
-      metric('Leads',leads.length,'All selected company leads')+
-      metric('Applications',applications.length,reportPercent(applications.length,leads.length)+' lead conversion')+
+      metric('Leads',leads.length,leadComparison.label)+
+      metric('Applications',applications.length,applicationComparison.label)+
       metric('Files received',documents.length,reportPercent(documentComplete.length,applications.length)+' cases complete')+
       metric('Ready for LMS',readyForLms.length,'Documents ready or queued')+
       metric('Approved',approvedApplications.length,'Loan application status')+
@@ -314,16 +565,30 @@ function reports(){
       metric('AI exceptions',aiExceptions.length,'Requires exception handling')+
       metric('Human handovers',humanHandovers.length,'Manager attention')+
       metric('Unassigned',unassigned.length,'No Staff or branch owner')+
+      metric('Overdue follow-ups',overdueFollowups.length,'Follow-up date has passed')+
+      metric('Stalled 3+ days',stalledApplications.length,'Open applications without update')+
+      metric('Average document time',averageDocumentDays+' days','Created to documents complete')+
+      metric('Quoted deposits',`RM ${quotedDepositTotal.toLocaleString('en-MY')}`,averageDeposit?`RM ${averageDeposit.toLocaleString('en-MY')} average`:'No approved quote')+
+      metric('Average instalment',averageMonthly?`RM ${averageMonthly.toLocaleString('en-MY')}`:'—',quotedApplications.length+' quoted applications')+
+      metric('Promotions used',promotionApplications,'Applications with promotion')+
       metric('Failed messages',failedMessages.length,'Outbox recovery needed')+
     '</div>'+
     '<div class="report-grid">'+
+      '<section class="report-card wide"><h3>Lead and application trend</h3><div class="report-split"><div><h4>New leads</h4>'+adminBars(leadTrendGroups,period==='90'?13:31)+'</div><div><h4>New applications</h4>'+adminBars(applicationTrendGroups,period==='90'?13:31)+'</div></div></section>'+
+      '<section class="report-card"><h3>Open-case ageing</h3>'+adminBars(agingGroups,10)+'</section>'+
+      '<section class="report-card"><h3>Missing document types</h3>'+adminBars(missingDocumentGroups,10)+'</section>'+
+      '<section class="report-card"><h3>Lead sources</h3>'+adminBars(leadSourceGroups,15)+'</section>'+
       '<section class="report-card"><h3>Customer-to-completion funnel</h3>'+adminBars({'Leads':leads.length,'Applications':applications.length,'Documents complete':documentComplete.length,'Ready for LMS':readyForLms.length,'Approved':approvedApplications.length,'Completed':completedApplications.length},20)+'</section>'+
       '<section class="report-card"><h3>Applications by stage</h3>'+adminBars(adminGroup(applications,application=>application.stage),20)+'</section>'+
+      '<section class="report-card"><h3>Loan application status</h3>'+adminBars(adminGroup(applications,application=>application.status),20)+'</section>'+
+      '<section class="report-card"><h3>Eligibility status</h3>'+adminBars(adminGroup(applications,application=>application.eligibilityStatus),15)+'</section>'+
+      '<section class="report-card"><h3>CAD status</h3>'+adminBars(adminGroup(applications,application=>application.cadStatus),15)+'</section>'+
+      '<section class="report-card"><h3>Rejection and exception reasons</h3>'+adminBars(rejectionReasonGroups,15)+'</section>'+
       '<section class="report-card"><h3>LMS submission status</h3>'+adminBars(adminGroup(applications,application=>application.lmsSubmissionStatus),20)+'</section>'+
       '<section class="report-card"><h3>Document verification status</h3>'+adminBars(adminGroup(documents,document=>document.verification||document.quality||document.classification),20)+'</section>'+
-      '<section class="report-card wide"><h3>Regional performance</h3>'+adminReportTable(['Region','Leads','Applications','Conversion','Documents complete','Ready for LMS','Approved','Completed'],regionRows)+'</section>'+
-      '<section class="report-card wide"><h3>Branch performance</h3>'+adminReportTable(['Branch','Region','Leads','Applications','Staff','Ready for LMS','Approved','Completed'],branchRows)+'</section>'+
-      '<section class="report-card wide"><h3>Staff workload and performance</h3>'+adminReportTable(['Staff','SA ID','Branch','Accepting leads','Leads','Applications','AI exceptions','Approved','Completed'],staffRows)+'</section>'+
+      '<section class="report-card wide"><h3>Regional performance</h3>'+adminReportTable(['Region','Leads','Applications','Conversion','Documents complete','Ready for LMS','Overdue','Approved','Completed'],regionRows)+'</section>'+
+      '<section class="report-card wide"><h3>Branch performance</h3>'+adminReportTable(['Branch','Region','Leads','Applications','Conversion','Staff','Documents complete','Ready for LMS','Overdue','Approved','Completed'],branchRows)+'</section>'+
+      '<section class="report-card wide"><h3>Staff workload and performance</h3>'+adminReportTable(['Staff','SA ID','Branch','Accepting leads','Leads','Applications','Documents complete','Ready for LMS','AI exceptions','Overdue','Approved','Completed','Conversion'],staffRows)+'</section>'+
       '<section class="report-card"><h3>Motorcycle demand</h3>'+adminBars(adminGroup(applications,application=>application.product),15)+'</section>'+
       '<section class="report-card"><h3>Customer inbox status</h3>'+adminBars(adminGroup(inbox,message=>message.status),15)+'</section>'+
       '<section class="report-card"><h3>Message outbox status</h3>'+adminBars(adminGroup(outbox,message=>message.status),15)+'</section>'+
@@ -342,6 +607,9 @@ function reports(){
     '</div>';
 
   document.getElementById('reportPeriod').onchange=event=>{state.reportPeriod=event.target.value;reports()};
-  document.getElementById('reportRegion').onchange=event=>{state.reportRegion=event.target.value;reports()};
+  document.getElementById('reportRegion').onchange=event=>{state.reportRegion=event.target.value;state.reportBranch='ALL';state.reportStaff='ALL';reports()};
+  document.getElementById('reportBranch').onchange=event=>{state.reportBranch=event.target.value;state.reportStaff='ALL';reports()};
+  document.getElementById('reportStaff').onchange=event=>{state.reportStaff=event.target.value;reports()};
+  document.getElementById('reportStage').onchange=event=>{state.reportStage=event.target.value;reports()};
   document.querySelector('[data-export-admin-report]').onclick=()=>downloadAdminReport(report);
 }
