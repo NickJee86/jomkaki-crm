@@ -1,4 +1,4 @@
-const state={user:null,summary:{},data:{leads:[],applications:[],documents:[],inbox:[],outbox:[],catalog:[],pricing:[],team:[],users:[],activity:[],integrations:[]},view:'dashboard',loaded:false};
+const state={user:null,summary:{},data:{leads:[],applications:[],documents:[],inbox:[],outbox:[],catalog:[],pricing:[],team:[],users:[],activity:[],integrations:[],qa:[]},view:'dashboard',loaded:false};
 const loadedResources=new Set();
 const app=document.getElementById('appView'),shell=document.getElementById('appShell'),gate=document.getElementById('loginGate'),form=document.getElementById('loginForm');
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
@@ -9,6 +9,9 @@ const pill=(v,good=false)=>`<span class="pill ${good?'green':''}">${pretty(v)}</
 const empty=n=>`<tr><td colspan="${n}">No live records found.</td></tr>`;
 const isSyntheticLead=lead=>Boolean(lead?.synthetic)||/^(CODEX|QA|UAT)\s+TEST\b/i.test(String(lead?.name||''))||/^(SYNTHETIC|TEST|QA|UAT)$/i.test(String(lead?.source||''));
 const isSyntheticApplication=application=>Boolean(application?.synthetic)||/^(CODEX|QA|UAT)\s+TEST\b/i.test(String(application?.customer||''))||/^TEST\s+BRAND$/i.test(String(application?.brand||''));
+const businessLeads=()=>state.data.leads.filter(lead=>!isSyntheticLead(lead));
+const businessApplications=()=>state.data.applications.filter(application=>!isSyntheticApplication(application));
+const businessDocuments=()=>{const syntheticApplicationIds=new Set(state.data.applications.filter(isSyntheticApplication).map(application=>application.id)),syntheticLeadIds=new Set(state.data.leads.filter(isSyntheticLead).map(lead=>lead.id));return state.data.documents.filter(document=>!syntheticApplicationIds.has(document.applicationId)&&!syntheticLeadIds.has(document.leadId))};
 const head=(title,desc)=>`<div class="page-head"><div><div class="eyebrow">JomKaki Motor CRM</div><h1>${title}</h1><p>${desc}</p></div><div class="page-actions"><button class="secondary" data-refresh>Refresh data</button></div></div><div class="status-strip"><span class="live-dot"></span><strong>Live CRM connected</strong><span>${esc(state.user?.role||'')}</span></div>`;
 const metric=(label,value,note)=>`<article class="metric-card"><span>${label}</span><strong>${value??0}</strong><small>${note}</small></article>`;
 async function get(resource){const r=await fetch(`/api/crm?resource=${resource}&_=${Date.now()}`,{cache:'no-store'});if(r.status===401)throw new Error('AUTH');const p=await r.json();if(!r.ok||!p.live)throw new Error(p.error||'Unable to load data');return p}
@@ -121,7 +124,7 @@ function settings(){
     const ready=integration.reportingReady||integration.automaticActionsEnabled;
     return `<article class="report-card integration-readiness-card"><div class="integration-readiness-head"><div><span class="eyebrow">${esc(integration.id)}</span><h3>${esc(integration.name)}</h3></div>${pill(integration.status,ready)}</div><p>${esc(integration.description)}</p><dl><div><dt>Mode</dt><dd>${pretty(integration.mode)}</dd></div><div><dt>Automatic actions</dt><dd>${integration.automaticActionsEnabled?'Enabled':'Safely disabled'}</dd></div><div><dt>Future reports</dt><dd>${integration.reportingReady?'Live data enabled':'Waiting for connection'}</dd></div></dl><small>${esc(integration.requiredNext)}</small></article>`;
   }).join('')||'<article class="report-card"><h3>Integration readiness</h3><p>Status is unavailable. Automatic actions remain disabled.</p></article>';
-  const syntheticLeads=state.data.leads.filter(isSyntheticLead),syntheticApplications=state.data.applications.filter(isSyntheticApplication);
+  const syntheticRows=(state.data.qa||[]).map(record=>[record.type,record.name,record.id]);
   const activeImageIssues=state.data.catalog.filter(item=>item.active&&(!item.imageApproved||!item.imageUrl));
   const approvedPricingGaps=state.data.pricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||!price.year3||!price.year4||!price.year5));
   const branchEntries=[...new Map(state.data.team.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
@@ -132,14 +135,13 @@ function settings(){
     ['Branch Manager coverage',missingManagerBranches.length?missingManagerBranches.length+' branches need an owner':'Complete',missingManagerBranches.length?'Owner confirmation required':'Every active branch has a Manager login',!missingManagerBranches.length],
     ['Active catalog images',activeImageIssues.length?activeImageIssues.length+' item needs attention':'Complete',activeImageIssues.length?'Open Motor Catalog to add or approve the image':'Every active model has an approved image',!activeImageIssues.length],
     ['Approved pricing completeness',approvedPricingGaps.length?approvedPricingGaps.length+' approved row needs attention':'Complete',approvedPricingGaps.length?'Open Loan Pricing and complete deposit plus 3/4/5-year instalments':'All active approved quotes are complete',!approvedPricingGaps.length],
-    ['Synthetic QA isolation',syntheticLeads.length+syntheticApplications.length+' records isolated','Excluded from dashboard and business reports; retained only as traceable test evidence',true],
+    ['Synthetic QA isolation',syntheticRows.length+' records isolated','Excluded from daily workspaces, dashboard and business reports; retained only as traceable Admin evidence',true],
     ['External production connections',pendingIntegrations.length?pendingIntegrations.length+' waiting':'Complete',pendingIntegrations.length?'Meta/LMS remain safely disabled until approved credentials exist':'All approved external connections are live',!pendingIntegrations.length]
   ];
   const readinessCards=readinessItems.map(item=>`<article class="readiness-item ${item[3]?'complete':'attention'}"><div>${pill(item[3]?'READY':'ACTION NEEDED',item[3])}<h4>${esc(item[0])}</h4></div><strong>${esc(item[1])}</strong><p>${esc(item[2])}</p></article>`).join('');
   const missingManagerRows=missingManagerBranches.map(([id,name])=>[name,id,'Owner name and account required']);
   const imageIssueRows=activeImageIssues.map(item=>[[item.brand,item.model,item.variant].filter(Boolean).join(' '),item.id,item.imageUrl?'Approval required':'Image URL required']);
   const pricingIssueRows=approvedPricingGaps.map(price=>[[price.brand,price.model,price.variant].filter(Boolean).join(' '),pretty(price.zone),[!price.deposit&&'Deposit',!price.year3&&'3 years',!price.year4&&'4 years',!price.year5&&'5 years'].filter(Boolean).join(', ')]);
-  const syntheticRows=[...syntheticLeads.map(lead=>['Lead',lead.name,lead.id]),...syntheticApplications.map(application=>['Application',application.customer,application.id])];
   app.innerHTML=head('System Settings','Production safety, data quality, AI workflow, password and integration readiness.')+
     `<div class="security-banner"><div><strong>Account security</strong><p>Five failed attempts lock an account for 15 minutes. Password reset, disable and role changes invalidate old sessions immediately.</p></div><button data-change-password>Change password</button></div>
     ${state.user?.role==='ADMIN'?`<section class="panel go-live-panel"><div class="panel-head"><div><h3>Go-live readiness</h3><p>Only active production data is treated as a blocker. Inactive history and synthetic QA records do not distort business reports.</p></div><button class="secondary" data-download-readiness>Download checklist</button></div><div class="readiness-grid">${readinessCards}</div><div class="quality-detail-grid"><article class="report-card"><h3>Branches missing a Manager</h3>${adminReportTable(['Branch','Branch ID','Required action'],missingManagerRows)}</article><article class="report-card"><h3>Active catalog image issues</h3>${adminReportTable(['Motor','Catalog ID','Required action'],imageIssueRows)}</article><article class="report-card"><h3>Approved pricing gaps</h3>${adminReportTable(['Motor','Zone','Missing'],pricingIssueRows)}</article><article class="report-card"><h3>Isolated synthetic QA records</h3>${adminReportTable(['Type','Name','Record ID'],syntheticRows)}</article></div><div class="readiness-actions"><button class="secondary" data-open-quality="users">Open Users & Access</button><button class="secondary" data-open-quality="catalog">Open Motor Catalog</button><button class="secondary" data-open-quality="pricing">Open Loan Pricing</button></div></section>`:''}
@@ -181,9 +183,9 @@ form.onsubmit=async e=>{e.preventDefault();const error=document.getElementById('
 setInterval(()=>{if(state.loaded&&state.user?.mustChangePassword&&!document.querySelector('.drawer-backdrop'))changePassword(true)},500);
 const ensureViewDataBase=ensureViewData;
 ensureViewData=async function(view){
-  if(view==='settings'&&state.user?.role==='ADMIN'&&!['integrations','catalog','pricing','users'].every(resource=>loadedResources.has(resource))){
+  if(view==='settings'&&state.user?.role==='ADMIN'&&!['integrations','catalog','pricing','users','qa'].every(resource=>loadedResources.has(resource))){
     app.innerHTML='<div class="v2-loading"><div class="spinner"></div><p>Loading go-live readinessâ€¦</p></div>';
-    const resources=['integrations','catalog','pricing','users'];
+    const resources=['integrations','catalog','pricing','users','qa'];
     const responses=await Promise.all(resources.map(resource=>loadedResources.has(resource)?{records:state.data[resource]||[]}:optional(resource)));
     responses.forEach((response,index)=>{state.data[resources[index]]=response.records||[];loadedResources.add(resources[index])});
     return;
