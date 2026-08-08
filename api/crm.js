@@ -698,6 +698,7 @@ export default async function handler(req, res) {
       const records = scope.leads.slice(-300).reverse().map(row => {
         const app = latest.get(row['Lead ID']) || {};
         return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region,
+          source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
           model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || row['Enquiry Type'] || 'Motor enquiry',
           productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
           tenure: app['Loan Tenure Years'], status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'],
@@ -735,6 +736,8 @@ export default async function handler(req, res) {
           bankAccountAvailable: row['Bank Account Available'], directDebitStatus: row['Direct Debit Status'], agreementStatus: row['Agreement Status'],
           lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (docs.aiComplete ? 'READY_FOR_LMS' : 'WAITING_FOR_AI_DOCUMENTS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
           missingApplicationFields: row['Missing Application Fields'], handoverReason: row['Handover Reason'], assignedSupervisorId: row['Assigned Supervisor ID'], supervisorAssignmentStatus: row['Supervisor Assignment Status'],
+          processingMode: row['Processing Mode'], rejectionReason: row['Rejection Reason'] || row['Eligibility Reason'] || row['CAD Remarks'],
+          created: row['Created At'], submittedAt: row['Submitted At'] || row['LMS Submitted At'], approvedAt: row['Approved At'], completedAt: row['Completed At'],
           updated: row['Updated At'] || row['Created At'] };
       });
       return res.status(200).json({ live: true, records });
