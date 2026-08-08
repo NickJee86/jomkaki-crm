@@ -358,8 +358,31 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
         return res.status(200).json({ live: true, accountId, enabled });
       }
-      if (['saveCatalogItem', 'savePricingPromotion'].includes(action)) {
+      if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        if (action === 'setCatalogItemEnabled') {
+          const catalogId = clean(body.catalogId), enabled = truth(body.enabled);
+          if (!catalogId) throw new Error('Catalog ID is required');
+          const [rows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+          const record = rowsToObjects(rows).find(row => clean(row['Catalog ID']) === catalogId);
+          if (!record) throw new Error('Catalog item was not found');
+          await updateObject(req, 'Motor_Model_Catalog', 'Catalog ID', catalogId, { Active: enabled ? 'TRUE' : 'FALSE', 'Last Verified At': now().slice(0, 10) }, 'Q');
+          await writeActivity(req, session, { type: enabled ? 'CRM_CATALOG_RESTORED' : 'CRM_CATALOG_DISABLED', description: `${record.Brand} ${record.Model} catalog item ${enabled ? 'restored' : 'disabled'}` });
+          return res.status(200).json({ live: true, catalogId, enabled });
+        }
+        if (action === 'setPricingEnabled' || action === 'setPromotionEnabled') {
+          const pricingId = clean(body.pricingId), enabled = truth(body.enabled);
+          if (!pricingId) throw new Error('Pricing ID is required');
+          const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000']);
+          const record = rowsToObjects(rows).find(row => clean(row['Pricing ID']) === pricingId);
+          if (!record) throw new Error('Pricing record was not found');
+          if (action === 'setPromotionEnabled' && enabled && (!clean(record['Promotion Name']) || clean(record['Promotion Deposit (RM)']) === '')) throw new Error('Add a promotion name and deposit before enabling it');
+          const changes = action === 'setPricingEnabled' ? { Active: enabled ? 'TRUE' : 'FALSE' } : { 'Promotion Active': enabled ? 'TRUE' : 'FALSE' };
+          await updateObject(req, 'Motor_Loan_Pricing', 'Pricing ID', pricingId, { ...changes, 'Last Updated At': now(), 'Updated By': session.username }, 'Z');
+          const subject = action === 'setPricingEnabled' ? 'pricing' : 'promotion';
+          await writeActivity(req, session, { type: `CRM_${subject.toUpperCase()}_${enabled ? 'ENABLED' : 'DISABLED'}`, description: `${record.Brand} ${record.Model} ${record['Price Zone']} ${subject} ${enabled ? 'enabled' : 'disabled'}` });
+          return res.status(200).json({ live: true, pricingId, enabled });
+        }
         if (action === 'saveCatalogItem') {
           const catalogId = clean(body.catalogId), brand = clean(body.brand), model = clean(body.model), variant = clean(body.variant) || 'Standard';
           const category = clean(body.category).toUpperCase(), fuel = clean(body.fuel).toUpperCase() || 'PETROL';
