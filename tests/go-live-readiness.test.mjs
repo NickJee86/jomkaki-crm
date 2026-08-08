@@ -21,7 +21,7 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   ].forEach(label=>assert.ok(app.includes(label),label+' should be present'));
   assert.match(app,/item\.active&&\(!item\.imageApproved\|\|!item\.imageUrl\)/);
   assert.match(app,/price\.active&&String\(price\.status\)\.toUpperCase\(\)==='APPROVED'/);
-  assert.match(app,/const resources=\['integrations','catalog','pricing','users'\]/);
+  assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa'\]/);
 });
 
 test('Synthetic QA records stay traceable but do not distort production metrics',()=>{
@@ -31,6 +31,12 @@ test('Synthetic QA records stay traceable but do not distort production metrics'
   assert.match(api,/synthetic: isSyntheticApplicationRow\(row\)/);
   assert.match(api,/const businessLeads = scope\.leads\.filter/);
   assert.match(api,/const businessApplications = scope\.applications\.filter/);
+  assert.match(api,/resource === 'qa'/);
+  assert.match(api,/const records = businessLeads\.slice/);
+  assert.match(api,/const records = businessApplications\.slice/);
+  assert.match(api,/businessApplicationIds\.has\(row\['Application ID'\]\) \|\| businessLeadIds\.has\(row\['Lead ID'\]\)/);
+  assert.match(app,/const syntheticRows=\(state\.data\.qa\|\|\[\]\)/);
+  assert.ok(app.includes('Excluded from daily workspaces, dashboard and business reports'));
   assert.match(app,/!isSyntheticLead\(lead\)&&reportWithin/);
   assert.match(app,/!isSyntheticApplication\(application\)&&reportWithin/);
 });
