@@ -125,6 +125,47 @@ const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).s
 const now = () => new Date().toISOString();
 const temporaryPassword = () => `JK!${crypto.randomBytes(6).toString('base64url')}9a`;
 const userSheetRange = 'CRM_User_Access!A1:R1000';
+const truth = value => clean(value).toUpperCase() === 'TRUE';
+const slug = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'ITEM';
+const amount = (value, label, optional = false) => {
+  const raw = clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
+  if (!raw && optional) return '';
+  const number = Number(raw);
+  if (!Number.isFinite(number) || number < 0) throw new Error(`${label} must be zero or a positive number`);
+  return number;
+};
+const validDate = (value, label) => {
+  const date = clean(value);
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`${label} must use YYYY-MM-DD`);
+  return date;
+};
+const validUrl = (value, label) => {
+  const url = clean(value);
+  if (url && !/^https?:\/\//i.test(url)) throw new Error(`${label} must start with http:// or https://`);
+  return url;
+};
+const promotionApplies = row => {
+  const today = now().slice(0, 10), start = clean(row['Promotion Start']), end = clean(row['Promotion End']);
+  return truth(row['Promotion Active']) && clean(row['Promotion Approval Status']).toUpperCase() === 'APPROVED' && clean(row['Promotion Deposit (RM)']) !== '' && (!start || start <= today) && (!end || end >= today);
+};
+const effectiveDeposit = row => customerAmount(promotionApplies(row) ? row['Promotion Deposit (RM)'] : row['Deposit (RM)']);
+
+async function setPricingDerivedFormulas(req, pricingId) {
+  const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z2000']);
+  const headers = rows?.[0] || [], idIndex = headers.indexOf('Pricing ID');
+  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(pricingId));
+  if (rowIndex < 1) throw new Error('New pricing record was not found');
+  const rowNumber = rowIndex + 1, token = await getAccessToken(req);
+  const data = [
+    { range: `Motor_Loan_Pricing!Y${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),S${rowNumber},G${rowNumber})),\"\")`]] },
+    { range: `Motor_Loan_Pricing!Z${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),IF(R${rowNumber}<>\"\",\"Promotion \"&R${rowNumber}&\" untuk\",\"Promotion untuk\"),\"Untuk\")),\"\")`]] }
+  ];
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data })
+  });
+  if (!response.ok) throw new Error(`Unable to finish pricing formulas (${response.status})`);
+}
 
 async function accountRows(req) {
   const [rows] = await readRanges(req, [userSheetRange]);
@@ -316,6 +357,71 @@ export default async function handler(req, res) {
         await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Status: enabled ? 'ACTIVE' : 'DISABLED', 'Login Enabled': enabled ? 'TRUE' : 'FALSE', 'Updated At': now() }, 'R');
         await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
         return res.status(200).json({ live: true, accountId, enabled });
+      }
+      if (['saveCatalogItem', 'savePricingPromotion'].includes(action)) {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        if (action === 'saveCatalogItem') {
+          const catalogId = clean(body.catalogId), brand = clean(body.brand), model = clean(body.model), variant = clean(body.variant) || 'Standard';
+          const category = clean(body.category).toUpperCase(), fuel = clean(body.fuel).toUpperCase() || 'PETROL';
+          const tier = clean(body.tier).toUpperCase(), stock = clean(body.stock).toUpperCase();
+          if (!brand || !model || !category) throw new Error('Brand, model and category are required');
+          if (fuel !== 'PETROL') throw new Error('Fuel type must be PETROL for the current catalog');
+          if (!['PRIMARY', 'SECONDARY', 'ON_REQUEST'].includes(tier)) throw new Error('A valid popularity tier is required');
+          if (!['CHECK_BRANCH', 'CHECK_WAREHOUSE', 'CONFIRMED_AVAILABLE', 'UNAVAILABLE'].includes(stock)) throw new Error('A valid stock check mode is required');
+          const timestamp = now(), record = {
+            Brand: brand, Model: model, Variant: variant, Category: category, 'Fuel Type': fuel, 'Popularity Tier': tier,
+            'Product Page URL': validUrl(body.productPageUrl, 'Product page URL'), 'Image URL': validUrl(body.imageUrl, 'Image URL'),
+            'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': truth(body.imageApproved) ? 'TRUE' : 'FALSE',
+            Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Stock Check Mode': stock, 'Branch Availability': clean(body.branchAvailability),
+            'Warehouse Availability': clean(body.warehouseAvailability), 'Search Keywords': clean(body.searchKeywords), 'Last Verified At': timestamp.slice(0, 10)
+          };
+          if (catalogId) {
+            await updateObject(req, 'Motor_Model_Catalog', 'Catalog ID', catalogId, record, 'Q');
+            await writeActivity(req, session, { type: 'CRM_CATALOG_UPDATED', description: `${brand} ${model} catalog item updated` });
+            return res.status(200).json({ live: true, catalogId });
+          }
+          const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+          const existing = rowsToObjects(catalogRows);
+          let newCatalogId = `MTR-${slug(brand)}-${slug(model)}`;
+          if (existing.some(row => clean(row['Catalog ID']) === newCatalogId)) newCatalogId = `${newCatalogId}-${Date.now().toString(36).toUpperCase()}`;
+          await appendObject(req, 'Motor_Model_Catalog', { 'Catalog ID': newCatalogId, ...record });
+          await writeActivity(req, session, { type: 'CRM_CATALOG_CREATED', description: `${brand} ${model} added to the motor catalog` });
+          return res.status(201).json({ live: true, catalogId: newCatalogId });
+        }
+
+        const pricingId = clean(body.pricingId), catalogId = clean(body.catalogId), zone = clean(body.zone).toUpperCase();
+        const [catalogRows, branchRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000', 'Branch_Master!A1:Q1000']);
+        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId);
+        if (!catalogRecord) throw new Error('Select a valid catalog motorcycle');
+        const allowedZones = new Set(['ALL_BRANCHES', 'WEST_MALAYSIA', 'EAST_MALAYSIA', 'SARAWAK', ...rowsToObjects(branchRows).filter(row => truth(row.Active)).map(row => clean(row['Branch ID']))]);
+        if (!allowedZones.has(zone)) throw new Error('Select a valid price zone or branch');
+        const quoteStatus = clean(body.quoteStatus).toUpperCase(), promotionStatus = clean(body.promotionStatus).toUpperCase();
+        if (!['DRAFT', 'APPROVED', 'PAUSED'].includes(quoteStatus) || !['DRAFT', 'APPROVED', 'PAUSED'].includes(promotionStatus)) throw new Error('A valid approval status is required');
+        const effectiveFrom = validDate(body.effectiveFrom, 'Effective from'), effectiveTo = validDate(body.effectiveTo, 'Effective to');
+        const promotionStart = validDate(body.promotionStart, 'Promotion start'), promotionEnd = validDate(body.promotionEnd, 'Promotion end');
+        if (effectiveFrom && effectiveTo && effectiveFrom > effectiveTo) throw new Error('Pricing end date cannot be earlier than its start date');
+        if (promotionStart && promotionEnd && promotionStart > promotionEnd) throw new Error('Promotion end date cannot be earlier than its start date');
+        const timestamp = now(), pricingRecord = {
+          'Catalog ID': catalogId, Brand: catalogRecord.Brand, Model: catalogRecord.Model, Variant: catalogRecord.Variant || 'Standard', 'Price Zone': zone,
+          'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
+          'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment'),
+          Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Effective From': effectiveFrom, 'Effective To': effectiveTo,
+          'Quote Approval Status': quoteStatus, 'Last Updated At': timestamp, 'Updated By': session.username, 'Internal Notes': clean(body.internalNotes),
+          'Promotion Name': clean(body.promotionName), 'Promotion Deposit (RM)': amount(body.promotionDeposit, 'Promotion deposit', true),
+          'Promotion Start': promotionStart, 'Promotion End': promotionEnd, 'Promotion Active': truth(body.promotionActive) ? 'TRUE' : 'FALSE',
+          'Promotion Approval Status': promotionStatus, 'Promotion Notes': clean(body.promotionNotes)
+        };
+        if (truth(body.promotionActive) && (!clean(body.promotionName) || pricingRecord['Promotion Deposit (RM)'] === '')) throw new Error('An active promotion requires a name and promotion deposit');
+        if (pricingId) {
+          await updateObject(req, 'Motor_Loan_Pricing', 'Pricing ID', pricingId, pricingRecord, 'Z');
+          await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_UPDATED', description: `${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion updated` });
+          return res.status(200).json({ live: true, pricingId });
+        }
+        const newPricingId = `PRICE-${slug(zone)}-${Date.now().toString(36).toUpperCase()}`;
+        await appendObject(req, 'Motor_Loan_Pricing', { 'Pricing ID': newPricingId, ...pricingRecord });
+        await setPricingDerivedFormulas(req, newPricingId);
+        await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_CREATED', description: `${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion created` });
+        return res.status(201).json({ live: true, pricingId: newPricingId });
       }
       if (action === 'createApplication') {
         const customerName = clean(body.customerName), phone = clean(body.phone), brand = clean(body.brand), model = clean(body.model);
@@ -577,7 +683,7 @@ export default async function handler(req, res) {
         return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone,
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
-          tenure, deposit: customerAmount(quote['Effective Deposit (RM)'] || quote['Deposit (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'], promotion: quote['Promotion Name'],
+          tenure, deposit: effectiveDeposit(quote), monthly: customerAmount(monthly), priceZone: quote['Price Zone'], promotion: promotionApplies(quote) ? quote['Promotion Name'] : '',
           branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.aiComplete ? 'AI_VERIFIED_COMPLETE' : docs.needsReview ? 'AI_EXCEPTION' : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
           missingDocuments: docs.aiComplete ? '' : (row['Missing Documents'] || docs.missing.join(', ')), documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
@@ -605,15 +711,23 @@ export default async function handler(req, res) {
 
     if (resource === 'pricing') {
       const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000']);
-      const records = rowsToObjects(rows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && (session.role === 'ADMIN' || canonicalRegion(row['Price Zone']) === session.region)).map(row => ({
-        id: row['Pricing ID'], brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'], deposit: customerAmount(row['Effective Deposit (RM)'] || row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']), effective: row['Effective From'], status: 'APPROVED', promotion: row['Promotion Name']
+      const records = rowsToObjects(rows).filter(row => session.role === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && canonicalRegion(row['Price Zone']) === session.region)).map(row => ({
+        id: row['Pricing ID'], catalogId: row['Catalog ID'], brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'],
+        deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']),
+        effective: row['Effective From'], effectiveTo: row['Effective To'], active: truth(row.Active), status: row['Quote Approval Status'], internalNotes: session.role === 'ADMIN' ? row['Internal Notes'] : '',
+        promotion: promotionApplies(row) || session.role === 'ADMIN' ? row['Promotion Name'] : '', promotionDeposit: customerAmount(row['Promotion Deposit (RM)']), promotionStart: row['Promotion Start'], promotionEnd: row['Promotion End'],
+        promotionActive: truth(row['Promotion Active']), promotionStatus: row['Promotion Approval Status'], promotionNotes: session.role === 'ADMIN' ? row['Promotion Notes'] : '', updated: row['Last Updated At'], updatedBy: row['Updated By']
       }));
       return res.status(200).json({ live: true, records });
     }
 
     if (resource === 'catalog') {
       const [rows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
-      return res.status(200).json({ live: true, records: rowsToObjects(rows).filter(row => clean(row.Active).toUpperCase() === 'TRUE').map(row => ({ id: row['Catalog ID'], brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], tier: row['Popularity Tier'], image: clean(row['Image Approved']).toUpperCase() === 'TRUE' ? row['Image URL'] : '', stock: row['Stock Check Mode'] })) });
+      return res.status(200).json({ live: true, records: rowsToObjects(rows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => ({
+        id: row['Catalog ID'], brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], tier: row['Popularity Tier'],
+        productPageUrl: row['Product Page URL'], imageUrl: row['Image URL'], image: truth(row['Image Approved']) ? row['Image URL'] : '', imageCaption: row['Image Caption (MS)'], imageApproved: truth(row['Image Approved']),
+        active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At']
+      })) });
     }
 
     if (resource === 'team') {
