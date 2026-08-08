@@ -1,0 +1,165 @@
+/* Official JomKaki Motor brand theme — 8 August 2026. */
+:root{
+  --brand-ink:#173044;
+  --brand-ink-deep:#071c2b;
+  --brand-ink-soft:#153a50;
+  --brand-teal:#f45f20;
+  --brand-teal-dark:#d94b13;
+  --brand-teal-soft:#fff0e8;
+  --brand-orange:#f45f20;
+  --brand-orange-dark:#d94b13;
+  --brand-orange-soft:#fff0e8;
+  --surface-bg:#f7f4f1;
+  --surface-card:#fff;
+  --surface-soft:#fcfaf8;
+  --surface-line:#e8e1dc;
+  --text-main:#193345;
+  --text-muted:#6f7e86;
+  --shadow-xs:0 1px 2px rgba(50,35,27,.04);
+  --shadow-sm:0 7px 22px rgba(45,31,23,.065);
+  --shadow-md:0 18px 44px rgba(34,24,18,.11);
+}
+
+html{background:var(--surface-bg)}
+body{
+  background:
+    radial-gradient(circle at 86% 0%,rgba(244,95,32,.10),transparent 25rem),
+    radial-gradient(circle at 22% 36%,rgba(255,179,103,.055),transparent 24rem),
+    linear-gradient(180deg,#fffaf6 0,var(--surface-bg) 21rem);
+}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline-color:rgba(244,95,32,.24);
+}
+
+/* Official logo treatment */
+.brand-logo{
+  width:54px;
+  height:54px;
+  flex:0 0 54px;
+  object-fit:cover;
+  border:1px solid rgba(255,255,255,.26);
+  border-radius:16px;
+  background:#f45f20;
+  box-shadow:0 11px 26px rgba(0,0,0,.25),0 0 0 3px rgba(244,95,32,.10);
+}
+.login-card .login-logo{
+  width:118px;
+  height:118px;
+  margin:0 auto 24px;
+  border:0;
+  border-radius:24px;
+  box-shadow:0 18px 38px rgba(180,62,14,.22),0 0 0 7px rgba(244,95,32,.075);
+}
+.brand{min-height:75px;gap:14px}
+.brand strong{font-size:19px}.brand span{color:#b4c1c8}
+
+/* Navigation */
+.sidebar{
+  background:
+    radial-gradient(circle at 7% 0%,rgba(244,95,32,.20),transparent 18rem),
+    linear-gradient(180deg,#071b2a,#0a2638 57%,#0c2d3e);
+  border-right-color:rgba(244,95,32,.12);
+}
+.nav-label{color:#8ca1ad}
+.nav-item{color:#c8d2d8}
+.nav-item>span{
+  border-color:rgba(255,255,255,.08);
+  background:rgba(255,255,255,.055);
+  color:#ffc5aa;
+}
+.nav-item:hover{background:rgba(255,255,255,.06);border-color:rgba(244,95,32,.11)}
+.nav-item.active{
+  background:linear-gradient(100deg,rgba(244,95,32,.30),rgba(32,70,91,.68));
+  border-color:rgba(255,157,112,.19);
+  box-shadow:inset 3px 0 #ff8b55,0 8px 22px rgba(0,0,0,.15);
+}
+.nav-item.active>span{
+  border-color:rgba(255,255,255,.18);
+  background:linear-gradient(145deg,#ff7b40,#e65017);
+  box-shadow:0 6px 14px rgba(111,37,8,.28);
+}
+.nav-item b{background:#345267;color:#d6e0e5}.nav-item i{background:#c94545}
+.integration-card{
+  border-color:rgba(255,137,82,.22);
+  background:linear-gradient(135deg,rgba(32,68,88,.94),rgba(12,46,65,.94));
+}
+.integration-card button{color:#ff9c6f}.status-dot{background:#f3a632}
+.avatar{background:linear-gradient(145deg,#fff3ec,#ffd9c7);color:#c64511}
+
+/* Header and primary actions */
+.topbar{background:rgba(255,252,249,.92);border-bottom-color:#eadfd8}
+.search{border-color:#e6ddd8;background:#fdfaf8}
+.search:focus-within{border-color:#f0a17f;box-shadow:0 0 0 4px rgba(244,95,32,.09)}
+.primary{
+  background:linear-gradient(135deg,#ff7133,#e65017);
+  box-shadow:0 8px 20px rgba(219,73,17,.22);
+}
+.primary:hover{
+  background:linear-gradient(135deg,#ff7a3d,#d94711);
+  box-shadow:0 11px 27px rgba(219,73,17,.29);
+}
+.icon-button:hover,.secondary:hover,.row-action.secondary:hover{border-color:#efb39a;background:#fff8f4;color:#c84612}
+.icon-button em{background:#d94747}
+
+/* Page foundations and cards */
+.eyebrow{color:#d94b13}
+.status-strip{
+  border-color:#cce7dc;
+  background:linear-gradient(90deg,#eaf7f1,#f7fcfa);
+  color:#156e54;
+}
+.metric,.metric-card{border-color:#e9e0da;background:linear-gradient(160deg,#fff 0,#fff 66%,#fff7f2 100%)}
+.metric:before,.metric-card:before{background:linear-gradient(#f45f20,#ffad76)}
+.metric:after,.metric-card:after{background:rgba(244,95,32,.075)}
+.metric:hover,.metric-card:hover{border-color:#edc8b7;box-shadow:0 12px 30px rgba(80,42,23,.09)}
+.panel,.report-card,.user-card,.work-column,.motor-card-v2{border-color:#e8dfda}
+.panel-head{background:linear-gradient(180deg,#fff,#fdfaf8)}
+.security-banner{
+  border-color:rgba(255,139,86,.18);
+  background:
+    radial-gradient(circle at 93% 12%,rgba(244,95,32,.28),transparent 10rem),
+    linear-gradient(125deg,#0a2435,#143c50);
+}
+#appView .security-banner:nth-of-type(2){background:linear-gradient(125deg,#0d2a3c,#174454)}
+#appView .security-banner:nth-of-type(3){background:linear-gradient(125deg,#102b3d,#1a4654)}
+#appView .security-banner:nth-of-type(4){background:linear-gradient(125deg,#0b2739,#1a4552)}
+
+/* Forms, tables and reports */
+.pipeline-toolbar,.smart-toolbar{border-color:#e8dfda;background:rgba(255,253,251,.95)}
+.pipeline-toolbar input:focus,.pipeline-toolbar select:focus,.smart-toolbar input:focus,.smart-toolbar select:focus,
+.crm-form input:focus,.crm-form select:focus,.crm-form textarea:focus{
+  border-color:#ee9b77;
+  box-shadow:0 0 0 4px rgba(244,95,32,.085);
+}
+.data-table th{border-bottom-color:#e5dcd7;background:#f6f1ed;color:#596d77}
+.data-table tbody tr:nth-child(even) td{background:#fdfbf9}
+.data-table tbody tr:hover td{background:#fff5ee}
+.row-action{border-color:#e65318;background:#f45f20}
+.row-action:hover{border-color:#ca420f;background:#d94b13;box-shadow:0 5px 14px rgba(219,75,19,.18)}
+.whatsapp-action{background:#148a63!important;border-color:#148a63!important}
+.hbar{background:#eee7e2}.hbar i{background:linear-gradient(90deg,#d94b13,#f45f20,#ffab72);box-shadow:0 2px 7px rgba(244,95,32,.18)}
+.report-table .data-table th{background:#f5efeb}
+.report-card:hover,.user-card:hover{border-color:#e7bba7}
+.user-avatar{background:linear-gradient(145deg,#fff0e8,#ffd7c3);color:#c74611}
+.readiness-item.attention{border-color:#ebc7a4;background:linear-gradient(180deg,#fff9f2,#fff)}
+.integration-placeholder{border-color:#e3bda9;background:linear-gradient(135deg,#fff7f2,#fffdfb)}
+
+/* Login */
+.login-gate{
+  background:
+    radial-gradient(circle at 16% 13%,rgba(244,95,32,.34),transparent 23rem),
+    radial-gradient(circle at 86% 84%,rgba(255,151,99,.17),transparent 23rem),
+    linear-gradient(135deg,#061a29,#0a2c40 58%,#103b49);
+}
+.login-gate:before{
+  opacity:.23;
+  background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+}
+.login-card{background:linear-gradient(180deg,#fff,#fffdfb);border-color:rgba(255,255,255,.75)}
+.login-card:after{background:linear-gradient(90deg,#d94b13,#f45f20,#ffad76)}
+.login-card input:focus{border-color:#ee9b77;box-shadow:0 0 0 4px rgba(244,95,32,.10)}
+
+@media(max-width:720px){
+  .brand-logo{width:50px;height:50px;flex-basis:50px}
+  .login-card .login-logo{width:102px;height:102px;border-radius:22px}
+}
