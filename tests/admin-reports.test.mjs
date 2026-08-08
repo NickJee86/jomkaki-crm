@@ -7,7 +7,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const api=fs.readFileSync(new URL('../api/crm.js',import.meta.url),'utf8');
 
 test('Administrator report loads every company control resource',()=>{
-  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity'\]/);
+  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity','integrations'\]/);
   assert.match(app,/state\.user\?\.role!=='ADMIN'/);
   assert.match(app,/reportsScoped\(\)/);
 });
@@ -32,6 +32,10 @@ test('Administrator report covers the complete operating view',()=>{
     'Document verification status',
     'Customer inbox status',
     'Message outbox status',
+    'WhatsApp Meta Cloud performance',
+    'LMS submission and decision performance',
+    'Prepared - waiting for connection',
+    'Integration readiness',
     'Catalog, pricing and access health',
     'Recent audit activity'
   ].forEach(label=>assert.ok(app.includes(label),label+' should be present'));
@@ -56,10 +60,14 @@ test('Report API exposes stable created dates and attribution fields',()=>{
   assert.match(api,/created: row\['Created At'\]/);
   assert.match(api,/rejectionReason:/);
   assert.match(api,/submittedAt:/);
+  assert.match(api,/lmsDecisionAt:/);
+  assert.match(api,/deliveredAt:/);
+  assert.match(api,/readAt:/);
+  assert.match(api,/resource === 'integrations'/);
 });
 
 test('Report deployment uses a fresh cache version',()=>{
   assert.match(html,/v2\.css\?v=20260808-admin-reports-layout/);
-  assert.match(html,/design-refresh\.css\?v=20260808-reports-2/);
-  assert.match(html,/app-v2\.js\?v=20260808-reports-2/);
+  assert.match(html,/design-refresh\.css\?v=20260808-integrations/);
+  assert.match(html,/app-v2\.js\?v=20260808-integrations/);
 });
