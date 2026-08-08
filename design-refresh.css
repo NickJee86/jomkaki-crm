@@ -359,6 +359,23 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .hbar{height:9px;background:#e9eef1}
 .hbar i{border-radius:99px;background:linear-gradient(90deg,#087d74,#16ad99,#62cbbf);box-shadow:0 2px 7px rgba(14,159,140,.15)}
 .report-table .data-table th{background:#edf4f4}
+.integration-readiness-panel{margin-top:16px}
+.integration-readiness-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.integration-readiness-card{min-height:244px;background:linear-gradient(180deg,#fff,#f8fbfb)}
+.integration-readiness-head,.integration-report-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+.integration-readiness-head h3,.integration-report-head h3{margin:5px 0 0}
+.integration-readiness-card>p{min-height:46px;color:#5d737f;font-size:11px;line-height:1.55}
+.integration-readiness-card dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:17px 0}
+.integration-readiness-card dl>div{padding:11px;border:1px solid #e1ebed;border-radius:11px;background:#fff}
+.integration-readiness-card dt{margin-bottom:5px;color:#78909a;font-size:8.5px;font-weight:800;text-transform:uppercase;letter-spacing:.45px}
+.integration-readiness-card dd{margin:0;color:#173848;font:700 10.5px Manrope}
+.integration-readiness-card>small{display:block;color:#607985;font-size:10px;line-height:1.5}
+.integration-report-card{background:linear-gradient(145deg,#fff,#f8fcfb)}
+.integration-report-head{margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid #e4eded}
+.integration-placeholder{padding:22px;border:1px dashed #bcd4d1;border-radius:14px;background:linear-gradient(135deg,#f4faf9,#fbfdfd)}
+.integration-placeholder strong{display:block;margin-bottom:7px;color:#153d49;font:800 13px Manrope}
+.integration-placeholder p{margin:0 0 7px;color:#5e7781;font-size:11px;line-height:1.55}
+.integration-placeholder small{color:#718791;font-size:9.5px}
 
 /* Users, forms and drawers */
 .user-grid{gap:16px}
@@ -453,6 +470,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .security-banner{align-items:flex-start;flex-direction:column;padding:17px}
   .security-banner>button{margin:2px 0 0;width:100%}
   .report-card{padding:16px}.hbar-row{grid-template-columns:100px minmax(0,1fr) 34px;gap:8px}.report-split{grid-template-columns:1fr}
+  .integration-readiness-grid{grid-template-columns:1fr}
+  .integration-readiness-card dl{grid-template-columns:1fr}
   .smart-toolbar{align-items:stretch}.smart-toolbar button{min-height:40px}
   .data-table{min-width:940px}
   .drawer-head,.drawer-body{padding-left:18px;padding-right:18px}
