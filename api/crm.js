@@ -358,6 +358,17 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
         return res.status(200).json({ live: true, accountId, enabled });
       }
+      if (action === 'setAdvisorAccepting') {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const saId = clean(body.saId), accepting = truth(body.accepting);
+        if (!saId) throw new Error('Sales advisor ID is required');
+        const [rows] = await readRanges(req, ['SA_Master!A1:L1000']);
+        const advisor = rowsToObjects(rows).find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
+        if (!advisor) throw new Error('Active sales advisor was not found');
+        await updateObject(req, 'SA_Master', 'SA ID', saId, { 'Accepting Leads': accepting ? 'TRUE' : 'FALSE' }, 'L');
+        await writeActivity(req, session, { type: accepting ? 'CRM_ADVISOR_ASSIGNMENT_RESUMED' : 'CRM_ADVISOR_ASSIGNMENT_PAUSED', description: `${advisor['SA Name'] || saId} ${accepting ? 'resumed' : 'paused'} automatic lead assignments` });
+        return res.status(200).json({ live: true, saId, accepting });
+      }
       if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         if (action === 'setCatalogItemEnabled') {
@@ -447,10 +458,14 @@ export default async function handler(req, res) {
         return res.status(201).json({ live: true, pricingId: newPricingId });
       }
       if (action === 'createApplication') {
-        const customerName = clean(body.customerName), phone = clean(body.phone), brand = clean(body.brand), model = clean(body.model);
+        const customerName = clean(body.customerName), phone = clean(body.phone), catalogId = clean(body.catalogId);
         const requestedRegion = canonicalRegion(body.region);
-        if (!customerName || !phone || !brand || !model || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region, brand and model are required');
+        if (!customerName || !phone || !catalogId || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and a catalog motorcycle are required');
         if (session.role !== 'ADMIN' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
+        const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
+        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
         const assignedBranchId = ['STAFF', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
@@ -479,7 +494,7 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Product Category': 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': clean(body.variant), 'Loan Tenure Years': clean(body.tenure),
+          'Product Category': 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Loan Tenure Years': clean(body.tenure),
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
@@ -555,12 +570,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ live: true, documentId });
       }
       if (action === 'updateApplicantProfile') {
-        const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+        const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
+        const [leadRows, applicationRows, branchRows, catalogRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Motor_Model_Catalog!A1:Q1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
         const changes = {
           'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
           'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
@@ -571,7 +588,7 @@ export default async function handler(req, res) {
           'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
           'Reference 2 Relationship': clean(body.reference2Relationship), 'Product Category': clean(body.productCategory) || 'MOTORCYCLE',
-          'Product Brand': clean(body.productBrand), 'Product Model': clean(body.productModel), 'Loan Tenure Years': clean(body.loanTenureYears),
+          'Product Brand': clean(catalogRecord.Brand), 'Product Model': clean(catalogRecord.Model), 'Product Variant': clean(catalogRecord.Variant) || 'Standard', 'Loan Tenure Years': clean(body.loanTenureYears),
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Updated By': session.username
