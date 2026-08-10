@@ -5,6 +5,7 @@
 .business-type-option strong{color:#0a293a;font:700 16px Manrope,sans-serif}
 .business-type-option small{margin-top:5px;color:#657988;line-height:1.4}
 .business-type-picker input:checked+.business-type-option{border-color:#f26522;background:#fff7f1;box-shadow:0 0 0 3px rgba(242,101,34,.12)}
+.crm-form [hidden]{display:none!important}
 .business-section[hidden]{display:none!important}
 .business-pill{display:inline-flex;align-items:center;width:max-content;border-radius:999px;padding:3px 9px;margin:0 0 5px;background:#eaf7f5;color:#087f73;font-size:11px;font-weight:800;letter-spacing:.05em}
 .business-pill.handphone{background:#fff0e8;color:#b94710}
