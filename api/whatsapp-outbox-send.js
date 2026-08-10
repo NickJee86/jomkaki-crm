@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     const existingProviderId = clean(outbox['Provider Message ID']);
     const existingStatus = clean(outbox['Send Status']).toUpperCase();
     if (existingProviderId || ['SENT', 'DELIVERED', 'READ'].includes(existingStatus)) return res.status(200).json({ ok: true, idempotent: true, outboxId, status: existingStatus, providerMessageId: existingProviderId });
-    const channels = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:Z1000'));
+    const channels = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));
     const route = channels.find(row => clean(row['Internal Channel ID']) === clean(outbox['Internal Channel ID'])) || {};
     const binding = validateRoute(outbox, route);
     const accessToken = clean(process.env[`${binding.credentialKey}_ACCESS_TOKEN`]);

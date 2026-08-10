@@ -19,15 +19,22 @@ const canonicalBusinessAccess = (value, role = '') => {
   if (normalizedRole === 'BUSINESS_MANAGER') return 'HANDPHONE';
   return 'MOTOR';
 };
+const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(value).toUpperCase()) ? clean(value).toUpperCase() : '';
 const rowBusinessUnit = row => {
   const explicit = clean(row?.['Business Unit'] || row?.businessUnit).toUpperCase();
+  if (explicit === 'UNASSIGNED') return explicit;
   if (['MOTOR', 'HANDPHONE'].includes(explicit)) return explicit;
   const category = clean(row?.['Product Category'] || row?.productCategory || row?.['Enquiry Type'] || row?.model).toUpperCase();
   return /(HANDPHONE|PHONE|IPHONE|SMARTPHONE)/.test(category) ? 'HANDPHONE' : 'MOTOR';
 };
+const businessAllows = (access, unit) => canonicalBusinessAccess(access) === 'BOTH' || canonicalBusinessAccess(access) === canonicalBusinessUnit(unit);
+const businessSheets = unit => canonicalBusinessUnit(unit) === 'HANDPHONE'
+  ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'Q', pricingMax: 'AB', idPrefix: 'HP' }
+  : { unit: 'MOTOR', catalog: 'Motor_Model_Catalog', pricing: 'Motor_Loan_Pricing', catalogMax: 'Q', pricingMax: 'Z', idPrefix: 'MTR' };
 const businessPermitted = (session, row) => {
   const access = canonicalBusinessAccess(session?.businessAccess, session?.role);
-  return access === 'BOTH' || access === rowBusinessUnit(row);
+  const unit = rowBusinessUnit(row);
+  return ['MOTOR', 'HANDPHONE'].includes(unit) && (access === 'BOTH' || access === unit);
 };
 const isSyntheticLeadRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Customer Name'])) || /^(SYNTHETIC|TEST|QA|UAT)$/i.test(clean(row['Lead Source'] || row.Source)) || /\bSYNTHETIC\b/i.test(clean(row.Notes));
 const isSyntheticApplicationRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Applicant Name'])) || /^TEST\s+BRAND$/i.test(clean(row['Product Brand'])) || /\bSYNTHETIC\b/i.test(clean(row['Internal Notes']));
@@ -186,15 +193,19 @@ const promotionApplies = row => {
 };
 const effectiveDeposit = row => customerAmount(promotionApplies(row) ? row['Promotion Deposit (RM)'] : row['Deposit (RM)']);
 
-async function setPricingDerivedFormulas(req, pricingId) {
-  const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z2000']);
+async function setPricingDerivedFormulas(req, pricingId, businessUnit = 'MOTOR') {
+  const config = businessSheets(businessUnit);
+  const [rows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}2000`]);
   const headers = rows?.[0] || [], idIndex = headers.indexOf('Pricing ID');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(pricingId));
   if (rowIndex < 1) throw new Error('New pricing record was not found');
   const rowNumber = rowIndex + 1, token = await getAccessToken(req);
-  const data = [
-    { range: `Motor_Loan_Pricing!Y${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),S${rowNumber},G${rowNumber})),\"\")`]] },
-    { range: `Motor_Loan_Pricing!Z${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),IF(R${rowNumber}<>\"\",\"Promotion \"&R${rowNumber}&\" untuk\",\"Promotion untuk\"),\"Untuk\")),\"\")`]] }
+  const data = config.unit === 'HANDPHONE' ? [
+    { range: `${config.pricing}!AA${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(X${rowNumber}=TRUE,Y${rowNumber}=\"APPROVED\",U${rowNumber}<>\"\",OR(V${rowNumber}=\"\",V${rowNumber}<=TODAY()),OR(W${rowNumber}=\"\",W${rowNumber}>=TODAY())),U${rowNumber},H${rowNumber})),\"\")`]] },
+    { range: `${config.pricing}!AB${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(X${rowNumber}=TRUE,Y${rowNumber}=\"APPROVED\",U${rowNumber}<>\"\",OR(V${rowNumber}=\"\",V${rowNumber}<=TODAY()),OR(W${rowNumber}=\"\",W${rowNumber}>=TODAY())),IF(T${rowNumber}<>\"\",\"Promotion \"&T${rowNumber}&\" untuk\",\"Promotion untuk\"),\"Untuk\")),\"\")`]] }
+  ] : [
+    { range: `${config.pricing}!Y${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),S${rowNumber},G${rowNumber})),\"\")`]] },
+    { range: `${config.pricing}!Z${rowNumber}`, values: [[`=IFERROR(IF(B${rowNumber}=\"\",\"\",IF(AND(V${rowNumber}=TRUE,W${rowNumber}=\"APPROVED\",S${rowNumber}<>\"\",OR(T${rowNumber}=\"\",T${rowNumber}<=TODAY()),OR(U${rowNumber}=\"\",U${rowNumber}>=TODAY())),IF(R${rowNumber}<>\"\",\"Promotion \"&R${rowNumber}&\" untuk\",\"Promotion untuk\"),\"Untuk\")),\"\")`]] }
   ];
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -219,7 +230,7 @@ async function validatedAccountScope(req, role, region, branchId, saId, business
   }
   if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(normalizedRegion)) throw new Error('A valid region is required');
   if (normalizedRole === 'REGION_MANAGER') return { region: normalizedRegion, branchId: '', saId: '', businessAccess: normalizedBusinessAccess };
-  const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+  const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
   const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
   if (normalizedRole === 'BRANCH_SUPERVISOR') {
     const branch = branches.find(row => clean(row['Branch ID']) === clean(branchId) && clean(row.Active).toUpperCase() === 'TRUE');
@@ -233,6 +244,8 @@ async function validatedAccountScope(req, role, region, branchId, saId, business
   const branch = branches.find(row => clean(row['Branch ID']) === advisorBranch && clean(row.Active).toUpperCase() === 'TRUE');
   if (!branch || canonicalRegion(advisor.Region || branch.Region) !== normalizedRegion) throw new Error('The selected sales advisor does not belong to this region');
   if (clean(branchId) && clean(branchId) !== advisorBranch) throw new Error('The selected sales advisor does not belong to this branch');
+  const advisorAccess = canonicalBusinessAccess(advisor['Business Access'] || 'BOTH', 'STAFF');
+  if ((normalizedBusinessAccess === 'BOTH' && advisorAccess !== 'BOTH') || (normalizedBusinessAccess !== 'BOTH' && !businessAllows(advisorAccess, normalizedBusinessAccess))) throw new Error('The selected sales advisor does not have the requested business access');
   return { region: normalizedRegion, branchId: advisorBranch, saId: clean(saId), businessAccess: normalizedBusinessAccess };
 }
 
@@ -253,7 +266,7 @@ const whatsappPhone = value => {
   return digits;
 };
 
-const channelRange = 'WhatsApp_Number_Master!A1:Z1000';
+const channelRange = 'WhatsApp_Number_Master!A1:AC1000';
 const channelIdPattern = /^JKM-WA-(EAST|WEST)-0([1-5])$/;
 const channelEnvironmentPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 const rowTime = row => new Date(row['Received At'] || row['Sent At'] || row['Created At'] || 0).valueOf() || 0;
@@ -274,7 +287,7 @@ function publicChannel(row, branches = [], env = process.env) {
   const phoneNumberId = clean(row['Phone Number ID'] || env[`${credentialKey}_PHONE_NUMBER_ID`]);
   return {
     id: row['Internal Channel ID'], name: row['Channel Name'], phoneNumberId: clean(row['Phone Number ID']), displayNumber: row['Display Number'],
-    wabaId: row['WABA ID'], appId: row['Meta App ID'], portfolioId: row['Business Portfolio ID'], branchId: row['Branch ID'], region: channelRegion(row, branches),
+    wabaId: row['WABA ID'], appId: row['Meta App ID'], portfolioId: row['Business Portfolio ID'], branchId: row['Branch ID'], region: channelRegion(row, branches), businessUnit: canonicalBusinessUnit(row['Business Unit']) || 'UNASSIGNED', teamId: row['Team ID'],
     slot: row['Channel Slot'], campaignSource: row['Campaign Source'], defaultOwner: row['Default Team / SA'], inboundEnabled: truth(row['Inbound Enabled']),
     outboundEnabled: truth(row['Outbound Enabled']), active: truth(row.Active), connectionAlias: row['Make Connection Alias'], webhookRouteKey: row['Webhook Route Key'],
     environment: row.Environment, lastVerified: row['Last Verified At'], lastInboundAt: row['Last Inbound At'], lastOutboundAt: row['Last Outbound At'],
@@ -290,6 +303,10 @@ const channelForMessage = (message, channels) => {
 
 export function resolveCustomerChannel({ leadId = '', applicationId = '', replyToMessageId = '', preferredChannelId = '', leads = [], applications = [], inbox = [], outbox = [], channels = [], branches = [] } = {}) {
   const matchesCustomer = row => (leadId && clean(row['Lead ID']) === clean(leadId)) || (applicationId && clean(row['Application ID']) === clean(applicationId));
+  const application = applications.find(app => clean(app['Application ID']) === clean(applicationId));
+  const lead = leads.find(row => clean(row['Lead ID']) === clean(leadId)) || leads.find(row => clean(row['Lead ID']) === clean(application?.['Lead ID']));
+  const targetBusiness = rowBusinessUnit(application || lead || {});
+  const channelMatchesBusiness = channel => !canonicalBusinessUnit(channel?.['Business Unit']) || canonicalBusinessUnit(channel?.['Business Unit']) === targetBusiness;
   const reply = inbox.find(row => clean(row['Message ID']) === clean(replyToMessageId) && matchesCustomer(row));
   const inbound = [reply, ...inbox.filter(row => matchesCustomer(row)).sort((a, b) => rowTime(b) - rowTime(a))].filter(Boolean);
   for (const message of inbound) {
@@ -298,20 +315,19 @@ export function resolveCustomerChannel({ leadId = '', applicationId = '', replyT
     const numberId = clean(message['WhatsApp Number ID']);
     if (numberId) return { channel: null, source: 'UNREGISTERED_INBOUND_CHANNEL', unregisteredNumberId: numberId };
   }
-  const lead = leads.find(row => clean(row['Lead ID']) === clean(leadId)) || leads.find(row => clean(row['Lead ID']) === clean(applications.find(app => clean(app['Application ID']) === clean(applicationId))?.['Lead ID']));
   const boundId = clean(lead?.['Last Inbound WhatsApp Channel ID'] || lead?.['Primary WhatsApp Channel ID']);
   const boundNumberId = clean(lead?.['Last Inbound WhatsApp Number ID']);
   const bound = channels.find(row => boundId && clean(row['Internal Channel ID']) === boundId) || channels.find(row => boundNumberId && clean(row['Phone Number ID']) === boundNumberId);
   if (bound) return { channel: bound, source: 'CUSTOMER_CHANNEL_BINDING' };
   const previousOutbound = outbox.filter(row => matchesCustomer(row)).sort((a, b) => rowTime(b) - rowTime(a)).map(row => channelForMessage(row, channels)).find(Boolean);
   if (previousOutbound) return { channel: previousOutbound, source: 'LATEST_OUTBOUND_CHANNEL' };
-  const preferred = channels.find(row => clean(row['Internal Channel ID']) === clean(preferredChannelId));
+  const preferred = channels.find(row => clean(row['Internal Channel ID']) === clean(preferredChannelId) && channelMatchesBusiness(row));
   if (preferred) return { channel: preferred, source: 'AUTHORIZED_CHANNEL_SELECTION' };
-  const targetBranch = clean(lead?.['Selected Branch ID'] || applications.find(app => clean(app['Application ID']) === clean(applicationId))?.['Assigned Branch ID']);
+  const targetBranch = clean(lead?.['Selected Branch ID'] || application?.['Assigned Branch ID']);
   const targetRegion = canonicalRegion(lead?.Region || branches.find(row => clean(row['Branch ID']) === targetBranch)?.Region);
-  const available = channels.filter(row => truth(row.Active) && truth(row['Outbound Enabled']));
+  const available = channels.filter(row => truth(row.Active) && truth(row['Outbound Enabled']) && channelMatchesBusiness(row));
   const fallback = available.find(row => targetBranch && clean(row['Branch ID']) === targetBranch) || available.find(row => channelRegion(row, branches) === targetRegion);
-  return { channel: fallback || null, source: fallback ? 'REGION_DEFAULT_CHANNEL' : 'LEGACY_DEFAULT_CHANNEL' };
+  return { channel: fallback || null, source: fallback ? 'REGION_BUSINESS_DEFAULT_CHANNEL' : 'NO_MATCHING_BUSINESS_CHANNEL' };
 }
 
 function channelCredentials(channel, env = process.env) {
@@ -372,7 +388,7 @@ export function scopeData(session, leads, applications, branches) {
 const count = (rows, field, value) => rows.filter(row => clean(row[field]).toUpperCase() === value).length;
 const latestApplicationByLead = applications => {
   const map = new Map();
-  applications.forEach(row => { const id = row['Lead ID']; if (id && !map.has(id)) map.set(id, row); });
+  applications.forEach(row => { const id = row['Lead ID']; if (id) map.set(id, row); });
   return map;
 };
 const acceptedVerification = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'ACCEPTED']);
@@ -491,7 +507,8 @@ export default async function handler(req, res) {
       }
       if (['saveWhatsAppChannel', 'setWhatsAppChannelEnabled'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
-        const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:Q1000']);
+        await ensureSheetHeaders(req, 'WhatsApp_Number_Master', ['Business Unit', 'Team ID']);
+        const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:S1000']);
         const channels = rowsToObjects(channelRows), branches = rowsToObjects(branchRows);
         const channelId = clean(body.channelId).toUpperCase(), existing = channels.find(row => clean(row['Internal Channel ID']).toUpperCase() === channelId);
         if (!channelId || (!existing && !channelIdPattern.test(channelId))) throw new Error('Use one of the reserved East or West WhatsApp channel slots');
@@ -499,8 +516,9 @@ export default async function handler(req, res) {
           if (!existing) throw new Error('WhatsApp channel was not found');
           const enabled = truth(body.enabled);
           if (enabled && (!clean(existing['Phone Number ID']) || !clean(existing['Display Number']))) throw new Error('Add the official number and Meta Phone Number ID before enabling this channel');
+          if (enabled && !canonicalBusinessUnit(existing['Business Unit'])) throw new Error('Select Motor or Handphone before enabling this channel');
           if (enabled && !channelCredentials(existing).accessToken) throw new Error(`Add the protected ${channelEnvironmentPrefix(existing['Credential Key'] || channelId)}_ACCESS_TOKEN secret in Vercel before enabling this channel`);
-          await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { Active: enabled ? 'TRUE' : 'FALSE', 'Inbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Data Status': enabled ? 'CONNECTED' : 'DISABLED', 'Updated By': session.username, 'Updated At': now() }, 'Z');
+          await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { Active: enabled ? 'TRUE' : 'FALSE', 'Inbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Data Status': enabled ? 'CONNECTED' : 'DISABLED', 'Updated By': session.username, 'Updated At': now() }, 'AC');
           await writeActivity(req, session, { type: enabled ? 'CRM_WHATSAPP_CHANNEL_ENABLED' : 'CRM_WHATSAPP_CHANNEL_DISABLED', description: `${channelId} ${enabled ? 'enabled for inbound and outbound routing' : 'disabled; bound conversations require approved transfer'}` });
           return res.status(200).json({ live: true, channelId, enabled });
         }
@@ -514,6 +532,8 @@ export default async function handler(req, res) {
         const phoneNumberId = clean(body.phoneNumberId), displayNumber = clean(body.displayNumber), wabaId = clean(body.wabaId);
         if (phoneNumberId && channels.some(row => clean(row['Internal Channel ID']).toUpperCase() !== channelId && clean(row['Phone Number ID']) === phoneNumberId)) throw new Error('This Meta Phone Number ID is already assigned to another channel');
         const active = truth(body.active), inboundEnabled = truth(body.inboundEnabled), outboundEnabled = truth(body.outboundEnabled);
+        const businessUnit = canonicalBusinessUnit(body.businessUnit || existing?.['Business Unit']);
+        if ((active || inboundEnabled || outboundEnabled) && !businessUnit) throw new Error('Select Motor or Handphone before activating this channel');
         if ((active || inboundEnabled || outboundEnabled) && (!phoneNumberId || !displayNumber)) throw new Error('Official display number and Meta Phone Number ID are required before activation');
         if ((inboundEnabled || outboundEnabled) && !active) throw new Error('Activate the channel before enabling inbound or outbound routing');
         const timestamp = now(), record = {
@@ -524,10 +544,11 @@ export default async function handler(req, res) {
           Active: active ? 'TRUE' : 'FALSE', 'Make Connection Alias': clean(body.connectionAlias), 'Webhook Route Key': clean(body.webhookRouteKey) || `JKM-WA-${region === 'EAST_MALAYSIA' ? 'EAST' : 'WEST'}-${slot}`,
           Environment: clean(body.environment).toUpperCase() === 'TEST' ? 'TEST' : 'PRODUCTION', 'Last Verified At': clean(body.lastVerified), 'Updated By': session.username,
           'Internal Notes': clean(body.notes), 'Data Status': active ? 'CONNECTED' : (phoneNumberId ? 'READY_FOR_CONNECTION' : 'PENDING_PHONE_SETUP'), Region: region,
-          'Channel Slot': slot, 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp
+          'Channel Slot': slot, 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp,
+          'Business Unit': businessUnit, 'Team ID': clean(body.teamId)
         };
         if (active && !channelCredentials({ ...(existing || {}), ...record }).accessToken) throw new Error(`Add the protected ${record['Credential Key']}_ACCESS_TOKEN secret in Vercel before activating this channel`);
-        if (existing) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, record, 'Z');
+        if (existing) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, record, 'AC');
         else await appendObject(req, 'WhatsApp_Number_Master', { 'Internal Channel ID': channelId, ...record });
         await writeActivity(req, session, { type: 'CRM_WHATSAPP_CHANNEL_UPDATED', description: `${channelId} configuration updated without exposing access tokens` });
         return res.status(existing ? 200 : 201).json({ live: true, channelId });
@@ -536,7 +557,7 @@ export default async function handler(req, res) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         const saId = clean(body.saId), accepting = truth(body.accepting);
         if (!saId) throw new Error('Sales advisor ID is required');
-        const [rows] = await readRanges(req, ['SA_Master!A1:L1000']);
+        const [rows] = await readRanges(req, ['SA_Master!A1:O1000']);
         const advisor = rowsToObjects(rows).find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
         if (!advisor) throw new Error('Active sales advisor was not found');
         await updateObject(req, 'SA_Master', 'SA ID', saId, { 'Accepting Leads': accepting ? 'TRUE' : 'FALSE' }, 'L');
@@ -545,62 +566,65 @@ export default async function handler(req, res) {
       }
       if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const businessUnit = canonicalBusinessUnit(body.businessUnit) || 'MOTOR';
+        const config = businessSheets(businessUnit);
         if (action === 'setCatalogItemEnabled') {
           const catalogId = clean(body.catalogId), enabled = truth(body.enabled);
           if (!catalogId) throw new Error('Catalog ID is required');
-          const [rows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+          const [rows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
           const record = rowsToObjects(rows).find(row => clean(row['Catalog ID']) === catalogId);
           if (!record) throw new Error('Catalog item was not found');
-          await updateObject(req, 'Motor_Model_Catalog', 'Catalog ID', catalogId, { Active: enabled ? 'TRUE' : 'FALSE', 'Last Verified At': now().slice(0, 10) }, 'Q');
-          await writeActivity(req, session, { type: enabled ? 'CRM_CATALOG_RESTORED' : 'CRM_CATALOG_DISABLED', description: `${record.Brand} ${record.Model} catalog item ${enabled ? 'restored' : 'disabled'}` });
-          return res.status(200).json({ live: true, catalogId, enabled });
+          await updateObject(req, config.catalog, 'Catalog ID', catalogId, { Active: enabled ? 'TRUE' : 'FALSE', 'Last Verified At': now().slice(0, 10) }, config.catalogMax);
+          await writeActivity(req, session, { type: enabled ? 'CRM_CATALOG_RESTORED' : 'CRM_CATALOG_DISABLED', description: `${businessUnit} ${record.Brand} ${record.Model} catalog item ${enabled ? 'restored' : 'disabled'}` });
+          return res.status(200).json({ live: true, catalogId, enabled, businessUnit });
         }
         if (action === 'setPricingEnabled' || action === 'setPromotionEnabled') {
           const pricingId = clean(body.pricingId), enabled = truth(body.enabled);
           if (!pricingId) throw new Error('Pricing ID is required');
-          const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000']);
+          const [rows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]);
           const record = rowsToObjects(rows).find(row => clean(row['Pricing ID']) === pricingId);
           if (!record) throw new Error('Pricing record was not found');
           if (action === 'setPromotionEnabled' && enabled && (!clean(record['Promotion Name']) || clean(record['Promotion Deposit (RM)']) === '')) throw new Error('Add a promotion name and deposit before enabling it');
           const changes = action === 'setPricingEnabled' ? { Active: enabled ? 'TRUE' : 'FALSE' } : { 'Promotion Active': enabled ? 'TRUE' : 'FALSE' };
-          await updateObject(req, 'Motor_Loan_Pricing', 'Pricing ID', pricingId, { ...changes, 'Last Updated At': now(), 'Updated By': session.username }, 'Z');
+          await updateObject(req, config.pricing, 'Pricing ID', pricingId, { ...changes, 'Last Updated At': now(), 'Updated By': session.username }, config.pricingMax);
           const subject = action === 'setPricingEnabled' ? 'pricing' : 'promotion';
-          await writeActivity(req, session, { type: `CRM_${subject.toUpperCase()}_${enabled ? 'ENABLED' : 'DISABLED'}`, description: `${record.Brand} ${record.Model} ${record['Price Zone']} ${subject} ${enabled ? 'enabled' : 'disabled'}` });
-          return res.status(200).json({ live: true, pricingId, enabled });
+          await writeActivity(req, session, { type: `CRM_${subject.toUpperCase()}_${enabled ? 'ENABLED' : 'DISABLED'}`, description: `${businessUnit} ${record.Brand} ${record.Model} ${record['Price Zone']} ${subject} ${enabled ? 'enabled' : 'disabled'}` });
+          return res.status(200).json({ live: true, pricingId, enabled, businessUnit });
         }
         if (action === 'saveCatalogItem') {
           const catalogId = clean(body.catalogId), brand = clean(body.brand), model = clean(body.model), variant = clean(body.variant) || 'Standard';
-          const category = clean(body.category).toUpperCase(), fuel = clean(body.fuel).toUpperCase() || 'PETROL';
+          const category = clean(body.category).toUpperCase(), fuel = clean(body.fuel).toUpperCase() || 'PETROL', operatingSystem = clean(body.operatingSystem).toUpperCase();
           const tier = clean(body.tier).toUpperCase(), stock = clean(body.stock).toUpperCase();
           if (!brand || !model || !category) throw new Error('Brand, model and category are required');
-          if (fuel !== 'PETROL') throw new Error('Fuel type must be PETROL for the current catalog');
+          if (businessUnit === 'MOTOR' && fuel !== 'PETROL') throw new Error('Fuel type must be PETROL for the current motor catalog');
+          if (businessUnit === 'HANDPHONE' && !operatingSystem) throw new Error('Operating system is required for Handphone');
           if (!['PRIMARY', 'SECONDARY', 'ON_REQUEST'].includes(tier)) throw new Error('A valid popularity tier is required');
           if (!['CHECK_BRANCH', 'CHECK_WAREHOUSE', 'CONFIRMED_AVAILABLE', 'UNAVAILABLE'].includes(stock)) throw new Error('A valid stock check mode is required');
           const timestamp = now(), record = {
-            Brand: brand, Model: model, Variant: variant, Category: category, 'Fuel Type': fuel, 'Popularity Tier': tier,
+            Brand: brand, Model: model, Variant: variant, Category: category, ...(businessUnit === 'HANDPHONE' ? { 'Operating System': operatingSystem } : { 'Fuel Type': fuel }), 'Popularity Tier': tier,
             'Product Page URL': validUrl(body.productPageUrl, 'Product page URL'), 'Image URL': validUrl(body.imageUrl, 'Image URL'),
             'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': truth(body.imageApproved) ? 'TRUE' : 'FALSE',
-            Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Stock Check Mode': stock, 'Branch Availability': clean(body.branchAvailability),
+            Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Stock Check Mode': stock, ...(businessUnit === 'HANDPHONE' ? { 'Region Availability': clean(body.regionAvailability || body.branchAvailability) } : { 'Branch Availability': clean(body.branchAvailability) }),
             'Warehouse Availability': clean(body.warehouseAvailability), 'Search Keywords': clean(body.searchKeywords), 'Last Verified At': timestamp.slice(0, 10)
           };
           if (catalogId) {
-            await updateObject(req, 'Motor_Model_Catalog', 'Catalog ID', catalogId, record, 'Q');
-            await writeActivity(req, session, { type: 'CRM_CATALOG_UPDATED', description: `${brand} ${model} catalog item updated` });
-            return res.status(200).json({ live: true, catalogId });
+            await updateObject(req, config.catalog, 'Catalog ID', catalogId, record, config.catalogMax);
+            await writeActivity(req, session, { type: 'CRM_CATALOG_UPDATED', description: `${businessUnit} ${brand} ${model} catalog item updated` });
+            return res.status(200).json({ live: true, catalogId, businessUnit });
           }
-          const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+          const [catalogRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
           const existing = rowsToObjects(catalogRows);
-          let newCatalogId = `MTR-${slug(brand)}-${slug(model)}`;
+          let newCatalogId = `${config.idPrefix}-${slug(brand)}-${slug(model)}`;
           if (existing.some(row => clean(row['Catalog ID']) === newCatalogId)) newCatalogId = `${newCatalogId}-${Date.now().toString(36).toUpperCase()}`;
-          await appendObject(req, 'Motor_Model_Catalog', { 'Catalog ID': newCatalogId, ...record });
-          await writeActivity(req, session, { type: 'CRM_CATALOG_CREATED', description: `${brand} ${model} added to the motor catalog` });
-          return res.status(201).json({ live: true, catalogId: newCatalogId });
+          await appendObject(req, config.catalog, { 'Catalog ID': newCatalogId, ...record });
+          await writeActivity(req, session, { type: 'CRM_CATALOG_CREATED', description: `${brand} ${model} added to the ${businessUnit.toLowerCase()} catalog` });
+          return res.status(201).json({ live: true, catalogId: newCatalogId, businessUnit });
         }
 
         const pricingId = clean(body.pricingId), catalogId = clean(body.catalogId), zone = clean(body.zone).toUpperCase();
-        const [catalogRows, branchRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000', 'Branch_Master!A1:Q1000']);
+        const [catalogRows, branchRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`, 'Branch_Master!A1:S1000']);
         const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId);
-        if (!catalogRecord) throw new Error('Select a valid catalog motorcycle');
+        if (!catalogRecord) throw new Error(`Select a valid ${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} catalog item`);
         const allowedZones = new Set(['ALL_BRANCHES', 'WEST_MALAYSIA', 'EAST_MALAYSIA', 'SARAWAK', ...rowsToObjects(branchRows).filter(row => truth(row.Active)).map(row => clean(row['Branch ID']))]);
         if (!allowedZones.has(zone)) throw new Error('Select a valid price zone or branch');
         const quoteStatus = clean(body.quoteStatus).toUpperCase(), promotionStatus = clean(body.promotionStatus).toUpperCase();
@@ -611,8 +635,14 @@ export default async function handler(req, res) {
         if (promotionStart && promotionEnd && promotionStart > promotionEnd) throw new Error('Promotion end date cannot be earlier than its start date');
         const timestamp = now(), pricingRecord = {
           'Catalog ID': catalogId, Brand: catalogRecord.Brand, Model: catalogRecord.Model, Variant: catalogRecord.Variant || 'Standard', 'Price Zone': zone,
-          'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
-          'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment'),
+          ...(businessUnit === 'HANDPHONE' ? {
+            'Product Price (RM)': amount(body.productPrice, 'Product price'), 'Deposit (RM)': amount(body.deposit, 'Deposit'),
+            'Monthly 12 Months (RM)': amount(body.month12, '12-month instalment'), 'Monthly 24 Months (RM)': amount(body.month24, '24-month instalment'),
+            'Monthly 36 Months (RM)': amount(body.month36, '36-month instalment'), 'Monthly 48 Months (RM)': amount(body.month48, '48-month instalment', true)
+          } : {
+            'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
+            'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment')
+          }),
           Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Effective From': effectiveFrom, 'Effective To': effectiveTo,
           'Quote Approval Status': quoteStatus, 'Last Updated At': timestamp, 'Updated By': session.username, 'Internal Notes': clean(body.internalNotes),
           'Promotion Name': clean(body.promotionName), 'Promotion Deposit (RM)': amount(body.promotionDeposit, 'Promotion deposit', true),
@@ -621,40 +651,39 @@ export default async function handler(req, res) {
         };
         if (truth(body.promotionActive) && (!clean(body.promotionName) || pricingRecord['Promotion Deposit (RM)'] === '')) throw new Error('An active promotion requires a name and promotion deposit');
         if (pricingId) {
-          await updateObject(req, 'Motor_Loan_Pricing', 'Pricing ID', pricingId, pricingRecord, 'Z');
-          await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_UPDATED', description: `${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion updated` });
-          return res.status(200).json({ live: true, pricingId });
+          await updateObject(req, config.pricing, 'Pricing ID', pricingId, pricingRecord, config.pricingMax);
+          await setPricingDerivedFormulas(req, pricingId, businessUnit);
+          await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_UPDATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion updated` });
+          return res.status(200).json({ live: true, pricingId, businessUnit });
         }
-        const newPricingId = `PRICE-${slug(zone)}-${Date.now().toString(36).toUpperCase()}`;
-        await appendObject(req, 'Motor_Loan_Pricing', { 'Pricing ID': newPricingId, ...pricingRecord });
-        await setPricingDerivedFormulas(req, newPricingId);
-        await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_CREATED', description: `${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion created` });
-        return res.status(201).json({ live: true, pricingId: newPricingId });
+        const newPricingId = `PRICE-${config.idPrefix}-${slug(zone)}-${Date.now().toString(36).toUpperCase()}`;
+        await appendObject(req, config.pricing, { 'Pricing ID': newPricingId, ...pricingRecord });
+        await setPricingDerivedFormulas(req, newPricingId, businessUnit);
+        await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_CREATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion created` });
+        return res.status(201).json({ live: true, pricingId: newPricingId, businessUnit });
       }
       if (action === 'createApplication') {
         const customerName = clean(body.customerName), phone = clean(body.phone), catalogId = clean(body.catalogId);
         const businessUnit = clean(body.businessUnit || body.productCategory).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
+        const productConfig = businessSheets(businessUnit);
         const requestedRegion = canonicalRegion(body.region);
         if (!customerName || !phone || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and application type are required');
         const sessionBusinessAccess = canonicalBusinessAccess(session.businessAccess, session.role);
         if (session.role !== 'ADMIN' && sessionBusinessAccess !== 'BOTH' && sessionBusinessAccess !== businessUnit) return res.status(403).json({ live: false, error: `Your account cannot submit ${businessUnit.toLowerCase()} applications.` });
         if (session.role !== 'ADMIN' && session.region !== 'ALL' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
-        let brand = '', model = '', variant = '';
-        if (businessUnit === 'MOTOR') {
-          if (!catalogId) throw new Error('Select an active motorcycle from the Motor Catalog');
-          const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
-          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-          if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
-          brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
-        } else {
-          brand = clean(body.productBrand); model = clean(body.productModel); variant = clean(body.productVariant);
-          if (!brand || !model) throw new Error('Handphone brand and model are required');
-        }
+        if (!catalogId) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+        const [catalogRows, existingLeadRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AO1000']);
+        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
+        const normalizedPhone = whatsappPhone(phone), existingCustomer = rowsToObjects(existingLeadRows).find(row => whatsappPhone(row['Phone Number']) === normalizedPhone);
+        const customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
         const assignedBranchId = ['STAFF', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
+        let teamId = clean(body.teamId);
         if (assignedSaId || assignedBranchId) {
-          const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+          const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
           const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
           const branch = branches.find(row => clean(row['Branch ID']) === assignedBranchId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!branch || (session.role !== 'ADMIN' && canonicalRegion(branch.Region) !== requestedRegion)) throw new Error('The selected branch is outside the application region');
@@ -662,13 +691,16 @@ export default async function handler(req, res) {
           if (assignedSaId) {
             const advisor = advisors.find(row => clean(row['SA ID']) === assignedSaId && clean(row.Active).toUpperCase() === 'TRUE');
             if (!advisor || clean(advisor['Branch ID']) !== assignedBranchId || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== requestedRegion)) throw new Error('The selected sales advisor does not belong to this branch and region');
+            if (!businessAllows(advisor['Business Access'] || 'BOTH', businessUnit)) throw new Error(`The selected sales advisor cannot receive ${businessUnit.toLowerCase()} applications`);
+            teamId = clean(advisor['Team ID']) || teamId;
           }
+          teamId = teamId || clean(branch?.['Team ID']);
         }
-        await ensureSheetHeaders(req, 'Leads', ['Business Unit']);
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)']);
+        await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID']);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID']);
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
-          Region: requestedRegion, 'Business Unit': businessUnit, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
+          'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
           'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED',
           'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
         });
@@ -680,7 +712,7 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': clean(body.tenure),
+          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '',
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
@@ -693,16 +725,18 @@ export default async function handler(req, res) {
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000']);
-        const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
+        const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
+        const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
+        const applicationRecord = applicationRecords.find(row => clean(row['Application ID']) === applicationId), leadRecord = leadRecords.find(row => clean(row['Lead ID']) === (leadId || clean(applicationRecord?.['Lead ID'])));
         const uploaded = await uploadDocument(req, body.file, applicationId || leadId);
         const documentId = makeId('DOC'), timestamp = now();
         await appendObject(req, 'Document_Log', {
           'Document ID': documentId, 'Received At': timestamp, 'Updated At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId,
           'Document Type': documentType, 'File Name': uploaded.name, 'Mime Type': clean(body.file.type), 'File URL': uploaded.webUrl || '',
           'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
-          'Manual Review Required': 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username
+          'Manual Review Required': 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username, 'Business Unit': rowBusinessUnit(applicationRecord || leadRecord || {}), 'Customer ID': clean(applicationRecord?.['Customer ID'] || leadRecord?.['Customer ID'])
         });
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
@@ -711,7 +745,7 @@ export default async function handler(req, res) {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
         const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
-        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -727,6 +761,7 @@ export default async function handler(req, res) {
         if (saId) {
           const advisor = salesAdvisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!advisor || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== session.region)) throw new Error('The selected sales advisor is outside your access');
+          if (!businessAllows(advisor['Business Access'] || 'BOTH', rowBusinessUnit(record))) throw new Error('The selected sales advisor does not have access to this business unit');
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
           if (branchId && clean(advisor['Branch ID']) !== branchId) throw new Error('The selected sales advisor does not belong to the selected branch');
         }
@@ -744,7 +779,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
         if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
@@ -757,20 +792,17 @@ export default async function handler(req, res) {
       }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
-        const [leadRows, applicationRows, branchRows, catalogRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Motor_Model_Catalog!A1:Q1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         const businessUnit = rowBusinessUnit(record);
-        let brand = '', model = '', variant = '';
-        if (businessUnit === 'MOTOR') {
-          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-          if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
-          brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
-        } else {
-          brand = clean(body.productBrand); model = clean(body.productModel); variant = clean(body.productVariant);
-        }
+        const productConfig = businessSheets(businessUnit);
+        const [catalogRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`]);
+        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
         const changes = {
           'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
           'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
@@ -781,22 +813,23 @@ export default async function handler(req, res) {
           'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
           'Reference 2 Relationship': clean(body.reference2Relationship), 'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
-          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': clean(body.loanTenureYears),
+          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.loanTenureYears) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.loanTenureMonths) : '',
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Updated By': session.username
         };
         if (clean(body.applicantIcNumber)) changes['Applicant IC Number'] = clean(body.applicantIcNumber);
         if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, product brand and model are required');
-        if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Loan tenure must be 3, 4 or 5 years');
+        if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
+        if (changes['Loan Tenure Months'] && !['12', '24', '36', '48'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be 12, 24, 36 or 48 months');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)']);
-        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BK');
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID']);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BN');
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -814,6 +847,9 @@ export default async function handler(req, res) {
           const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
           const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId: body.replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           const route = resolved.channel;
+          const targetApplication = applications.find(row => clean(row['Application ID']) === applicationId);
+          const targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
+          const messageBusinessUnit = rowBusinessUnit(targetApplication || targetLead || {}), customerId = clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']);
           if (cloudMode && resolved.unregisteredNumberId) throw new Error(`The customer's original WhatsApp number (${resolved.unregisteredNumberId}) is not registered in CRM. Admin must map it before replying.`);
           if (cloudMode && route && (!truth(route.Active) || !truth(route['Outbound Enabled']))) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} is disabled. Admin approval is required before transferring the conversation.`);
           let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '';
@@ -825,8 +861,8 @@ export default async function handler(req, res) {
             const result = await response.json().catch(() => ({}));
             if (response.ok) { sendStatus = 'QUEUED'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
           }
-          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}` });
-          if (route?.['Internal Channel ID']) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', route['Internal Channel ID'], { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'Z');
+          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}`, 'Business Unit': messageBusinessUnit, 'Customer ID': customerId, 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
+          if (route?.['Internal Channel ID']) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', route['Internal Channel ID'], { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'AC');
           await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply through ${route?.['Channel Name'] || 'the legacy default WhatsApp channel'}` });
           return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, channelId: route?.['Internal Channel ID'] || '', channelName: route?.['Channel Name'] || '', displayNumber: route?.['Display Number'] || '', routingSource: resolved.source, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
         }
@@ -839,7 +875,8 @@ export default async function handler(req, res) {
           const messageId = makeId('MSG'), timestamp = now();
           const resolved = resolveCustomerChannel({ leadId, applicationId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           const route = resolved.channel;
-          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '' });
+          const targetApplication = applications.find(row => clean(row['Application ID']) === applicationId), targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
+          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Business Unit': rowBusinessUnit(targetApplication || targetLead || {}), 'Customer ID': clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']), 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
           await writeActivity(req, session, { leadId, applicationId, type: status === 'HUMAN_HANDOVER_REQUIRED' ? 'CRM_HUMAN_HANDOVER_REQUESTED' : 'CRM_CUSTOMER_REPLY_RECORDED', description: message.slice(0, 240) });
           return res.status(201).json({ live: true, messageId, status });
         }
@@ -860,6 +897,10 @@ export default async function handler(req, res) {
           if (!advisor) throw new Error('Select an active sales advisor');
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('This sales advisor is outside your branch');
           if (session.role === 'REGION_MANAGER' && canonicalRegion(advisor.Region) !== session.region) throw new Error('This sales advisor is outside your region');
+          const handoverApplication = applications.find(row => clean(row['Application ID']) === clean(inboxRecord['Application ID']));
+          const handoverLead = leads.find(row => clean(row['Lead ID']) === clean(inboxRecord['Lead ID']));
+          const handoverBusiness = rowBusinessUnit(handoverApplication || handoverLead || {});
+          if (!businessAllows(advisor['Business Access'] || 'BOTH', handoverBusiness)) throw new Error(`This sales advisor cannot receive ${handoverBusiness.toLowerCase()} handovers`);
           const assignedBranchId = clean(advisor['Branch ID']);
           if (inboxRecord['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now() }, 'AF');
           if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BK');
@@ -888,22 +929,23 @@ export default async function handler(req, res) {
   if (resource === 'integrations') return res.status(200).json({ live: true, records: publicIntegrationRecords(process.env), readiness: integrationReadiness(process.env), reportingFields: FUTURE_REPORTING_FIELDS });
   try {
     if (resource === 'channels') {
-      const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:Q1000']);
+      const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:S1000']);
       const branches = rowsToObjects(branchRows);
       const records = rowsToObjects(channelRows).filter(row => row['Internal Channel ID']).map(row => publicChannel(row, branches)).filter(row => {
         if (session.role === 'ADMIN') return true;
+        if (!businessAllows(session.businessAccess, row.businessUnit)) return false;
         if (session.role === 'REGION_MANAGER') return row.region === session.region;
         if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role)) return row.region === session.region && (!row.branchId || row.branchId === session.branchId);
         if (session.role === 'BUSINESS_MANAGER') return session.region === 'ALL' || row.region === session.region;
         return false;
       });
-      return res.status(200).json({ live: true, records, capacity: { EAST_MALAYSIA: 5, WEST_MALAYSIA: 5 }, secretsExposed: false });
+      return res.status(200).json({ live: true, records, capacity: { EAST_MALAYSIA: 5, WEST_MALAYSIA: 5 }, dimensions: ['Region', 'Business Unit', 'Team ID', 'Official Number'], secretsExposed: false });
     }
     if (resource === 'users') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -928,7 +970,7 @@ export default async function handler(req, res) {
           source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
           model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || row['Enquiry Type'] || `${rowBusinessUnit(row) === 'HANDPHONE' ? 'Handphone' : 'Motor'} enquiry`,
           productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
-          tenure: app['Loan Tenure Years'], status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'],
+          tenure: rowBusinessUnit(app) === 'HANDPHONE' ? app['Loan Tenure Months'] : app['Loan Tenure Years'], tenureUnit: rowBusinessUnit(app) === 'HANDPHONE' ? 'MONTHS' : 'YEARS', status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'], customerId: row['Customer ID'] || app['Customer ID'], teamId: row['Team ID'] || app['Team ID'],
           sa: row['Assigned SA ID'] || app['Assigned SA ID'] || 'Unassigned', branch: row['Selected Branch ID'] || app['Assigned Branch ID'] || '', state: row.State, city: row['City or Area'],
           notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
       });
@@ -936,23 +978,25 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'applications') {
-      const [documentRows, pricingRows] = await readRanges(req, ['Document_Log!A1:Y1500', 'Motor_Loan_Pricing!A1:Z1000']);
+      const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AA1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AB1000']);
       const documents = rowsToObjects(documentRows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID']));
-      const pricing = rowsToObjects(pricingRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
+      const motorPricing = rowsToObjects(motorPricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
+      const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const docsByApplication = new Map(); documents.forEach(row => { const key = row['Application ID']; if (key) docsByApplication.set(key, [...(docsByApplication.get(key) || []), row]); });
       const leadRegion = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], canonicalRegion(row.Region)]));
       const records = [...businessApplications].reverse().map(row => {
         const docs = documentSummary(docsByApplication.get(row['Application ID']) || []);
         const zone = leadRegion[row['Lead ID']];
         const businessUnit = rowBusinessUnit(row);
-        const quote = businessUnit === 'MOTOR' ? pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && canonicalRegion(p['Price Zone']) === zone) || {} : {};
-        const tenure = clean(row['Loan Tenure Years']);
-        const monthly = tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '';
+        const pricing = businessUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
+        const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && (clean(p['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(p['Price Zone']) === zone)) || {};
+        const tenure = clean(businessUnit === 'HANDPHONE' ? row['Loan Tenure Months'] : row['Loan Tenure Years']);
+        const monthly = businessUnit === 'HANDPHONE' ? (tenure === '12' ? quote['Monthly 12 Months (RM)'] : tenure === '24' ? quote['Monthly 24 Months (RM)'] : tenure === '36' ? quote['Monthly 36 Months (RM)'] : tenure === '48' ? quote['Monthly 48 Months (RM)'] : '') : (tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '');
         const ic = clean(row['Applicant IC Number']);
         return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), synthetic: isSyntheticApplicationRow(row),
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
-          tenure, deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)']) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '',
+          tenure, tenureUnit: businessUnit === 'HANDPHONE' ? 'MONTHS' : 'YEARS', deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)'] || effectiveDeposit(quote)) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)'] || quote['Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '', customerId: row['Customer ID'], teamId: row['Team ID'], originChannelId: row['Origin WhatsApp Channel ID'],
           branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.aiComplete ? 'AI_VERIFIED_COMPLETE' : docs.needsReview ? 'AI_EXCEPTION' : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
           missingDocuments: docs.aiComplete ? '' : (row['Missing Documents'] || docs.missing.join(', ')), documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
@@ -974,7 +1018,7 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'documents') {
-      const [rows] = await readRanges(req, ['Document_Log!A1:Y1500']);
+      const [rows] = await readRanges(req, ['Document_Log!A1:AA1500']);
       const records = rowsToObjects(rows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID'])).reverse().map(row => ({
         id: row['Document ID'], applicationId: row['Application ID'], leadId: row['Lead ID'], type: row['Document Type'], received: row['Received At'], fileName: row['File Name'], mimeType: row['Mime Type'],
         classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, updated: row['Updated At']
@@ -983,40 +1027,45 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'pricing') {
-      const [rows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000']);
-      const records = rowsToObjects(rows).filter(row => session.role === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && canonicalRegion(row['Price Zone']) === session.region)).map(row => ({
-        id: row['Pricing ID'], catalogId: row['Catalog ID'], brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'],
-        deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']),
+      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AB1000']);
+      const visible = (row, businessUnit) => businessPermitted(session, { 'Business Unit': businessUnit }) && (session.role === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && (clean(row['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(row['Price Zone']) === session.region)));
+      const mapPricing = (row, businessUnit) => ({
+        id: row['Pricing ID'], catalogId: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'], productPrice: customerAmount(row['Product Price (RM)']),
+        deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']), month12: customerAmount(row['Monthly 12 Months (RM)']), month24: customerAmount(row['Monthly 24 Months (RM)']), month36: customerAmount(row['Monthly 36 Months (RM)']), month48: customerAmount(row['Monthly 48 Months (RM)']),
         effective: row['Effective From'], effectiveTo: row['Effective To'], active: truth(row.Active), status: row['Quote Approval Status'], internalNotes: session.role === 'ADMIN' ? row['Internal Notes'] : '',
         promotion: promotionApplies(row) || session.role === 'ADMIN' ? row['Promotion Name'] : '', promotionDeposit: customerAmount(row['Promotion Deposit (RM)']), promotionStart: row['Promotion Start'], promotionEnd: row['Promotion End'],
         promotionActive: truth(row['Promotion Active']), promotionStatus: row['Promotion Approval Status'], promotionNotes: session.role === 'ADMIN' ? row['Promotion Notes'] : '', updated: row['Last Updated At'], updatedBy: row['Updated By']
-      }));
+      });
+      const records = [...rowsToObjects(motorRows).filter(row => visible(row, 'MOTOR')).map(row => mapPricing(row, 'MOTOR')), ...rowsToObjects(handphoneRows).filter(row => visible(row, 'HANDPHONE')).map(row => mapPricing(row, 'HANDPHONE'))];
       return res.status(200).json({ live: true, records });
     }
 
     if (resource === 'catalog') {
-      const [rows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
-      return res.status(200).json({ live: true, records: rowsToObjects(rows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => ({
-        id: row['Catalog ID'], brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], tier: row['Popularity Tier'],
+      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000', 'Handphone_Model_Catalog!A1:Q1000']);
+      const mapCatalog = (row, businessUnit) => ({
+        id: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], operatingSystem: row['Operating System'], tier: row['Popularity Tier'],
         productPageUrl: row['Product Page URL'], imageUrl: row['Image URL'], image: truth(row['Image Approved']) ? row['Image URL'] : '', imageCaption: row['Image Caption (MS)'], imageApproved: truth(row['Image Approved']),
-        active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At']
-      })) });
+        active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], regionAvailability: row['Region Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At']
+      });
+      const allowed = businessUnit => businessPermitted(session, { 'Business Unit': businessUnit });
+      const records = [...(allowed('MOTOR') ? rowsToObjects(motorRows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => mapCatalog(row, 'MOTOR')) : []), ...(allowed('HANDPHONE') ? rowsToObjects(handphoneRows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => mapCatalog(row, 'HANDPHONE')) : [])];
+      return res.status(200).json({ live: true, records });
     }
 
     if (resource === 'team') {
-      const [saRows, userRows] = await readRanges(req, ['SA_Master!A1:L1000', userSheetRange]);
+      const [saRows, userRows] = await readRanges(req, ['SA_Master!A1:O1000', userSheetRange]);
       const branchNames = Object.fromEntries(branches.map(row => [row['Branch ID'], row['Branch Name']]));
       const staffAccess = Object.fromEntries(rowsToObjects(userRows).filter(row => canonicalRole(row.Role) === 'STAFF' && row['SA ID']).map(row => [clean(row['SA ID']), canonicalBusinessAccess(row['Business Access'], row.Role)]));
       const records = rowsToObjects(saRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || (session.role === 'STAFF' ? clean(row['SA ID']) === clean(session.saId) : ['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? clean(row['Branch ID']) === clean(session.branchId) : session.region === 'ALL' || canonicalRegion(row.Region) === session.region))).map(row => {
         const branch = branchNames[row['Branch ID']] || row['Branch ID'];
-        const branchBusinessUnit = /(HANDPHONE|IPHONE|SMARTPHONE)/i.test(`${row['Branch ID']} ${branch}`) ? 'HANDPHONE' : 'MOTOR';
-        return { id: row['SA ID'], name: row['SA Name'], branch, branchId: row['Branch ID'], region: row.Region, businessUnit: branchBusinessUnit, businessAccess: staffAccess[clean(row['SA ID'])] || 'BOTH', accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] };
+        const branchBusinessUnit = canonicalBusinessUnit(row['Business Unit']) || (/(HANDPHONE|IPHONE|SMARTPHONE)/i.test(`${row['Branch ID']} ${branch}`) ? 'HANDPHONE' : 'MOTOR');
+        return { id: row['SA ID'], name: row['SA Name'], branch, branchId: row['Branch ID'], region: row.Region, businessUnit: branchBusinessUnit, businessAccess: canonicalBusinessAccess(row['Business Access'] || staffAccess[clean(row['SA ID'])] || 'BOTH', 'STAFF'), teamId: row['Team ID'], accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] };
       });
       return res.status(200).json({ live: true, records, branches: branches.filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || canonicalRegion(row.Region) === session.region)).length });
     }
 
     if (['inbox', 'outbox', 'activity'].includes(resource)) {
-      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:Z1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:Z1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
+      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:AC1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:AC1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
       const [rows, channelRows] = await readRanges(req, [cfg[0], channelRange]);
       const channels = rowsToObjects(channelRows);
       const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID'])).reverse();
@@ -1039,7 +1088,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ live: true, records });
     }
 
-    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:Z1000', 'Message_Outbox!A1:Z1200', 'Document_Log!A1:Y1500']);
+    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AC1200', 'Document_Log!A1:AA1500']);
     const inbox = rowsToObjects(inboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID']));

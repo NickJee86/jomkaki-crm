@@ -37,7 +37,9 @@ function value(row, sheetHeader, apiField) {
  * may only send the returned payload after the official contract is approved.
  */
 export function prepareLmsSubmission(application = {}, documents = []) {
-  const missingFields = LMS_REQUIRED_FIELDS.filter(header => !clean(application[header]));
+  const businessUnit = upper(application['Business Unit'] || application.businessUnit) === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
+  const requiredFields = businessUnit === 'HANDPHONE' ? LMS_REQUIRED_FIELDS.map(header => header === 'Loan Tenure Years' ? 'Loan Tenure Months' : header) : LMS_REQUIRED_FIELDS;
+  const missingFields = requiredFields.filter(header => !clean(application[header]));
   const accepted = documents.filter(acceptedDocument);
   const byType = new Map();
   accepted.forEach(row => {
@@ -69,6 +71,11 @@ export function prepareLmsSubmission(application = {}, documents = []) {
     payload: {
       source_system: 'JOMKAKI_CRM',
       source_application_id: applicationId,
+      customer_id: value(application, 'Customer ID', 'customerId'),
+      business_unit: businessUnit,
+      region: value(application, 'Region', 'region'),
+      team_id: value(application, 'Team ID', 'teamId'),
+      origin_whatsapp_channel_id: value(application, 'Origin WhatsApp Channel ID', 'originChannelId'),
       applicant: {
         name: value(application, 'Applicant Name', 'customer'),
         ic_number: value(application, 'Applicant IC Number', 'applicantIcNumber'),
@@ -85,11 +92,15 @@ export function prepareLmsSubmission(application = {}, documents = []) {
         salary_payment_method: value(application, 'Salary Payment Method', 'salaryPaymentMethod')
       },
       financing: {
-        product_category: value(application, 'Product Category', 'productCategory') || 'MOTORCYCLE',
+        business_unit: businessUnit,
+        product_category: value(application, 'Product Category', 'productCategory') || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'),
         product_brand: value(application, 'Product Brand', 'brand'),
         product_model: value(application, 'Product Model', 'model'),
         product_variant: value(application, 'Product Variant', 'variant'),
-        tenure_years: value(application, 'Loan Tenure Years', 'tenure')
+        product_price_rm: value(application, 'Requested Product Price (RM)', 'requestedPrice'),
+        requested_deposit_rm: value(application, 'Requested Deposit (RM)', 'deposit'),
+        tenure_years: businessUnit === 'MOTOR' ? value(application, 'Loan Tenure Years', 'tenure') : '',
+        tenure_months: businessUnit === 'HANDPHONE' ? value(application, 'Loan Tenure Months', 'tenure') : ''
       },
       references: [
         {
