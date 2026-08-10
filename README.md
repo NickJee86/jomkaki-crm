@@ -5,7 +5,7 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 ## Included
 
 - Secure multi-user login with signed HTTP-only session cookies
-- Role-scoped access for company Admin, Regional Manager, Branch Manager and assigned Staff
+- Role-scoped access for company Admin, Regional Manager, Business Manager, Branch Supervisor and assigned Staff
 - Live dashboard, leads, applications, inbox, outbox, motor catalog, approved loan pricing and team directory
 - Create leads and update lead ownership, status, notes and follow-up date
 - Update application stage, status, branch, SA, review requirement and follow-up date
@@ -77,9 +77,19 @@ Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
 - Incomplete document collection or failed AI follow-up becomes `AI_TO_SA_HANDOVER` and is round-robin assigned to eligible Staff.
 - Explicit customer requests for a human enter the Manager handover queue.
 - Staff can only see and work on exception cases assigned to their own SA ID.
-- Branch Managers can only see Leads assigned to their own branch.
+- Branch Supervisors can only see Leads assigned to their own branch. Vacant Supervisor positions fall back to the Regional Manager.
 - Regional Managers can see every Lead in their own region; Administrators can see all company Leads.
 - Automatic LMSPRO submission remains gated off until the official API contract, sandbox endpoint and secured test credentials are supplied.
+
+## Motor and Handphone business architecture
+
+- One CRM account can be limited to `MOTOR`, `HANDPHONE` or `BOTH` business access.
+- Staff select Motorcycle Loan or Handphone Loan before creating a manual application.
+- Motor cases use the approved Motor Catalog; Handphone cases record brand, model, variant, product price and requested deposit.
+- Handphone is managed as a separate business unit, not as a Motor branch.
+- Business Managers see only their permitted business unit. Regional Managers retain Motor regional oversight.
+- Leads, Applications, Customer 360 and Reports display and filter by business unit.
+- Legacy `BRANCH_MANAGER` accounts remain compatible and are presented as Branch Supervisors.
 
 ## Human handover and account control
 

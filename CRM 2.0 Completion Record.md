@@ -1,6 +1,6 @@
 # JomKaki Motor CRM 2.0 — Completion Record
 
-Updated: 7 August 2026  
+Updated: 10 August 2026  
 Production: https://jomkaki-crm.vercel.app/
 
 ## Current production flow
@@ -16,8 +16,9 @@ Production: https://jomkaki-crm.vercel.app/
 
 - Administrator: all company Leads, Applications, accounts, reports and audit records.
 - Regional Manager: all Leads and Applications in the Manager's own region.
-- Branch Manager: only Leads assigned to the Manager's own branch.
-- Staff: only AI exceptions or explicit cases assigned to the Staff member's own SA ID.
+- Business Manager: all permitted Handphone or business-unit cases within the account scope.
+- Branch Supervisor: only Leads assigned to the Supervisor's own branch; vacancies fall back to the Regional Manager.
+- Staff: only AI exceptions, assigned cases or applications submitted under the Staff member's own SA ID.
 
 ## CRM capabilities completed
 
@@ -29,6 +30,9 @@ Production: https://jomkaki-crm.vercel.app/
 - Admin can create, edit, enable, disable, unlock and reset CRM accounts without exposing stored passwords.
 - Manual WhatsApp Business replies remain available while Meta Cloud authorization is pending.
 - Login, page asset version and browser console were verified on the final production deployment.
+- Accounts support Motor, Handphone or Both business access.
+- Manual application submission starts with Motorcycle Loan or Handphone Loan and stores separately reportable product data.
+- Leads, Applications, Customer 360 and Reports identify and filter Motor and Handphone cases.
 
 ## Automation and data configuration
 
@@ -42,7 +46,7 @@ Production: https://jomkaki-crm.vercel.app/
 
 - JavaScript syntax checks passed for the frontend and both production APIs.
 - Authentication/session tests passed.
-- Role-scope tests passed for Admin, Regional Manager, Branch Manager and Staff.
+- Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
 - AI document-readiness tests passed for complete, missing and exception cases.
 - Character-encoding checks passed for the frontend, index and README.
 - Vercel reported the final deployment `Ready` in Production.
