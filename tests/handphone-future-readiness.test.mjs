@@ -91,6 +91,9 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(appUi, /handphonePricing:pricing/);
   assert.match(appUi, /view==='handphoneCatalog'\?'catalog'/);
   assert.match(productUi, /Apple · iPhone 17 family/i);
+  assert.match(productUi, /One catalog card per phone model/);
+  assert.match(productUi, /data-manage-phone-model/);
+  assert.match(productUi, /five iPhone models are shown as five cards/i);
   assert.match(productUi, /Draft pricing safeguard/);
   assert.match(productUi, /pricing-pending/);
   assert.match(productUi, /!\/TEMPLATE\/i/);
