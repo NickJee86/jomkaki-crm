@@ -75,7 +75,7 @@
   catalog = function () {
     const selected = isHandphoneCatalogView() ? 'HANDPHONE' : 'MOTOR';
     state.catalogBusiness = selected;
-    const rows = state.data.catalog.filter(item => unitOf(item) === selected), admin = state.user?.role === 'ADMIN';
+    const rows = state.data.catalog.filter(item => unitOf(item) === selected && !/TEMPLATE/i.test(String(item.id || ''))), admin = state.user?.role === 'ADMIN';
     const heading = selected === 'HANDPHONE' ? 'Handphone Catalog' : 'Motor Catalog';
     const description = admin ? `Manage ${unitLabel(selected)} models, options, images and availability in this dedicated catalog.` : `Approved active ${unitLabel(selected)} products.`;
     app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? handphoneCatalogShowcase(rows) : '') + `<div class="smart-toolbar catalog-toolbar"><input id="catalogSearch" placeholder="Search brand, model, colour, storage or Catalog ID"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product>+ Add ${unitLabel(selected)} product</button>` : ''}</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">ADMIN OPTIONS</span><h2>${unitLabel(selected)} option records</h2></div><span>${rows.length} records</span></div><div id="catalogResults">${productCatalogTable(rows)}</div></section>`;
@@ -112,7 +112,7 @@
   pricing = function () {
     const selected = isHandphonePricingView() ? 'HANDPHONE' : 'MOTOR';
     state.pricingBusiness = selected;
-    const rows = state.data.pricing.filter(item => unitOf(item) === selected), admin = state.user?.role === 'ADMIN';
+    const rows = state.data.pricing.filter(item => unitOf(item) === selected && !/TEMPLATE/i.test(String(item.id || ''))), admin = state.user?.role === 'ADMIN';
     const heading = selected === 'HANDPHONE' ? 'Handphone Pricing' : 'Motor Pricing & Promotions';
     const description = selected === 'HANDPHONE' ? 'Apple Malaysia retail prices are references only. Deposit and monthly instalments remain Draft until Admin approves JomKaki terms.' : (admin ? 'Manage Motor prices, financing and promotions without leaving CRM.' : 'Approved Motor customer pricing.');
     app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? `<div class="pricing-safety-banner"><strong>Draft pricing safeguard</strong><span>These iPhone 17 prices are official Apple Malaysia retail references. They cannot be quoted to customers until Admin enters the approved deposit and monthly instalments, changes the status to Approved and enables the row.</span></div>` : '') + `<div class="smart-toolbar"><input id="pricingSearch" placeholder="Search product, colour, storage, zone, promotion or Pricing ID"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product-price>+ Add ${unitLabel(selected)} price</button>` : ''}</div><section class="panel" id="pricingResults">${productPricingTable(rows)}</section>`;
