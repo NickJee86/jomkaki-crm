@@ -206,6 +206,76 @@ const whatsappPhone = value => {
   return digits;
 };
 
+const channelRange = 'WhatsApp_Number_Master!A1:Z1000';
+const channelIdPattern = /^JKM-WA-(EAST|WEST)-0([1-5])$/;
+const channelEnvironmentPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+const rowTime = row => new Date(row['Received At'] || row['Sent At'] || row['Created At'] || 0).valueOf() || 0;
+
+export function channelRegion(row = {}, branches = []) {
+  const explicit = canonicalRegion(row.Region);
+  if (['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(explicit)) return explicit;
+  const branch = branches.find(item => clean(item['Branch ID']) === clean(row['Branch ID']));
+  const branchRegion = canonicalRegion(branch?.Region);
+  if (['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(branchRegion)) return branchRegion;
+  const match = clean(row['Internal Channel ID']).match(channelIdPattern);
+  return match ? `${match[1]}_MALAYSIA` : 'UNASSIGNED';
+}
+
+function publicChannel(row, branches = [], env = process.env) {
+  const credentialKey = channelEnvironmentPrefix(row['Credential Key'] || row['Internal Channel ID']);
+  const tokenConfigured = !!clean(env[`${credentialKey}_ACCESS_TOKEN`] || env.WHATSAPP_ACCESS_TOKEN);
+  const phoneNumberId = clean(row['Phone Number ID'] || env[`${credentialKey}_PHONE_NUMBER_ID`]);
+  return {
+    id: row['Internal Channel ID'], name: row['Channel Name'], phoneNumberId: clean(row['Phone Number ID']), displayNumber: row['Display Number'],
+    wabaId: row['WABA ID'], appId: row['Meta App ID'], portfolioId: row['Business Portfolio ID'], branchId: row['Branch ID'], region: channelRegion(row, branches),
+    slot: row['Channel Slot'], campaignSource: row['Campaign Source'], defaultOwner: row['Default Team / SA'], inboundEnabled: truth(row['Inbound Enabled']),
+    outboundEnabled: truth(row['Outbound Enabled']), active: truth(row.Active), connectionAlias: row['Make Connection Alias'], webhookRouteKey: row['Webhook Route Key'],
+    environment: row.Environment, lastVerified: row['Last Verified At'], lastInboundAt: row['Last Inbound At'], lastOutboundAt: row['Last Outbound At'],
+    status: row['Data Status'], notes: row['Internal Notes'], credentialKey, credentialConfigured: tokenConfigured && !!phoneNumberId
+  };
+}
+
+const channelForMessage = (message, channels) => {
+  const channelId = clean(message?.['Internal Channel ID']);
+  const numberId = clean(message?.['WhatsApp Number ID']);
+  return channels.find(row => channelId && clean(row['Internal Channel ID']) === channelId) || channels.find(row => numberId && clean(row['Phone Number ID']) === numberId);
+};
+
+export function resolveCustomerChannel({ leadId = '', applicationId = '', replyToMessageId = '', preferredChannelId = '', leads = [], applications = [], inbox = [], outbox = [], channels = [], branches = [] } = {}) {
+  const matchesCustomer = row => (leadId && clean(row['Lead ID']) === clean(leadId)) || (applicationId && clean(row['Application ID']) === clean(applicationId));
+  const reply = inbox.find(row => clean(row['Message ID']) === clean(replyToMessageId) && matchesCustomer(row));
+  const inbound = [reply, ...inbox.filter(row => matchesCustomer(row)).sort((a, b) => rowTime(b) - rowTime(a))].filter(Boolean);
+  for (const message of inbound) {
+    const channel = channelForMessage(message, channels);
+    if (channel) return { channel, source: reply === message ? 'REPLY_TO_INBOUND_CHANNEL' : 'LATEST_INBOUND_CHANNEL' };
+    const numberId = clean(message['WhatsApp Number ID']);
+    if (numberId) return { channel: null, source: 'UNREGISTERED_INBOUND_CHANNEL', unregisteredNumberId: numberId };
+  }
+  const lead = leads.find(row => clean(row['Lead ID']) === clean(leadId)) || leads.find(row => clean(row['Lead ID']) === clean(applications.find(app => clean(app['Application ID']) === clean(applicationId))?.['Lead ID']));
+  const boundId = clean(lead?.['Last Inbound WhatsApp Channel ID'] || lead?.['Primary WhatsApp Channel ID']);
+  const boundNumberId = clean(lead?.['Last Inbound WhatsApp Number ID']);
+  const bound = channels.find(row => boundId && clean(row['Internal Channel ID']) === boundId) || channels.find(row => boundNumberId && clean(row['Phone Number ID']) === boundNumberId);
+  if (bound) return { channel: bound, source: 'CUSTOMER_CHANNEL_BINDING' };
+  const previousOutbound = outbox.filter(row => matchesCustomer(row)).sort((a, b) => rowTime(b) - rowTime(a)).map(row => channelForMessage(row, channels)).find(Boolean);
+  if (previousOutbound) return { channel: previousOutbound, source: 'LATEST_OUTBOUND_CHANNEL' };
+  const preferred = channels.find(row => clean(row['Internal Channel ID']) === clean(preferredChannelId));
+  if (preferred) return { channel: preferred, source: 'AUTHORIZED_CHANNEL_SELECTION' };
+  const targetBranch = clean(lead?.['Selected Branch ID'] || applications.find(app => clean(app['Application ID']) === clean(applicationId))?.['Assigned Branch ID']);
+  const targetRegion = canonicalRegion(lead?.Region || branches.find(row => clean(row['Branch ID']) === targetBranch)?.Region);
+  const available = channels.filter(row => truth(row.Active) && truth(row['Outbound Enabled']));
+  const fallback = available.find(row => targetBranch && clean(row['Branch ID']) === targetBranch) || available.find(row => channelRegion(row, branches) === targetRegion);
+  return { channel: fallback || null, source: fallback ? 'REGION_DEFAULT_CHANNEL' : 'LEGACY_DEFAULT_CHANNEL' };
+}
+
+function channelCredentials(channel, env = process.env) {
+  const prefix = channelEnvironmentPrefix(channel?.['Credential Key'] || channel?.['Internal Channel ID']);
+  return {
+    accessToken: clean(env[`${prefix}_ACCESS_TOKEN`] || env.WHATSAPP_ACCESS_TOKEN),
+    phoneNumberId: clean(channel?.['Phone Number ID'] || env[`${prefix}_PHONE_NUMBER_ID`] || env.WHATSAPP_PHONE_NUMBER_ID),
+    version: clean(env.WHATSAPP_GRAPH_VERSION) || 'v25.0'
+  };
+}
+
 function publicAccount(row) {
   return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
 }
@@ -360,6 +430,49 @@ export default async function handler(req, res) {
         await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Status: enabled ? 'ACTIVE' : 'DISABLED', 'Login Enabled': enabled ? 'TRUE' : 'FALSE', 'Updated At': now() }, 'R');
         await writeActivity(req, session, { type: enabled ? 'CRM_USER_ENABLED' : 'CRM_USER_DISABLED', description: `${record.Username} ${enabled ? 'enabled' : 'disabled'}` });
         return res.status(200).json({ live: true, accountId, enabled });
+      }
+      if (['saveWhatsAppChannel', 'setWhatsAppChannelEnabled'].includes(action)) {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:Q1000']);
+        const channels = rowsToObjects(channelRows), branches = rowsToObjects(branchRows);
+        const channelId = clean(body.channelId).toUpperCase(), existing = channels.find(row => clean(row['Internal Channel ID']).toUpperCase() === channelId);
+        if (!channelId || (!existing && !channelIdPattern.test(channelId))) throw new Error('Use one of the reserved East or West WhatsApp channel slots');
+        if (action === 'setWhatsAppChannelEnabled') {
+          if (!existing) throw new Error('WhatsApp channel was not found');
+          const enabled = truth(body.enabled);
+          if (enabled && (!clean(existing['Phone Number ID']) || !clean(existing['Display Number']))) throw new Error('Add the official number and Meta Phone Number ID before enabling this channel');
+          if (enabled && !channelCredentials(existing).accessToken) throw new Error(`Add the protected ${channelEnvironmentPrefix(existing['Credential Key'] || channelId)}_ACCESS_TOKEN secret in Vercel before enabling this channel`);
+          await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { Active: enabled ? 'TRUE' : 'FALSE', 'Inbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Data Status': enabled ? 'CONNECTED' : 'DISABLED', 'Updated By': session.username, 'Updated At': now() }, 'Z');
+          await writeActivity(req, session, { type: enabled ? 'CRM_WHATSAPP_CHANNEL_ENABLED' : 'CRM_WHATSAPP_CHANNEL_DISABLED', description: `${channelId} ${enabled ? 'enabled for inbound and outbound routing' : 'disabled; bound conversations require approved transfer'}` });
+          return res.status(200).json({ live: true, channelId, enabled });
+        }
+        const parsed = channelId.match(channelIdPattern), region = canonicalRegion(body.region || (parsed ? `${parsed[1]}_MALAYSIA` : channelRegion(existing, branches)));
+        if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(region)) throw new Error('Select East Malaysia or West Malaysia');
+        if (parsed && region !== `${parsed[1]}_MALAYSIA`) throw new Error('The channel slot must match its East or West region');
+        const slot = clean(body.slot || (parsed ? parsed[2] : existing?.['Channel Slot']));
+        if (parsed && slot !== parsed[2]) throw new Error('The channel slot number cannot be changed');
+        const branchId = clean(body.branchId), branch = branches.find(row => clean(row['Branch ID']) === branchId);
+        if (branchId && (!branch || canonicalRegion(branch.Region) !== region)) throw new Error('The selected branch does not belong to this channel region');
+        const phoneNumberId = clean(body.phoneNumberId), displayNumber = clean(body.displayNumber), wabaId = clean(body.wabaId);
+        if (phoneNumberId && channels.some(row => clean(row['Internal Channel ID']).toUpperCase() !== channelId && clean(row['Phone Number ID']) === phoneNumberId)) throw new Error('This Meta Phone Number ID is already assigned to another channel');
+        const active = truth(body.active), inboundEnabled = truth(body.inboundEnabled), outboundEnabled = truth(body.outboundEnabled);
+        if ((active || inboundEnabled || outboundEnabled) && (!phoneNumberId || !displayNumber)) throw new Error('Official display number and Meta Phone Number ID are required before activation');
+        if ((inboundEnabled || outboundEnabled) && !active) throw new Error('Activate the channel before enabling inbound or outbound routing');
+        const timestamp = now(), record = {
+          'Channel Name': clean(body.name) || `${region === 'EAST_MALAYSIA' ? 'East' : 'West'} Malaysia Official ${slot}`,
+          'Phone Number ID': phoneNumberId, 'Display Number': displayNumber, 'WABA ID': wabaId, 'Meta App ID': clean(body.appId),
+          'Business Portfolio ID': clean(body.portfolioId), 'Branch ID': branchId, 'Campaign Source': clean(body.campaignSource) || 'ALL',
+          'Default Team / SA': clean(body.defaultOwner), 'Inbound Enabled': inboundEnabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': outboundEnabled ? 'TRUE' : 'FALSE',
+          Active: active ? 'TRUE' : 'FALSE', 'Make Connection Alias': clean(body.connectionAlias), 'Webhook Route Key': clean(body.webhookRouteKey) || `JKM-WA-${region === 'EAST_MALAYSIA' ? 'EAST' : 'WEST'}-${slot}`,
+          Environment: clean(body.environment).toUpperCase() === 'TEST' ? 'TEST' : 'PRODUCTION', 'Last Verified At': clean(body.lastVerified), 'Updated By': session.username,
+          'Internal Notes': clean(body.notes), 'Data Status': active ? 'CONNECTED' : (phoneNumberId ? 'READY_FOR_CONNECTION' : 'PENDING_PHONE_SETUP'), Region: region,
+          'Channel Slot': slot, 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp
+        };
+        if (active && !channelCredentials({ ...(existing || {}), ...record }).accessToken) throw new Error(`Add the protected ${record['Credential Key']}_ACCESS_TOKEN secret in Vercel before activating this channel`);
+        if (existing) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, record, 'Z');
+        else await appendObject(req, 'WhatsApp_Number_Master', { 'Internal Channel ID': channelId, ...record });
+        await writeActivity(req, session, { type: 'CRM_WHATSAPP_CHANNEL_UPDATED', description: `${channelId} configuration updated without exposing access tokens` });
+        return res.status(existing ? 200 : 201).json({ live: true, channelId });
       }
       if (action === 'setAdvisorAccepting') {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -605,8 +718,8 @@ export default async function handler(req, res) {
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000']);
-        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AJ1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000', channelRange]);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
         const permitted = (leadId && scope.leadIds.has(leadId)) || (applicationId && scope.applicationIds.has(applicationId));
@@ -621,18 +734,23 @@ export default async function handler(req, res) {
           if (messageType === 'TEMPLATE' && !templateName) throw new Error('An approved Meta template name is required');
           const outboxId = makeId('OUT'), timestamp = now();
           const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
+          const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId: body.replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
+          const route = resolved.channel;
+          if (cloudMode && resolved.unregisteredNumberId) throw new Error(`The customer's original WhatsApp number (${resolved.unregisteredNumberId}) is not registered in CRM. Admin must map it before replying.`);
+          if (cloudMode && route && (!truth(route.Active) || !truth(route['Outbound Enabled']))) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} is disabled. Admin approval is required before transferring the conversation.`);
           let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '';
           if (cloudMode) {
-            const accessToken = clean(process.env.WHATSAPP_ACCESS_TOKEN), phoneNumberId = clean(process.env.WHATSAPP_PHONE_NUMBER_ID), version = clean(process.env.WHATSAPP_GRAPH_VERSION) || 'v25.0';
+            const { accessToken, phoneNumberId, version } = channelCredentials(route);
             if (!accessToken || !phoneNumberId) throw new Error('WhatsApp Cloud credentials are not configured');
             const cloudPayload = messageType === 'TEMPLATE' ? { messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: templateName, language: { code: language } } } : { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'text', text: { preview_url: false, body: message } };
             const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(cloudPayload) });
             const result = await response.json().catch(() => ({}));
             if (response.ok) { sendStatus = 'QUEUED'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
           }
-          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'Send Routing Status': cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL' });
-          await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply` });
-          return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
+          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}` });
+          if (route?.['Internal Channel ID']) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', route['Internal Channel ID'], { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'Z');
+          await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply through ${route?.['Channel Name'] || 'the legacy default WhatsApp channel'}` });
+          return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, channelId: route?.['Internal Channel ID'] || '', channelName: route?.['Channel Name'] || '', displayNumber: route?.['Display Number'] || '', routingSource: resolved.source, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
         }
 
         if (action === 'recordManualReply' || action === 'requestHumanHandover') {
@@ -641,7 +759,9 @@ export default async function handler(req, res) {
           if (!phone || !message) throw new Error('Phone number and message are required');
           const status = action === 'requestHumanHandover' || clean(body.requiresManager).toUpperCase() === 'TRUE' ? 'HUMAN_HANDOVER_REQUIRED' : 'MANUAL_RECORDED';
           const messageId = makeId('MSG'), timestamp = now();
-          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'Webhook Source': 'CRM', 'Number Routing Status': 'MANUAL_TEST' });
+          const resolved = resolveCustomerChannel({ leadId, applicationId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
+          const route = resolved.channel;
+          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '' });
           await writeActivity(req, session, { leadId, applicationId, type: status === 'HUMAN_HANDOVER_REQUIRED' ? 'CRM_HUMAN_HANDOVER_REQUESTED' : 'CRM_CUSTOMER_REPLY_RECORDED', description: message.slice(0, 240) });
           return res.status(201).json({ live: true, messageId, status });
         }
@@ -689,11 +809,22 @@ export default async function handler(req, res) {
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
   if (resource === 'integrations') return res.status(200).json({ live: true, records: publicIntegrationRecords(process.env), readiness: integrationReadiness(process.env), reportingFields: FUTURE_REPORTING_FIELDS });
   try {
+    if (resource === 'channels') {
+      const [channelRows, branchRows] = await readRanges(req, [channelRange, 'Branch_Master!A1:Q1000']);
+      const branches = rowsToObjects(branchRows);
+      const records = rowsToObjects(channelRows).filter(row => row['Internal Channel ID']).map(row => publicChannel(row, branches)).filter(row => {
+        if (session.role === 'ADMIN') return true;
+        if (session.role === 'REGION_MANAGER') return row.region === session.region;
+        if (session.role === 'BRANCH_MANAGER') return row.region === session.region && (!row.branchId || row.branchId === session.branchId);
+        return false;
+      });
+      return res.status(200).json({ live: true, records, capacity: { EAST_MALAYSIA: 5, WEST_MALAYSIA: 5 }, secretsExposed: false });
+    }
     if (resource === 'users') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AJ1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -720,7 +851,7 @@ export default async function handler(req, res) {
           productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
           tenure: app['Loan Tenure Years'], status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'],
           sa: row['Assigned SA ID'] || app['Assigned SA ID'] || 'Unassigned', branch: row['Selected Branch ID'] || app['Assigned Branch ID'] || '', state: row.State, city: row['City or Area'],
-          notes: row.Notes, nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
+          notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
       });
       return res.status(200).json({ live: true, records });
     }
@@ -801,7 +932,8 @@ export default async function handler(req, res) {
 
     if (['inbox', 'outbox', 'activity'].includes(resource)) {
       const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:Z1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:Z1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
-      const [rows] = await readRanges(req, [cfg[0]]);
+      const [rows, channelRows] = await readRanges(req, [cfg[0], channelRange]);
+      const channels = rowsToObjects(channelRows);
       const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID'])).reverse();
       const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Customer Name']]));
       const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
@@ -810,11 +942,12 @@ export default async function handler(req, res) {
         id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'],
         assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'],
         status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'], messageType: row['Message Type'], channel: row.Channel,
+        channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], displayNumber: row['WhatsApp Display Number'], wabaId: row['WABA ID'], conversationKey: row['Conversation Key'], routingStatus: row['Number Routing Status'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'] || row['WhatsApp Display Number'],
         source: row.Source || row['Webhook Source'], aiProcessed: truth(row['AI Processed']), aiProcessedAt: row['AI Processed At'],
         humanHandoverAt: row['Human Handover At'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase())
       }) : resource === 'outbox' ? ({
         id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'],
-        status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'],
+        status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'], channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], wabaId: row['WABA ID'], replyToMessageId: row['Reply To Message ID'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'], displayNumber: channelForMessage(row, channels)?.['Display Number'] || '',
         attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
         manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING'
       }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));

@@ -38,6 +38,19 @@ async function appendObject(token, sheet, object) {
   if (!response.ok) throw new Error(`Unable to write ${sheet}`);
 }
 
+async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
+  const rows = await readSheet(token, `${sheet}!A1:${maxColumn}2000`), headers = rows[0] || [], idIndex = headers.indexOf(idHeader);
+  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(id));
+  if (rowIndex < 1) return;
+  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
+  if (!data.length) return;
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  if (!response.ok) throw new Error(`Unable to update ${sheet}`);
+}
+
+const truth = value => clean(value).toUpperCase() === 'TRUE';
+const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
+
 async function updateOutboxStatus(token, providerId, status, errorMessage = '') {
   const rows = await readSheet(token, 'Message_Outbox!A1:Z1500');
   const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID');
@@ -67,27 +80,36 @@ export default async function handler(req, res) {
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}'), token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const leads = objects(await readSheet(token, 'Leads!A1:AF1000'));
+    const leads = objects(await readSheet(token, 'Leads!A1:AJ1000'));
     const applications = objects(await readSheet(token, 'Applications!A1:BG1000'));
-    const routes = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:T1000'));
+    const routes = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:Z1000'));
     const branches = objects(await readSheet(token, 'Branch_Master!A1:Q1000'));
     const existingMessageIds = new Set(objects(await readSheet(token, 'Customer_Inbox!A1:Z1200')).map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
-      const value = change.value || {}, numberId = value.metadata?.phone_number_id || '';
+      const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
         if (message.id && existingMessageIds.has(clean(message.id))) continue;
         const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
+        const route = routes.find(row => clean(row['Phone Number ID']) === clean(numberId)) || {};
+        const channelId = clean(route['Internal Channel ID']), branchId = clean(route['Branch ID']);
+        const branch = branches.find(row => clean(row['Branch ID']) === branchId) || {};
+        const routeRegion = canonicalRegion(route.Region || branch.Region) || 'UNASSIGNED';
+        const receivedAt = new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString();
+        const routeUsable = !!channelId && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone);
         if (!lead) {
-          const route = routes.find(row => clean(row['Phone Number ID']) === clean(numberId)) || {}, branchId = clean(route['Branch ID']);
-          const branch = branches.find(row => clean(row['Branch ID']) === branchId) || {}, timestamp = new Date().toISOString();
-          lead = { 'Lead ID': makeId('LEAD'), 'Customer Name': `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, Region: clean(branch.Region) || 'UNASSIGNED', 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
-          await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK' });
+          const timestamp = new Date().toISOString();
+          lead = { 'Lead ID': makeId('LEAD'), 'Customer Name': `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, Region: routeRegion, 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
+          await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', 'Primary WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK' });
           leads.push(lead);
+        } else {
+          await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], { 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt }, 'AJ');
         }
         const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
         const human = requiresManager(text);
-        await appendObject(token, 'Customer_Inbox', { 'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': clean(lead.Region) === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED' });
+        const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId });
+        if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'Z');
         const media = message.document || message.image;
         if (media?.id) await appendObject(token, 'Document_Log', {
           'Document ID': makeId('DOC'), 'Application ID': application['Application ID'] || '', 'Lead ID': lead['Lead ID'] || '',
