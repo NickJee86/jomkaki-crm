@@ -10,6 +10,25 @@ const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-produc
 const clean = value => String(value ?? '').trim();
 const customerAmount = value => clean(value).replace(/^RM\s*/i, '');
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
+const canonicalRole = value => clean(value).toUpperCase() === 'BRANCH_MANAGER' ? 'BRANCH_SUPERVISOR' : clean(value).toUpperCase();
+const canonicalBusinessAccess = (value, role = '') => {
+  const access = clean(value).toUpperCase();
+  if (['MOTOR', 'HANDPHONE', 'BOTH'].includes(access)) return access;
+  const normalizedRole = canonicalRole(role);
+  if (normalizedRole === 'ADMIN' || normalizedRole === 'STAFF') return 'BOTH';
+  if (normalizedRole === 'BUSINESS_MANAGER') return 'HANDPHONE';
+  return 'MOTOR';
+};
+const rowBusinessUnit = row => {
+  const explicit = clean(row?.['Business Unit'] || row?.businessUnit).toUpperCase();
+  if (['MOTOR', 'HANDPHONE'].includes(explicit)) return explicit;
+  const category = clean(row?.['Product Category'] || row?.productCategory || row?.['Enquiry Type'] || row?.model).toUpperCase();
+  return /(HANDPHONE|PHONE|IPHONE|SMARTPHONE)/.test(category) ? 'HANDPHONE' : 'MOTOR';
+};
+const businessPermitted = (session, row) => {
+  const access = canonicalBusinessAccess(session?.businessAccess, session?.role);
+  return access === 'BOTH' || access === rowBusinessUnit(row);
+};
 const isSyntheticLeadRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Customer Name'])) || /^(SYNTHETIC|TEST|QA|UAT)$/i.test(clean(row['Lead Source'] || row.Source)) || /\bSYNTHETIC\b/i.test(clean(row.Notes));
 const isSyntheticApplicationRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Applicant Name'])) || /^TEST\s+BRAND$/i.test(clean(row['Product Brand'])) || /\bSYNTHETIC\b/i.test(clean(row['Internal Notes']));
 
@@ -79,6 +98,20 @@ async function updateObject(req, sheet, idHeader, id, changes, maxColumn = 'BG')
   if (!response.ok) throw new Error(`Unable to update ${sheet} (${response.status})`);
 }
 
+async function ensureSheetHeaders(req, sheet, requiredHeaders) {
+  const [headerRows] = await readRanges(req, [`${sheet}!1:1`]);
+  const headers = headerRows?.[0] || [];
+  const missing = requiredHeaders.filter(header => !headers.includes(header));
+  if (!missing.length) return headers;
+  const token = await getAccessToken(req);
+  const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, {
+    method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] })
+  });
+  if (!response.ok) throw new Error(`Unable to extend ${sheet} headers (${response.status})`);
+  return [...headers, ...missing];
+}
+
 async function getSharePointToken() {
   const tenant = clean(process.env.SHAREPOINT_TENANT_ID), client = clean(process.env.SHAREPOINT_CLIENT_ID), secret = clean(process.env.SHAREPOINT_CLIENT_SECRET);
   if (!tenant || !client || !secret) throw new Error('SharePoint application credentials are not configured');
@@ -127,7 +160,7 @@ async function uploadDocument(req, file, caseId) {
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 const now = () => new Date().toISOString();
 const temporaryPassword = () => `JK!${crypto.randomBytes(6).toString('base64url')}9a`;
-const userSheetRange = 'CRM_User_Access!A1:R1000';
+const userSheetRange = 'CRM_User_Access!A1:S1000';
 const truth = value => clean(value).toUpperCase() === 'TRUE';
 const slug = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'ITEM';
 const amount = (value, label, optional = false) => {
@@ -175,19 +208,24 @@ async function accountRows(req) {
   return rowsToObjects(rows);
 }
 
-async function validatedAccountScope(req, role, region, branchId, saId) {
-  const normalizedRole = clean(role).toUpperCase();
-  const normalizedRegion = normalizedRole === 'ADMIN' ? 'ALL' : canonicalRegion(region);
-  if (normalizedRole === 'ADMIN') return { region: 'ALL', branchId: '', saId: '' };
+async function validatedAccountScope(req, role, region, branchId, saId, businessAccess) {
+  const normalizedRole = canonicalRole(role);
+  const normalizedBusinessAccess = canonicalBusinessAccess(businessAccess, normalizedRole);
+  const normalizedRegion = ['ADMIN', 'BUSINESS_MANAGER'].includes(normalizedRole) && canonicalRegion(region) === 'ALL' ? 'ALL' : canonicalRegion(region);
+  if (normalizedRole === 'ADMIN') return { region: 'ALL', branchId: '', saId: '', businessAccess: 'BOTH' };
+  if (normalizedRole === 'BUSINESS_MANAGER') {
+    if (!['ALL', 'EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(normalizedRegion)) throw new Error('A valid business region is required');
+    return { region: normalizedRegion, branchId: '', saId: '', businessAccess: normalizedBusinessAccess };
+  }
   if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(normalizedRegion)) throw new Error('A valid region is required');
-  if (normalizedRole === 'REGION_MANAGER') return { region: normalizedRegion, branchId: '', saId: '' };
+  if (normalizedRole === 'REGION_MANAGER') return { region: normalizedRegion, branchId: '', saId: '', businessAccess: normalizedBusinessAccess };
   const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
   const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
-  if (normalizedRole === 'BRANCH_MANAGER') {
+  if (normalizedRole === 'BRANCH_SUPERVISOR') {
     const branch = branches.find(row => clean(row['Branch ID']) === clean(branchId) && clean(row.Active).toUpperCase() === 'TRUE');
-    if (!branch) throw new Error('Branch Manager requires an active Branch ID');
+    if (!branch) throw new Error('Branch Supervisor requires an active Branch ID');
     if (canonicalRegion(branch.Region) !== normalizedRegion) throw new Error('The selected branch does not belong to this region');
-    return { region: normalizedRegion, branchId: clean(branchId), saId: '' };
+    return { region: normalizedRegion, branchId: clean(branchId), saId: '', businessAccess: normalizedBusinessAccess };
   }
   const advisor = advisors.find(row => clean(row['SA ID']) === clean(saId) && clean(row.Active).toUpperCase() === 'TRUE');
   if (!advisor) throw new Error('Staff requires an active SA ID');
@@ -195,11 +233,20 @@ async function validatedAccountScope(req, role, region, branchId, saId) {
   const branch = branches.find(row => clean(row['Branch ID']) === advisorBranch && clean(row.Active).toUpperCase() === 'TRUE');
   if (!branch || canonicalRegion(advisor.Region || branch.Region) !== normalizedRegion) throw new Error('The selected sales advisor does not belong to this region');
   if (clean(branchId) && clean(branchId) !== advisorBranch) throw new Error('The selected sales advisor does not belong to this branch');
-  return { region: normalizedRegion, branchId: advisorBranch, saId: clean(saId) };
+  return { region: normalizedRegion, branchId: advisorBranch, saId: clean(saId), businessAccess: normalizedBusinessAccess };
 }
 
+const accountAccessDescription = identity => {
+  if (identity.role === 'ADMIN') return 'All CRM customers, accounts and settings';
+  const business = identity.businessAccess === 'BOTH' ? 'Motor and Handphone' : identity.businessAccess === 'HANDPHONE' ? 'Handphone' : 'Motor';
+  if (identity.role === 'BUSINESS_MANAGER') return `All ${business} customers and staff${identity.region === 'ALL' ? '' : ` in ${identity.region.replace('_', ' ')}`}`;
+  if (identity.role === 'REGION_MANAGER') return `All ${business} branches, staff and customers in ${identity.region.replace('_', ' ')}`;
+  if (identity.role === 'BRANCH_SUPERVISOR') return `All ${business} staff and customers in own branch`;
+  return `${business} customers and follow-ups assigned to own SA ID`;
+};
+
 const humanStatuses = new Set(['HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF']);
-const managerRoles = new Set(['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER']);
+const managerRoles = new Set(['ADMIN', 'REGION_MANAGER', 'BUSINESS_MANAGER', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER']);
 const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
@@ -277,7 +324,8 @@ function channelCredentials(channel, env = process.env) {
 }
 
 function publicAccount(row) {
-  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role: row.Role, saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
+  const role = canonicalRole(row.Role);
+  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role, businessAccess: canonicalBusinessAccess(row['Business Access'], role), saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
 }
 
 async function writeActivity(req, session, payload) {
@@ -295,21 +343,29 @@ function rowsToObjects(rows) {
 export function scopeData(session, leads, applications, branches) {
   if (session.role === 'ADMIN') return { leads, applications, leadIds: new Set(leads.map(x => x['Lead ID'])), applicationIds: new Set(applications.map(x => x['Application ID'])) };
   const branchRegion = Object.fromEntries(branches.map(row => [row['Branch ID'], canonicalRegion(row.Region)]));
+  const permittedLeads = leads.filter(row => businessPermitted(session, row));
+  const permittedApplications = applications.filter(row => businessPermitted(session, row));
   if (session.role === 'STAFF') {
-    const scopedLeads = leads.filter(row => clean(row['Assigned SA ID']) === clean(session.saId));
+    const scopedLeads = permittedLeads.filter(row => clean(row['Assigned SA ID']) === clean(session.saId));
     const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-    const scopedApplications = applications.filter(row => clean(row['Assigned SA ID']) === clean(session.saId) || leadIds.has(row['Lead ID']));
+    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned SA ID']) === clean(session.saId) || leadIds.has(row['Lead ID']));
     return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
   }
-  if (session.role === 'BRANCH_MANAGER') {
-    const scopedLeads = leads.filter(row => clean(row['Selected Branch ID']) === clean(session.branchId));
+  if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role)) {
+    const scopedLeads = permittedLeads.filter(row => clean(row['Selected Branch ID']) === clean(session.branchId));
     const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-    const scopedApplications = applications.filter(row => clean(row['Assigned Branch ID']) === clean(session.branchId) || leadIds.has(row['Lead ID']));
+    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned Branch ID']) === clean(session.branchId) || leadIds.has(row['Lead ID']));
     return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
   }
-  const scopedLeads = leads.filter(row => canonicalRegion(row.Region) === session.region);
+  if (session.role === 'BUSINESS_MANAGER') {
+    const scopedLeads = permittedLeads.filter(row => session.region === 'ALL' || canonicalRegion(row.Region) === session.region);
+    const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
+    const scopedApplications = permittedApplications.filter(row => leadIds.has(row['Lead ID']) || session.region === 'ALL' || branchRegion[row['Assigned Branch ID']] === session.region);
+    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+  }
+  const scopedLeads = permittedLeads.filter(row => canonicalRegion(row.Region) === session.region);
   const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-  const scopedApplications = applications.filter(row => leadIds.has(row['Lead ID']) || branchRegion[row['Assigned Branch ID']] === session.region);
+  const scopedApplications = permittedApplications.filter(row => leadIds.has(row['Lead ID']) || branchRegion[row['Assigned Branch ID']] === session.region);
   return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
 }
 
@@ -374,24 +430,26 @@ export default async function handler(req, res) {
       if (['createUser', 'resetUserPassword', 'setUserEnabled', 'editUser', 'unlockUser', 'migrateLegacyAccounts'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         if (action === 'migrateLegacyAccounts') {
+          await ensureSheetHeaders(req, 'CRM_User_Access', ['Business Access']);
           const migrated = await migrateEnvironmentAccounts(req);
           await writeActivity(req, session, { type: 'CRM_LEGACY_ACCOUNTS_MIGRATED', description: `${migrated} legacy accounts migrated to CRM management` });
           return res.status(200).json({ live: true, migrated });
         }
+        await ensureSheetHeaders(req, 'CRM_User_Access', ['Business Access']);
         const users = await accountRows(req);
         if (action === 'createUser') {
-          const username = clean(body.username).toLowerCase(), name = clean(body.name), role = clean(body.role).toUpperCase();
+          const username = clean(body.username).toLowerCase(), name = clean(body.name), role = canonicalRole(body.role);
           if (!/^[a-z0-9._-]{3,40}$/.test(username)) throw new Error('Username must be 3–40 letters, numbers, dots, dashes or underscores');
-          if (!name || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Name and a valid role are required');
+          if (!name || !['ADMIN', 'REGION_MANAGER', 'BUSINESS_MANAGER', 'BRANCH_SUPERVISOR', 'STAFF'].includes(role)) throw new Error('Name and a valid role are required');
           if (users.some(row => clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
-          const identity = await validatedAccountScope(req, role, body.region, body.branchId, body.saId);
+          const identity = { role, ...(await validatedAccountScope(req, role, body.region, body.branchId, body.saId, body.businessAccess)) };
           const password = clean(body.password) || temporaryPassword();
           if (password.length < 10) throw new Error('Temporary password must contain at least 10 characters');
           const accountId = `${role.replace('_MANAGER', '').replace('REGION', 'REG')}-${Date.now()}`;
           const timestamp = now();
           await appendObject(req, 'CRM_User_Access', {
-            'Account ID': accountId, Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region,
-            Status: 'ACTIVE', 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${identity.region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID',
+            'Account ID': accountId, Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region, 'Business Access': identity.businessAccess,
+            Status: 'ACTIVE', 'Access Scope': accountAccessDescription(identity),
             'Login Enabled': 'TRUE', 'Last Verified': timestamp.slice(0, 10), Notes: 'Created in CRM by Admin', 'Password Hash': hashPassword(password), 'Must Change Password': 'TRUE', 'Failed Login Attempts': '0', 'Locked Until': '', 'Last Password Reset': timestamp, 'Updated At': timestamp
           });
           await writeActivity(req, session, { type: 'CRM_USER_CREATED', description: `${role} account ${username} created` });
@@ -410,13 +468,13 @@ export default async function handler(req, res) {
           return res.status(200).json({ live: true, temporaryPassword: password });
         }
         if (action === 'editUser') {
-          const role = clean(body.role).toUpperCase(), name = clean(body.name), username = clean(body.username).toLowerCase();
-          if (!name || !/^[a-z0-9._-]{3,40}$/.test(username) || !['ADMIN', 'REGION_MANAGER', 'BRANCH_MANAGER', 'STAFF'].includes(role)) throw new Error('Valid name, username and role are required');
+          const role = canonicalRole(body.role), name = clean(body.name), username = clean(body.username).toLowerCase();
+          if (!name || !/^[a-z0-9._-]{3,40}$/.test(username) || !['ADMIN', 'REGION_MANAGER', 'BUSINESS_MANAGER', 'BRANCH_SUPERVISOR', 'STAFF'].includes(role)) throw new Error('Valid name, username and role are required');
           if (users.some(row => row['Account ID'] !== accountId && clean(row.Username).toLowerCase() === username)) throw new Error('This username already exists');
           if (clean(record.Username).toLowerCase() === clean(session.username).toLowerCase() && role !== 'ADMIN') throw new Error('You cannot remove your own Administrator access');
           if (clean(record.Role).toUpperCase() === 'ADMIN' && role !== 'ADMIN' && activeAdmins.length <= 1) throw new Error('At least one active Administrator must remain');
-          const identity = await validatedAccountScope(req, role, body.region, body.branchId, body.saId);
-          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region, 'Access Scope': role === 'ADMIN' ? 'All CRM customers, accounts and settings' : role === 'REGION_MANAGER' ? `All ${identity.region.replace('_', ' ')} branches, staff and customers` : role === 'BRANCH_MANAGER' ? 'All staff and customers in own branch' : 'Customers and follow-ups assigned to own SA ID', 'Updated At': now() }, 'R');
+          const identity = { role, ...(await validatedAccountScope(req, role, body.region, body.branchId, body.saId, body.businessAccess)) };
+          await updateObject(req, 'CRM_User_Access', 'Account ID', accountId, { Username: username, 'Display Name': name, Role: role, 'SA ID': identity.saId, 'Branch ID': identity.branchId, Region: identity.region, 'Business Access': identity.businessAccess, 'Access Scope': accountAccessDescription(identity), 'Updated At': now() }, 'S');
           await writeActivity(req, session, { type: 'CRM_USER_EDITED', description: `${username} account details updated` });
           return res.status(200).json({ live: true, accountId });
         }
@@ -575,30 +633,42 @@ export default async function handler(req, res) {
       }
       if (action === 'createApplication') {
         const customerName = clean(body.customerName), phone = clean(body.phone), catalogId = clean(body.catalogId);
+        const businessUnit = clean(body.businessUnit || body.productCategory).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
         const requestedRegion = canonicalRegion(body.region);
-        if (!customerName || !phone || !catalogId || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and a catalog motorcycle are required');
-        if (session.role !== 'ADMIN' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
-        const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
-        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-        if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
-        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
+        if (!customerName || !phone || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and application type are required');
+        const sessionBusinessAccess = canonicalBusinessAccess(session.businessAccess, session.role);
+        if (session.role !== 'ADMIN' && sessionBusinessAccess !== 'BOTH' && sessionBusinessAccess !== businessUnit) return res.status(403).json({ live: false, error: `Your account cannot submit ${businessUnit.toLowerCase()} applications.` });
+        if (session.role !== 'ADMIN' && session.region !== 'ALL' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
+        let brand = '', model = '', variant = '';
+        if (businessUnit === 'MOTOR') {
+          if (!catalogId) throw new Error('Select an active motorcycle from the Motor Catalog');
+          const [catalogRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000']);
+          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+          if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
+          brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
+        } else {
+          brand = clean(body.productBrand); model = clean(body.productModel); variant = clean(body.productVariant);
+          if (!brand || !model) throw new Error('Handphone brand and model are required');
+        }
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
-        const assignedBranchId = ['STAFF', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
+        const assignedBranchId = ['STAFF', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
         if (assignedSaId || assignedBranchId) {
           const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
           const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
           const branch = branches.find(row => clean(row['Branch ID']) === assignedBranchId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!branch || (session.role !== 'ADMIN' && canonicalRegion(branch.Region) !== requestedRegion)) throw new Error('The selected branch is outside the application region');
-          if (session.role === 'BRANCH_MANAGER' && assignedBranchId !== clean(session.branchId)) throw new Error('Branch Manager may create cases in their own branch only');
+          if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && assignedBranchId !== clean(session.branchId)) throw new Error('Branch Supervisor may create cases in their own branch only');
           if (assignedSaId) {
             const advisor = advisors.find(row => clean(row['SA ID']) === assignedSaId && clean(row.Active).toUpperCase() === 'TRUE');
             if (!advisor || clean(advisor['Branch ID']) !== assignedBranchId || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== requestedRegion)) throw new Error('The selected sales advisor does not belong to this branch and region');
           }
         }
+        await ensureSheetHeaders(req, 'Leads', ['Business Unit']);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)']);
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
-          Region: requestedRegion, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
+          Region: requestedRegion, 'Business Unit': businessUnit, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
           'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED',
           'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
         });
@@ -610,20 +680,20 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Product Category': 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Loan Tenure Years': clean(body.tenure),
+          'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': clean(body.tenure),
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
           'Document Status': 'PENDING', 'Minimum Documents Complete': 'FALSE', 'Missing Documents': clean(body.missingDocuments) || 'IC_FRONT, IC_BACK, INCOME_PROOF',
           'SA Review Required': 'FALSE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username, 'Updated By': session.username
         });
-        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `Manual application created for ${brand} ${model}` });
-        return res.status(201).json({ live: true, leadId, applicationId });
+        await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} application created for ${brand} ${model}` });
+        return res.status(201).json({ live: true, leadId, applicationId, businessUnit });
       }
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
         const uploaded = await uploadDocument(req, body.file, applicationId || leadId);
@@ -641,7 +711,7 @@ export default async function handler(req, res) {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
         const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
-        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'SA_Master!A1:L1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -653,11 +723,11 @@ export default async function handler(req, res) {
         if (!stages.includes(stage) || !statuses.includes(status)) throw new Error('A valid stage and status are required');
         const branchRegion = Object.fromEntries(branches.map(row => [clean(row['Branch ID']), canonicalRegion(row.Region)]));
         if (branchId && (!branchRegion[branchId] || (session.role !== 'ADMIN' && branchRegion[branchId] !== session.region))) throw new Error('The selected branch is outside your access');
-        if (session.role === 'BRANCH_MANAGER' && branchId !== clean(session.branchId)) throw new Error('Branch Manager may assign cases inside their own branch only');
+        if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && branchId !== clean(session.branchId)) throw new Error('Branch Supervisor may assign cases inside their own branch only');
         if (saId) {
           const advisor = salesAdvisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!advisor || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== session.region)) throw new Error('The selected sales advisor is outside your access');
-          if (session.role === 'BRANCH_MANAGER' && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
+          if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
           if (branchId && clean(advisor['Branch ID']) !== branchId) throw new Error('The selected sales advisor does not belong to the selected branch');
         }
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
@@ -674,7 +744,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Document_Log!A1:Y1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
         if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
@@ -687,13 +757,20 @@ export default async function handler(req, res) {
       }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
-        const [leadRows, applicationRows, branchRows, catalogRows] = await readRanges(req, ['Leads!A1:AF1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Motor_Model_Catalog!A1:Q1000']);
+        const [leadRows, applicationRows, branchRows, catalogRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Motor_Model_Catalog!A1:Q1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
-        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-        if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
+        const businessUnit = rowBusinessUnit(record);
+        let brand = '', model = '', variant = '';
+        if (businessUnit === 'MOTOR') {
+          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+          if (!catalogRecord) throw new Error('Select an active motorcycle from the Motor Catalog');
+          brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
+        } else {
+          brand = clean(body.productBrand); model = clean(body.productModel); variant = clean(body.productVariant);
+        }
         const changes = {
           'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
           'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
@@ -703,22 +780,23 @@ export default async function handler(req, res) {
           'Occupation Category': clean(body.occupationCategory), 'Reference 1 Name': clean(body.reference1Name),
           'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
-          'Reference 2 Relationship': clean(body.reference2Relationship), 'Product Category': clean(body.productCategory) || 'MOTORCYCLE',
-          'Product Brand': clean(catalogRecord.Brand), 'Product Model': clean(catalogRecord.Model), 'Product Variant': clean(catalogRecord.Variant) || 'Standard', 'Loan Tenure Years': clean(body.loanTenureYears),
+          'Reference 2 Relationship': clean(body.reference2Relationship), 'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
+          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': clean(body.loanTenureYears),
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Updated By': session.username
         };
         if (clean(body.applicantIcNumber)) changes['Applicant IC Number'] = clean(body.applicantIcNumber);
-        if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, motor brand and model are required');
+        if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, product brand and model are required');
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Loan tenure must be 3, 4 or 5 years');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
-        await updateObject(req, 'Applications', 'Application ID', applicationId, changes);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)']);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BK');
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AJ1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000', 'Customer_Inbox!A1:Z1200', 'Message_Outbox!A1:Z1500', 'SA_Master!A1:L1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -780,11 +858,11 @@ export default async function handler(req, res) {
           if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to assign a human handover.' });
           const saId = clean(body.saId), advisor = advisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!advisor) throw new Error('Select an active sales advisor');
-          if (session.role === 'BRANCH_MANAGER' && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('This sales advisor is outside your branch');
+          if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('This sales advisor is outside your branch');
           if (session.role === 'REGION_MANAGER' && canonicalRegion(advisor.Region) !== session.region) throw new Error('This sales advisor is outside your region');
           const assignedBranchId = clean(advisor['Branch ID']);
           if (inboxRecord['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now() }, 'AF');
-          if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BG');
+          if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BK');
           await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': 'ASSIGNED_TO_STAFF', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
           await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: 'CRM_HANDOVER_ASSIGNED', description: `Human handover assigned to ${saId}` });
           return res.status(200).json({ live: true, messageId, saId });
@@ -806,7 +884,7 @@ export default async function handler(req, res) {
   }
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
-  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: session.role, region: session.region, saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
+  if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: canonicalRole(session.role), region: session.region, businessAccess: canonicalBusinessAccess(session.businessAccess, session.role), saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
   if (resource === 'integrations') return res.status(200).json({ live: true, records: publicIntegrationRecords(process.env), readiness: integrationReadiness(process.env), reportingFields: FUTURE_REPORTING_FIELDS });
   try {
     if (resource === 'channels') {
@@ -815,7 +893,8 @@ export default async function handler(req, res) {
       const records = rowsToObjects(channelRows).filter(row => row['Internal Channel ID']).map(row => publicChannel(row, branches)).filter(row => {
         if (session.role === 'ADMIN') return true;
         if (session.role === 'REGION_MANAGER') return row.region === session.region;
-        if (session.role === 'BRANCH_MANAGER') return row.region === session.region && (!row.branchId || row.branchId === session.branchId);
+        if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role)) return row.region === session.region && (!row.branchId || row.branchId === session.branchId);
+        if (session.role === 'BUSINESS_MANAGER') return session.region === 'ALL' || row.region === session.region;
         return false;
       });
       return res.status(200).json({ live: true, records, capacity: { EAST_MALAYSIA: 5, WEST_MALAYSIA: 5 }, secretsExposed: false });
@@ -824,7 +903,7 @@ export default async function handler(req, res) {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AJ1000', 'Applications!A1:BG1000', 'Branch_Master!A1:Q1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AL1000', 'Applications!A1:BK1000', 'Branch_Master!A1:Q1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -845,9 +924,9 @@ export default async function handler(req, res) {
       const latest = latestApplicationByLead(businessApplications);
       const records = [...businessLeads].reverse().map(row => {
         const app = latest.get(row['Lead ID']) || {};
-        return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region, synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
+        return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region, businessUnit: rowBusinessUnit(Object.keys(app).length ? app : row), synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
           source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
-          model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || row['Enquiry Type'] || 'Motor enquiry',
+          model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || row['Enquiry Type'] || `${rowBusinessUnit(row) === 'HANDPHONE' ? 'Handphone' : 'Motor'} enquiry`,
           productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
           tenure: app['Loan Tenure Years'], status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'],
           sa: row['Assigned SA ID'] || app['Assigned SA ID'] || 'Unassigned', branch: row['Selected Branch ID'] || app['Assigned Branch ID'] || '', state: row.State, city: row['City or Area'],
@@ -865,14 +944,15 @@ export default async function handler(req, res) {
       const records = [...businessApplications].reverse().map(row => {
         const docs = documentSummary(docsByApplication.get(row['Application ID']) || []);
         const zone = leadRegion[row['Lead ID']];
-        const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && canonicalRegion(p['Price Zone']) === zone) || {};
+        const businessUnit = rowBusinessUnit(row);
+        const quote = businessUnit === 'MOTOR' ? pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && canonicalRegion(p['Price Zone']) === zone) || {} : {};
         const tenure = clean(row['Loan Tenure Years']);
         const monthly = tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '';
         const ic = clean(row['Applicant IC Number']);
-        return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone, synthetic: isSyntheticApplicationRow(row),
+        return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), synthetic: isSyntheticApplicationRow(row),
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
-          tenure, deposit: effectiveDeposit(quote), monthly: customerAmount(monthly), priceZone: quote['Price Zone'], promotion: promotionApplies(quote) ? quote['Promotion Name'] : '',
+          tenure, deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)']) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '',
           branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.aiComplete ? 'AI_VERIFIED_COMPLETE' : docs.needsReview ? 'AI_EXCEPTION' : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
           missingDocuments: docs.aiComplete ? '' : (row['Missing Documents'] || docs.missing.join(', ')), documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
@@ -924,9 +1004,14 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'team') {
-      const [saRows] = await readRanges(req, ['SA_Master!A1:L1000']);
+      const [saRows, userRows] = await readRanges(req, ['SA_Master!A1:L1000', userSheetRange]);
       const branchNames = Object.fromEntries(branches.map(row => [row['Branch ID'], row['Branch Name']]));
-      const records = rowsToObjects(saRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || (session.role === 'STAFF' ? clean(row['SA ID']) === clean(session.saId) : session.role === 'BRANCH_MANAGER' ? clean(row['Branch ID']) === clean(session.branchId) : canonicalRegion(row.Region) === session.region))).map(row => ({ id: row['SA ID'], name: row['SA Name'], branch: branchNames[row['Branch ID']] || row['Branch ID'], branchId: row['Branch ID'], region: row.Region, accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] }));
+      const staffAccess = Object.fromEntries(rowsToObjects(userRows).filter(row => canonicalRole(row.Role) === 'STAFF' && row['SA ID']).map(row => [clean(row['SA ID']), canonicalBusinessAccess(row['Business Access'], row.Role)]));
+      const records = rowsToObjects(saRows).filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || (session.role === 'STAFF' ? clean(row['SA ID']) === clean(session.saId) : ['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? clean(row['Branch ID']) === clean(session.branchId) : session.region === 'ALL' || canonicalRegion(row.Region) === session.region))).map(row => {
+        const branch = branchNames[row['Branch ID']] || row['Branch ID'];
+        const branchBusinessUnit = /(HANDPHONE|IPHONE|SMARTPHONE)/i.test(`${row['Branch ID']} ${branch}`) ? 'HANDPHONE' : 'MOTOR';
+        return { id: row['SA ID'], name: row['SA Name'], branch, branchId: row['Branch ID'], region: row.Region, businessUnit: branchBusinessUnit, businessAccess: staffAccess[clean(row['SA ID'])] || 'BOTH', accepting: row['Accepting Leads'], lastAssigned: row['Last Assigned At'] };
+      });
       return res.status(200).json({ live: true, records, branches: branches.filter(row => clean(row.Active).toUpperCase() === 'TRUE' && (session.role === 'ADMIN' || canonicalRegion(row.Region) === session.region)).length });
     }
 
