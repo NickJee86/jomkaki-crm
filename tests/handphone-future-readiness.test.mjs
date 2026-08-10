@@ -96,6 +96,14 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(productUi, /five iPhone models are shown as five cards/i);
   assert.match(productUi, /Draft pricing safeguard/);
   assert.match(productUi, /pricing-pending/);
+  assert.match(productUi, /ONE PRICE PER STORAGE/);
+  assert.match(productUi, /Model and storage determine the price/);
+  assert.match(productUi, /Colour never changes the phone price/);
+  assert.match(productUi, /data-handphone-price-edit/);
+  assert.match(productUi, /pricingScope: handphone \? 'MODEL_STORAGE_ZONE'/);
+  assert.match(crm, /CRM_HANDPHONE_SHARED_PRICING_UPDATED/);
+  assert.match(crm, /CRM_HANDPHONE_SHARED_PRICING_CREATED/);
+  assert.match(crm, /storageFromVariant/);
   assert.match(productUi, /!\/TEMPLATE\/i/);
   assert.match(businessUi, /motorTenureField\.hidden=unit!=='MOTOR'/);
   assert.match(businessUi, /motorBranchField\.hidden=unit!=='MOTOR'/);
