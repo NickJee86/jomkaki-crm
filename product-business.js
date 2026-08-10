@@ -19,12 +19,14 @@
   }[colour] || '#dce5e8');
 
   function handphoneCatalogShowcase(rows) {
+    const admin = state.user?.role === 'ADMIN';
     const activeRows = rows.filter(item => item.active);
     const families = [...activeRows.reduce((map, item) => {
-      const entry = map.get(item.model) || { model: item.model, brand: item.brand, image: item.image, productPageUrl: item.productPageUrl, storage: new Set(), colours: new Set() };
+      const entry = map.get(item.model) || { model: item.model, brand: item.brand, image: item.image, productPageUrl: item.productPageUrl, storage: new Set(), colours: new Set(), variants: [] };
       const [storage, colour] = optionParts(item.variant);
       if (storage) entry.storage.add(storage);
       if (colour) entry.colours.add(colour);
+      entry.variants.push(item);
       if (!entry.image && item.image) entry.image = item.image;
       if (!entry.productPageUrl && item.productPageUrl) entry.productPageUrl = item.productPageUrl;
       map.set(item.model, entry);
@@ -32,7 +34,17 @@
     }, new Map()).values()];
     const capacities = new Set(activeRows.map(item => optionParts(item.variant)[0]).filter(Boolean));
     const colours = new Set(activeRows.map(item => optionParts(item.variant)[1]).filter(Boolean));
-    return `<section class="handphone-catalog-overview"><div class="handphone-overview-copy"><span class="catalog-family-badge">APPLE · IPHONE 17 FAMILY</span><h2>All current models, storage and colours</h2><p>Choose the exact option below. Stock is confirmed with the warehouse before the customer receives a final quote.</p><div class="handphone-summary-stats"><span><strong>${families.length}</strong> models</span><span><strong>${capacities.size}</strong> storage sizes</span><span><strong>${colours.size}</strong> colours</span><span><strong>${activeRows.length}</strong> selectable options</span></div></div></section><section class="handphone-family-grid">${families.map(family => `<article class="handphone-family-card"><div class="handphone-family-image">${family.image ? `<img src="${esc(family.image)}" alt="${esc(`${family.brand} ${family.model}`)}">` : '<span>No approved image</span>'}</div><div class="handphone-family-body"><span class="product-brand">${esc(family.brand)}</span><h3>${esc(family.model)}</h3><p class="option-label">Storage</p><div class="option-chip-row">${[...family.storage].map(storage => `<span class="product-option-chip">${esc(storage)}</span>`).join('')}</div><p class="option-label">Colours</p><div class="colour-option-list">${[...family.colours].map(colour => `<span class="colour-option"><i style="--colour:${colourTone(colour)}"></i>${esc(colour)}</span>`).join('')}</div>${family.productPageUrl ? `<a class="official-product-link" href="${esc(family.productPageUrl)}" target="_blank" rel="noopener">Official Apple product page</a>` : ''}</div></article>`).join('')}</section>`;
+    return `<section class="handphone-catalog-overview"><div class="handphone-overview-copy"><span class="catalog-family-badge">APPLE · IPHONE 17 FAMILY</span><h2>One catalog card per phone model</h2><p>Storage and colour are options inside each model, not separate products. The exact combination is selected only when creating an application.</p><div class="handphone-summary-stats"><span><strong>${families.length}</strong> catalog cards</span><span><strong>${capacities.size}</strong> storage sizes</span><span><strong>${colours.size}</strong> colours</span><span><strong>${activeRows.length}</strong> exact combinations</span></div></div></section><section class="handphone-family-grid">${families.map(family => `<article class="handphone-family-card"><div class="handphone-family-image">${family.image ? `<img src="${esc(family.image)}" alt="${esc(`${family.brand} ${family.model}`)}">` : '<span>No approved image</span>'}</div><div class="handphone-family-body"><span class="product-brand">${esc(family.brand)}</span><h3>${esc(family.model)}</h3><p class="option-label">Storage options</p><div class="option-chip-row">${[...family.storage].map(storage => `<span class="product-option-chip">${esc(storage)}</span>`).join('')}</div><p class="option-label">Colour options</p><div class="colour-option-list">${[...family.colours].map(colour => `<span class="colour-option"><i style="--colour:${colourTone(colour)}"></i>${esc(colour)}</span>`).join('')}</div><div class="handphone-card-actions">${family.productPageUrl ? `<a class="official-product-link" href="${esc(family.productPageUrl)}" target="_blank" rel="noopener">Official Apple page</a>` : ''}${admin ? `<button class="row-action" data-manage-phone-model="${esc(family.model)}">Manage ${family.variants.length} options</button>` : ''}</div></div></article>`).join('')}</section>`;
+  }
+
+  function openHandphoneModelOptions(model, rows) {
+    const options = rows.filter(item => item.model === model);
+    drawer(`${esc(model)} options`, 'Storage and colour combinations are kept behind one catalog card.', `<div class="handphone-option-note"><strong>Why these records are separate underneath</strong><span>Each exact storage and colour combination needs its own SKU for stock, AI selection and loan applications. Customers and staff still see one phone model card.</span></div><div class="table-card handphone-option-table"><table class="data-table"><thead><tr><th>Storage</th><th>Colour</th><th>Availability</th><th>Status</th><th>Admin</th></tr></thead><tbody>${options.map(item => { const [storage, colour] = optionParts(item.variant); return `<tr><td><strong>${esc(storage || 'Standard')}</strong></td><td><span class="colour-option compact"><i style="--colour:${colourTone(colour)}"></i>${esc(colour || 'Default')}</span></td><td>${pretty(item.stock)}<small>${esc(item.regionAvailability || item.warehouseAvailability || 'Check warehouse')}</small></td><td>${pill(item.active ? 'Active' : 'Inactive', item.active)}</td><td><div class="inline-admin-actions"><button class="row-action" data-product-edit="${esc(item.id)}">Edit</button><button class="row-action secondary" data-product-toggle="${esc(item.id)}">${item.active ? 'Disable' : 'Restore'}</button></div></td></tr>`; }).join('')}</tbody></table></div>`);
+    bindProductCatalog();
+  }
+
+  function bindHandphoneCatalog(rows) {
+    document.querySelectorAll('[data-manage-phone-model]').forEach(button => button.onclick = () => openHandphoneModelOptions(button.dataset.managePhoneModel, rows));
   }
 
   function productCatalogTable(rows) {
@@ -48,6 +60,7 @@
       if (!confirm(`${enabled ? 'Restore' : 'Disable'} ${item.brand} ${item.model}?`)) return;
       try {
         await post('setCatalogItemEnabled', { catalogId: item.id, businessUnit: unitOf(item), enabled });
+        document.querySelector('.drawer-backdrop')?.remove();
         await refreshProductCatalog();
       } catch (error) { alert(error.message); }
     });
@@ -78,10 +91,11 @@
     const rows = state.data.catalog.filter(item => unitOf(item) === selected && !/TEMPLATE/i.test(String(item.id || ''))), admin = state.user?.role === 'ADMIN';
     const heading = selected === 'HANDPHONE' ? 'Handphone Catalog' : 'Motor Catalog';
     const description = admin ? `Manage ${unitLabel(selected)} models, options, images and availability in this dedicated catalog.` : `Approved active ${unitLabel(selected)} products.`;
-    app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? handphoneCatalogShowcase(rows) : '') + `<div class="smart-toolbar catalog-toolbar"><input id="catalogSearch" placeholder="Search brand, model, colour, storage or Catalog ID"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product>+ Add ${unitLabel(selected)} product</button>` : ''}</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">ADMIN OPTIONS</span><h2>${unitLabel(selected)} option records</h2></div><span>${rows.length} records</span></div><div id="catalogResults">${productCatalogTable(rows)}</div></section>`;
-    document.getElementById('catalogSearch').oninput = event => { const query = event.target.value.toLowerCase(); document.getElementById('catalogResults').innerHTML = productCatalogTable(rows.filter(item => Object.values(item).join(' ').toLowerCase().includes(query))); bindProductCatalog(); };
+    const phoneView = selected === 'HANDPHONE';
+    app.innerHTML = head(heading, description) + `<div class="smart-toolbar catalog-toolbar"><input id="catalogSearch" placeholder="Search brand, model, colour or storage"><span class="locked-business-pill ${phoneView ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product>+ Add ${unitLabel(selected)} product</button>` : ''}</div><div id="catalogResults">${phoneView ? handphoneCatalogShowcase(rows) : `<section class="panel">${productCatalogTable(rows)}</section>`}</div>${phoneView ? '<p class="notice catalog-structure-note"><strong>Clean catalog view:</strong> five iPhone models are shown as five cards. Exact storage and colour SKUs stay available under Manage options for Admin.</p>' : ''}`;
+    document.getElementById('catalogSearch').oninput = event => { const query = event.target.value.toLowerCase(), filtered = rows.filter(item => Object.values(item).join(' ').toLowerCase().includes(query)); document.getElementById('catalogResults').innerHTML = phoneView ? handphoneCatalogShowcase(filtered) : `<section class="panel">${productCatalogTable(filtered)}</section>`; phoneView ? bindHandphoneCatalog(filtered) : bindProductCatalog(); };
     document.querySelector('[data-new-product]')?.addEventListener('click', () => editProductCatalog({ businessUnit: selected }));
-    bindProductCatalog();
+    phoneView ? bindHandphoneCatalog(rows) : bindProductCatalog();
   };
 
   function productPricingTable(rows) {
