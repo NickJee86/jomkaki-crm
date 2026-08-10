@@ -12,6 +12,7 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
     'Branch Manager coverage',
     'Active catalog images',
     'Approved pricing completeness',
+    'Account password readiness',
     'Synthetic QA isolation',
     'Branches missing a Manager',
     'Active catalog image issues',
@@ -24,6 +25,9 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.match(app,/const pricingAmountReady=/);
   assert.match(app,/approvedPricingMissingFields\(price\)\.length/);
   assert.match(app,/price\.baseDeposit\?\?price\.deposit/);
+  assert.match(app,/passwordSetupGaps=state\.data\.users\.filter/);
+  assert.match(app,/Password setup required/);
+  assert.match(api,/passwordConfigured: Boolean\(clean\(row\['Password Hash'\]\)\)/);
   assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa','channels'\]/);
 });
 

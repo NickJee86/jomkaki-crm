@@ -13,6 +13,7 @@ const auth = await import(`data:text/javascript;base64,${Buffer.from(authSource)
 const passwordHash = auth.hashPassword('Temporary!123');
 let enabled = true;
 let authVersion = '2026-08-07T10:00:00.000Z';
+let includeLegacyPlaceholder = false;
 
 const headers = ['Account ID','Username','Display Name','Role','SA ID','Branch ID','Region','Status','Access Scope','Login Enabled','Last Verified','Notes','Password Hash','Must Change Password','Failed Login Attempts','Locked Until','Last Password Reset','Updated At','Business Access'];
 globalThis.fetch = async url => {
@@ -21,7 +22,9 @@ globalThis.fetch = async url => {
   if (target.includes('generateAccessToken')) return new Response(JSON.stringify({ accessToken: 'google-token' }), { status: 200 });
   if (target.includes('/values/CRM_User_Access')) {
     const row = ['STAFF-1','staff.one','Staff One','STAFF','SA-1','BR-1','EAST_MALAYSIA',enabled?'ACTIVE':'DISABLED','Own customers',enabled?'TRUE':'FALSE','','',passwordHash,'FALSE','0','','',authVersion,'BOTH'];
-    return new Response(JSON.stringify({ values: [headers, row] }), { status: 200 });
+    const values = [headers, row];
+    if (includeLegacyPlaceholder) values.push(['STAFF-LEGACY','legacy.staff','Legacy Staff','STAFF','SA-2','BR-1','EAST_MALAYSIA','ACTIVE','Own customers','TRUE','','Legacy Vercel account','','FALSE','0','','','','BOTH']);
+    return new Response(JSON.stringify({ values }), { status: 200 });
   }
   return new Response(JSON.stringify({}), { status: 200 });
 };
@@ -40,5 +43,15 @@ assert.equal(await auth.validateSession(request, signed), false, 'disabled accou
 enabled = true;
 authVersion = '2026-08-07T11:00:00.000Z';
 assert.equal(await auth.validateSession(request, signed), false, 'password reset or account edit must invalidate an older session version');
+
+process.env.CRM_STAFF_ACCOUNTS_JSON = JSON.stringify([{ username: 'legacy.staff', password: 'Legacy!Password123', name: 'Legacy Staff', region: 'EAST_MALAYSIA', saId: 'SA-2', branchId: 'BR-1', businessAccess: 'BOTH' }]);
+includeLegacyPlaceholder = true;
+const legacyAccount = await auth.authenticate({ headers: {} }, 'legacy.staff', 'Legacy!Password123');
+assert.equal(legacyAccount.authSource, 'environment', 'an active placeholder row without a hash must not shadow its Vercel account');
+const legacyHeaders = {};
+auth.setSession({ setHeader(name, value) { legacyHeaders[name] = value; } }, legacyAccount);
+const legacyCookie = legacyHeaders['Set-Cookie'].split(';')[0];
+const legacySession = auth.getSession({ headers: { cookie: legacyCookie } });
+assert.equal((await auth.validateSession({ headers: { cookie: legacyCookie } }, legacySession)).username, 'legacy.staff', 'a legacy environment session must remain valid while its Sheet row has no hash');
 
 console.log('auth-session tests passed');
