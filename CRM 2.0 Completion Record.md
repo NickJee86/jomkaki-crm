@@ -33,11 +33,17 @@ Production: https://jomkaki-crm.vercel.app/
 - Accounts support Motor, Handphone or Both business access.
 - Manual application submission starts with Motorcycle Loan or Handphone Loan and stores separately reportable product data.
 - Leads, Applications, Customer 360 and Reports identify and filter Motor and Handphone cases.
+- Admin can maintain separate Motor and Handphone catalogs, financing prices and promotions directly in CRM.
+- Handphone financing supports product price, deposit and 12/24/36/48-month tenures.
+- East and future West Handphone operations are separated by business unit, region, team and official WhatsApp number.
+- The same customer can hold separate Motor and Handphone Leads under one Customer ID, preventing mixed conversations while keeping a complete Customer 360 record.
+- Inbound and outbound messages preserve the exact official number used by the customer; no reply may silently cross to another business or region.
 
 ## Automation and data configuration
 
-- Make S02 is named `S02 — AI Exception Staff Round Robin` and remains `Inactive`.
-- No Make scenario was run during this change.
+- Make S02 blueprint is now business- and team-aware; exception assignment matches Business Unit + Team ID before selecting Staff.
+- Make S03C is Motor-only, and the new S03H blueprint is Handphone-only with its own catalog, pricing and customer reply wording.
+- Updated blueprints are import-ready but must remain inactive until connections are reselected and a synthetic scenario run passes.
 - `ASSIGNED_SA_REQUIRED_FOR_EVERY_LEAD=FALSE`.
 - `HANDOVER_AFTER_ATTEMPTS=3`.
 - Automatic LMS production submission remains disabled.
@@ -48,6 +54,7 @@ Production: https://jomkaki-crm.vercel.app/
 - Authentication/session tests passed.
 - Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
 - AI document-readiness tests passed for complete, missing and exception cases.
+- Motor/Handphone number isolation, shared Customer ID, monthly Handphone tenure and Make business/team routing tests passed.
 - Character-encoding checks passed for the frontend, index and README.
 - Vercel reported the final deployment `Ready` in Production.
 

@@ -6,7 +6,7 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 
 - Secure multi-user login with signed HTTP-only session cookies
 - Role-scoped access for company Admin, Regional Manager, Business Manager, Branch Supervisor and assigned Staff
-- Live dashboard, leads, applications, inbox, outbox, motor catalog, approved loan pricing and team directory
+- Live dashboard, leads, applications, inbox, outbox, Motor and Handphone catalogs, approved loan pricing and team directory
 - Create leads and update lead ownership, status, notes and follow-up date
 - Update application stage, status, branch, SA, review requirement and follow-up date
 - Queue WhatsApp messages safely in `Message_Outbox` while the Meta connection is pending
@@ -85,10 +85,15 @@ Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
 
 - One CRM account can be limited to `MOTOR`, `HANDPHONE` or `BOTH` business access.
 - Staff select Motorcycle Loan or Handphone Loan before creating a manual application.
-- Motor cases use the approved Motor Catalog; Handphone cases record brand, model, variant, product price and requested deposit.
+- Motor cases use the approved Motor Catalog and yearly tenures. Handphone cases use a separate approved Handphone Catalog, product price, requested deposit and 12/24/36/48-month tenures.
 - Handphone is managed as a separate business unit, not as a Motor branch.
-- Business Managers see only their permitted business unit. Regional Managers retain Motor regional oversight.
-- Leads, Applications, Customer 360 and Reports display and filter by business unit.
+- East and West Handphone teams are separate (`TEAM-HP-EAST` and `TEAM-HP-WEST`); West remains planned until the business is launched there.
+- Every official WhatsApp number is bound to one region, one business unit and one team. Replies are sent only through the exact number used by the customer.
+- One customer may have separate Motor and Handphone Leads while retaining one global Customer ID in Customer 360.
+- Business Managers see only their permitted business unit. Regional and branch roles remain restricted by their permitted region/team; Administrators see all.
+- Leads, Applications, Customer 360 and Reports display and filter by region, business unit, team and official number.
+- Admin can add, edit, disable and restore products, financing prices and promotions for both businesses directly in CRM.
+- AI-complete cases continue directly to LMS readiness. Only missing-document or failed-follow-up exceptions enter staff assignment.
 - Legacy `BRANCH_MANAGER` accounts remain compatible and are presented as Branch Supervisors.
 
 ## Human handover and account control
@@ -123,6 +128,6 @@ Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not u
 
 - WhatsApp Business Cloud remains pending until Meta phone verification rate limiting clears and the Make connection can be authorized.
 - LMSPRO remains disabled until the official vendor API contract, sandbox endpoint and secured test credentials are provided.
-- Make schedules must remain OFF during development and integration testing.
+- The business-aware Make blueprints are prepared and tested locally. Keep new or replaced scenarios OFF until their Google/OpenAI connections are reselected after import and one synthetic run passes.
 
 See `./JomKaki External Integration Activation Runbook.md` for the prepared WhatsApp Cloud, SharePoint and LMSPRO activation checklists. The provider-neutral LMSPRO field and document readiness adapter is in `api/_lmspro.js`; it performs no network request and remains disabled until the official vendor contract is approved.
