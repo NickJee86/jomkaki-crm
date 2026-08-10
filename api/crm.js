@@ -31,6 +31,27 @@ const businessAllows = (access, unit) => canonicalBusinessAccess(access) === 'BO
 const businessSheets = unit => canonicalBusinessUnit(unit) === 'HANDPHONE'
   ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'Q', pricingMax: 'AB', idPrefix: 'HP' }
   : { unit: 'MOTOR', catalog: 'Motor_Model_Catalog', pricing: 'Motor_Loan_Pricing', catalogMax: 'Q', pricingMax: 'Z', idPrefix: 'MTR' };
+const secondHandSheet = 'Second_Hand_Motor_Inventory';
+const secondHandRange = `${secondHandSheet}!A1:AF2000`;
+const secondHandSearchText = row => clean([row.Brand, row.Model, row.Variant, row['Engine CC'], row['AI Search Keywords']].filter(Boolean).join(' ')).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const secondHandNumber = value => Number(customerAmount(value)) || 0;
+export function rankSecondHandMotors(records = [], criteria = {}) {
+  const query = clean(criteria.query || criteria.model).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), brand = clean(criteria.brand).toLowerCase();
+  const region = clean(criteria.region).toUpperCase(), budget = secondHandNumber(criteria.budget), requestedCc = secondHandNumber(criteria.engineCc), tokens = query.split(' ').filter(token => token.length > 1);
+  return records.filter(row => clean(row['Stock Status']).toUpperCase() === 'AVAILABLE' && truth(row['Customer Visible'])).map(record => {
+    const text = secondHandSearchText(record), price = secondHandNumber(record['Selling Price (RM)']), recordRegion = clean(record.Region).toUpperCase(), recordBrand = clean(record.Brand).toLowerCase(), recordModel = clean(record.Model).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(), recordCc = secondHandNumber(record['Engine CC']);
+    const exactModel = Boolean(query && (recordModel === query || text.includes(query))), matchedTokens = tokens.filter(token => text.includes(token)).length;
+    const sameBrand = Boolean(brand && recordBrand === brand) || Boolean(tokens.length && tokens.includes(recordBrand)), sameRegion = Boolean(region && recordRegion === region);
+    const tolerance = Math.max(secondHandNumber(record['Similar Price Tolerance (RM)']) || 1500, budget * 0.2), priceDifference = budget && price ? Math.abs(price - budget) : 0, withinBudgetRange = Boolean(budget && price && priceDifference <= tolerance), ccDifference = requestedCc && recordCc ? Math.abs(recordCc - requestedCc) : 0;
+    let score = exactModel ? 1200 : 0;
+    score += matchedTokens * 90 + (sameBrand ? 180 : 0) + (sameRegion ? 160 : (region ? -80 : 0));
+    score += withinBudgetRange ? 320 - Math.min(260, priceDifference / 10) : (budget && price ? Math.max(-220, 120 - priceDifference / 20) : 0);
+    score += requestedCc && recordCc ? Math.max(-80, 100 - ccDifference) : 0;
+    score += truth(record['Image Approved']) ? 35 : 0;
+    score -= secondHandNumber(record['Mileage KM']) / 10000;
+    return { record, score, exactModel, sameRegion, priceDifference, matchType: exactModel ? 'EXACT_MODEL' : withinBudgetRange ? 'SIMILAR_PRICE' : sameBrand ? 'SAME_BRAND_ALTERNATIVE' : 'ALTERNATIVE' };
+  }).filter(match => match.exactModel || match.score > 0 || (!query && !budget)).sort((a, b) => b.score - a.score || a.priceDifference - b.priceDifference).slice(0, Math.max(1, Math.min(Number(criteria.limit) || 3, 10)));
+}
 const businessPermitted = (session, row) => {
   const access = canonicalBusinessAccess(session?.businessAccess, session?.role);
   const unit = rowBusinessUnit(row);
@@ -161,6 +182,29 @@ async function uploadDocument(req, file, caseId) {
   const safeName = (clean(file.name) || `document-${Date.now()}`).replace(/["*:<>?/\\|#%]/g, '-').slice(0, 180);
   return graph(token, `/drives/${drive.id}/items/${caseFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
     method: 'PUT', headers: { 'content-type': clean(file.type) || 'application/octet-stream' }, body: bytes
+  });
+}
+
+async function uploadSecondHandMotorPhoto(file, inventoryId) {
+  const mimeType = clean(file.type).toLowerCase();
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(mimeType)) throw new Error('Use a JPG, PNG, WebP or HEIC motor photo');
+  const bytes = Buffer.from(clean(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+  if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Motor photo must be between 1 byte and 5 MB');
+  const token = await getSharePointToken();
+  const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
+  const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
+  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
+  const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
+  const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
+  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
+  if (!drive) throw new Error('SharePoint document library was not found');
+  const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
+  const inventoryFolder = await ensureFolder(token, drive.id, root.id, 'CRM Second Hand Motor Photos');
+  const motorFolder = await ensureFolder(token, drive.id, inventoryFolder.id, inventoryId);
+  const extension = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const safeName = `${inventoryId}-${Date.now()}.${extension}`;
+  return graph(token, `/drives/${drive.id}/items/${motorFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
+    method: 'PUT', headers: { 'content-type': mimeType }, body: bytes
   });
 }
 
@@ -356,6 +400,26 @@ function rowsToObjects(rows) {
   const [headers = [], ...data] = rows;
   return data.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
 }
+
+const secondHandMotorVisibleToSession = (session, row) => {
+  if (!businessAllows(session.businessAccess, 'MOTOR')) return false;
+  if (session.role === 'ADMIN') return true;
+  if (!truth(row['Customer Visible']) || clean(row['Stock Status']).toUpperCase() !== 'AVAILABLE') return false;
+  if (session.role === 'STAFF') return canonicalRegion(row.Region) === canonicalRegion(session.region);
+  if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role)) return clean(row['Branch ID']) === clean(session.branchId);
+  return session.region === 'ALL' || canonicalRegion(row.Region) === canonicalRegion(session.region);
+};
+
+const publicSecondHandMotor = (row, branchNames = {}, session = {}) => ({
+  id: row['Inventory ID'], brand: row.Brand, model: row.Model, variant: row.Variant, year: row.Year,
+  registrationNumber: session.role === 'ADMIN' ? row['Registration Number'] : '', engineCc: row['Engine CC'], mileageKm: row['Mileage KM'],
+  conditionGrade: row['Condition Grade'], conditionNotes: row['Condition Notes'], branchId: row['Branch ID'], branch: branchNames[row['Branch ID']] || row['Branch ID'],
+  region: canonicalRegion(row.Region), location: row['Customer Location Label'] || branchNames[row['Branch ID']] || row['Branch ID'], viewingNotes: row['Viewing Notes'],
+  price: customerAmount(row['Selling Price (RM)']), deposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']),
+  photos: (truth(row['Image Approved']) || session.role === 'ADMIN') ? [row['Photo 1 URL'], row['Photo 2 URL'], row['Photo 3 URL']].filter(Boolean) : [], imageApproved: truth(row['Image Approved']), status: clean(row['Stock Status']).toUpperCase(),
+  searchKeywords: row['AI Search Keywords'], similarPriceTolerance: customerAmount(row['Similar Price Tolerance (RM)']), customerVisible: truth(row['Customer Visible']),
+  lastVerified: row['Last Verified At'], updated: row['Updated At'], updatedBy: row['Updated By'], internalNotes: session.role === 'ADMIN' ? row['Internal Notes'] : ''
+});
 
 export function scopeData(session, leads, applications, branches) {
   if (session.role === 'ADMIN') return { leads, applications, leadIds: new Set(leads.map(x => x['Lead ID'])), applicationIds: new Set(applications.map(x => x['Application ID'])) };
@@ -564,6 +628,70 @@ export default async function handler(req, res) {
         await updateObject(req, 'SA_Master', 'SA ID', saId, { 'Accepting Leads': accepting ? 'TRUE' : 'FALSE' }, 'L');
         await writeActivity(req, session, { type: accepting ? 'CRM_ADVISOR_ASSIGNMENT_RESUMED' : 'CRM_ADVISOR_ASSIGNMENT_PAUSED', description: `${advisor['SA Name'] || saId} ${accepting ? 'resumed' : 'paused'} automatic lead assignments` });
         return res.status(200).json({ live: true, saId, accepting });
+      }
+      if (['saveSecondHandMotor', 'setSecondHandMotorStatus', 'uploadSecondHandMotorPhoto'].includes(action)) {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const [inventoryRows, branchRows] = await readRanges(req, [secondHandRange, 'Branch_Master!A1:S1000']);
+        const inventory = rowsToObjects(inventoryRows), branches = rowsToObjects(branchRows).filter(row => truth(row.Active));
+        const inventoryId = clean(body.inventoryId), existing = inventory.find(row => clean(row['Inventory ID']) === inventoryId);
+        if (action === 'setSecondHandMotorStatus') {
+          if (!existing) throw new Error('Second-hand motor was not found');
+          const status = clean(body.status).toUpperCase();
+          if (!['AVAILABLE', 'RESERVED', 'SOLD', 'HOLD', 'INACTIVE'].includes(status)) throw new Error('Select a valid stock status');
+          const hidden = ['SOLD', 'INACTIVE'].includes(status);
+          await updateObject(req, secondHandSheet, 'Inventory ID', inventoryId, { 'Stock Status': status, ...(hidden ? { 'Customer Visible': 'FALSE' } : {}), 'Updated At': now(), 'Last Verified At': now().slice(0, 10), 'Updated By': session.username }, 'AF');
+          await writeActivity(req, session, { type: `CRM_SECOND_HAND_MOTOR_${status}`, description: `${existing.Brand} ${existing.Model} marked ${status}` });
+          return res.status(200).json({ live: true, inventoryId, status });
+        }
+        if (action === 'uploadSecondHandMotorPhoto') {
+          if (!existing) throw new Error('Save the second-hand motor before uploading photos');
+          const requestedSlot = Number(body.slot || 0);
+          const slot = [1, 2, 3].includes(requestedSlot) ? requestedSlot : [1, 2, 3].find(index => !clean(existing[`Photo ${index} URL`]));
+          if (!slot) throw new Error('This motor already has three photos. Choose a slot to replace.');
+          const uploaded = await uploadSecondHandMotorPhoto(body.file || {}, inventoryId);
+          await updateObject(req, secondHandSheet, 'Inventory ID', inventoryId, { [`Photo ${slot} URL`]: uploaded.webUrl, 'Image Approved': 'FALSE', 'Updated At': now(), 'Updated By': session.username }, 'AF');
+          await writeActivity(req, session, { type: 'CRM_SECOND_HAND_MOTOR_PHOTO_UPLOADED', description: `${inventoryId} photo ${slot} uploaded for approval` });
+          return res.status(201).json({ live: true, inventoryId, slot, photoUrl: uploaded.webUrl });
+        }
+
+        const brand = clean(body.brand), model = clean(body.model), variant = clean(body.variant) || 'Standard';
+        if (!brand || !model) throw new Error('Brand and model are required');
+        const year = amount(body.year, 'Year'), currentYear = new Date().getFullYear();
+        if (year < 1980 || year > currentYear + 1) throw new Error('Enter a valid motor year');
+        const branchId = clean(body.branchId), branch = branches.find(row => clean(row['Branch ID']) === branchId);
+        if (!branch) throw new Error('Select an active branch where the motor can be viewed');
+        const region = canonicalRegion(body.region || branch.Region);
+        if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(region) || canonicalRegion(branch.Region) !== region) throw new Error('The selected branch and region must match');
+        const conditionGrade = clean(body.conditionGrade).toUpperCase();
+        if (!['A', 'B', 'C', 'AS_IS'].includes(conditionGrade)) throw new Error('Select a valid condition grade');
+        const status = clean(body.stockStatus).toUpperCase();
+        if (!['AVAILABLE', 'RESERVED', 'SOLD', 'HOLD', 'INACTIVE'].includes(status)) throw new Error('Select a valid stock status');
+        const imageApproved = truth(body.imageApproved), customerVisible = truth(body.customerVisible);
+        const photoUrls = [1, 2, 3].map(index => validUrl(body[`photo${index}Url`] ?? existing?.[`Photo ${index} URL`], `Photo ${index} URL`));
+        const location = clean(body.location);
+        if (customerVisible && status !== 'AVAILABLE') throw new Error('Only Available motors can be shown to customers');
+        if (customerVisible && (!imageApproved || !photoUrls[0])) throw new Error('Approve at least one photo before showing this motor to customers');
+        if (customerVisible && !location) throw new Error('Add the customer-facing location before showing this motor');
+        const timestamp = now(), record = {
+          'Updated At': timestamp, Brand: brand, Model: model, Variant: variant, Year: year, 'Registration Number': clean(body.registrationNumber).toUpperCase(),
+          'Engine CC': amount(body.engineCc, 'Engine CC', true), 'Mileage KM': amount(body.mileageKm, 'Mileage', true), 'Condition Grade': conditionGrade, 'Condition Notes': clean(body.conditionNotes),
+          'Branch ID': branchId, Region: region, 'Selling Price (RM)': amount(body.price, 'Selling price'), 'Deposit (RM)': amount(body.deposit, 'Deposit', true),
+          'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment', true), 'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment', true), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment', true),
+          'Photo 1 URL': photoUrls[0], 'Photo 2 URL': photoUrls[1], 'Photo 3 URL': photoUrls[2], 'Image Approved': imageApproved ? 'TRUE' : 'FALSE', 'Stock Status': status,
+          'AI Search Keywords': clean(body.searchKeywords), 'Similar Price Tolerance (RM)': amount(body.similarPriceTolerance || 1500, 'Similar price tolerance'), 'Customer Visible': customerVisible ? 'TRUE' : 'FALSE',
+          'Last Verified At': validDate(body.lastVerified || timestamp.slice(0, 10), 'Last verified date'), 'Updated By': session.username, 'Internal Notes': clean(body.internalNotes),
+          'Customer Location Label': location, 'Viewing Notes': clean(body.viewingNotes)
+        };
+        if (existing) {
+          await updateObject(req, secondHandSheet, 'Inventory ID', inventoryId, record, 'AF');
+          await writeActivity(req, session, { type: 'CRM_SECOND_HAND_MOTOR_UPDATED', description: `${brand} ${model} second-hand inventory updated at ${location || branchId}` });
+          return res.status(200).json({ live: true, inventoryId });
+        }
+        let newInventoryId = `2H-${slug(brand)}-${slug(model)}-${Date.now().toString(36).toUpperCase()}`;
+        while (inventory.some(row => clean(row['Inventory ID']) === newInventoryId)) newInventoryId = `${newInventoryId}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+        await appendObject(req, secondHandSheet, { 'Inventory ID': newInventoryId, 'Created At': timestamp, ...record });
+        await writeActivity(req, session, { type: 'CRM_SECOND_HAND_MOTOR_CREATED', description: `${brand} ${model} added to second-hand inventory at ${location || branchId}` });
+        return res.status(201).json({ live: true, inventoryId: newInventoryId });
       }
       if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled'].includes(action)) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -1059,6 +1187,20 @@ export default async function handler(req, res) {
         classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, updated: row['Updated At']
       }));
       return res.status(200).json({ live: true, records });
+    }
+
+    if (resource === 'secondHandMotors' || resource === 'secondHandMotorRecommendations') {
+      const [rows] = await readRanges(req, [secondHandRange]);
+      const inventory = rowsToObjects(rows).filter(row => secondHandMotorVisibleToSession(session, row));
+      const branchNames = Object.fromEntries(branches.map(row => [row['Branch ID'], row['Branch Name']]));
+      if (resource === 'secondHandMotorRecommendations') {
+        const matches = rankSecondHandMotors(inventory, {
+          query: clean(req.query?.q || req.query?.model), brand: clean(req.query?.brand), budget: clean(req.query?.budget), engineCc: clean(req.query?.engineCc),
+          region: clean(req.query?.region || (session.region === 'ALL' ? '' : session.region)), limit: clean(req.query?.limit || 3)
+        });
+        return res.status(200).json({ live: true, records: matches.map(match => ({ ...publicSecondHandMotor(match.record, branchNames, session), matchType: match.matchType, exactModel: match.exactModel, sameRegion: match.sameRegion, priceDifference: match.priceDifference })) });
+      }
+      return res.status(200).json({ live: true, records: inventory.reverse().map(row => publicSecondHandMotor(row, branchNames, session)) });
     }
 
     if (resource === 'pricing') {
