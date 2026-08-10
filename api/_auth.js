@@ -102,8 +102,8 @@ export async function authenticate(req, username, password) {
   const wanted = clean(username || 'admin').toLowerCase();
   const dynamic = await dynamicAccounts(req);
   const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted);
-  if (dynamicAccount) {
-    if (!dynamicAccount.active || !dynamicAccount.passwordHash) return false;
+  if (dynamicAccount?.passwordHash) {
+    if (!dynamicAccount.active) return false;
     if (dynamicAccount.lockedUntil && new Date(dynamicAccount.lockedUntil).getTime() > Date.now()) return false;
     const token = await getAccessToken(req);
     if (verifyPassword(password, dynamicAccount.passwordHash)) {
@@ -114,17 +114,19 @@ export async function authenticate(req, username, password) {
     await updateLoginSecurity(token, dynamicAccount.rowNumber, attempts, attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : '');
     return false;
   }
+  if (dynamicAccount && !dynamicAccount.active) return false;
   return environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password))) || false;
 }
 
 export async function validateSession(req, session) {
   if (!session?.username) return false;
   const account = (await dynamicAccounts(req)).find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
-  if (account) {
-    if (!account.active || !account.passwordHash || (account.lockedUntil && new Date(account.lockedUntil).getTime() > Date.now())) return false;
+  if (account?.passwordHash) {
+    if (!account.active || (account.lockedUntil && new Date(account.lockedUntil).getTime() > Date.now())) return false;
     if (clean(session.authSource) !== 'sheet' || clean(session.authVersion) !== clean(account.authVersion)) return false;
     return { ...session, name: account.name, role: account.role, region: account.region, businessAccess: account.businessAccess, saId: account.saId || '', branchId: account.branchId || '', mustChangePassword: account.mustChangePassword };
   }
+  if (account && !account.active) return false;
   if (clean(session.authSource) === 'sheet') return false;
   const environment = environmentAccounts().find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
   return environment ? session : false;

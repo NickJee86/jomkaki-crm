@@ -342,7 +342,7 @@ function channelCredentials(channel, env = process.env) {
 
 function publicAccount(row) {
   const role = canonicalRole(row.Role);
-  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role, businessAccess: canonicalBusinessAccess(row['Business Access'], role), saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
+  return { id: row['Account ID'], username: row.Username, name: row['Display Name'], role, businessAccess: canonicalBusinessAccess(row['Business Access'], role), saId: row['SA ID'], branchId: row['Branch ID'], region: row.Region, status: row.Status, access: row['Access Scope'], loginEnabled: clean(row['Login Enabled']).toUpperCase() === 'TRUE', passwordConfigured: Boolean(clean(row['Password Hash'])), mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], lastVerified: row['Last Verified'], lastPasswordReset: row['Last Password Reset'], notes: row.Notes };
 }
 
 async function writeActivity(req, session, payload) {
