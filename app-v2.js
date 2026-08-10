@@ -395,11 +395,30 @@ function reportOption(value,label,current){
   return '<option value="'+esc(value)+'" '+(value===current?'selected':'')+'>'+esc(label)+'</option>';
 }
 
+function reportProductTypeKey(record={}){
+  const business=String(record.businessUnit||record.productCategory||'').trim().toUpperCase();
+  if(business==='HANDPHONE'||business.includes('PHONE'))return'HANDPHONE';
+  const condition=String(record.motorType||record.productCondition||record.vehicleCondition||record.inventoryId||record.secondHandInventoryId||'').trim().toUpperCase();
+  return /(SECOND|2ND|USED|PRE.?OWNED)/.test(condition)||record.inventoryId||record.secondHandInventoryId?'SECOND_HAND_MOTOR':'NEW_MOTOR';
+}
+
+function reportProductAllowed(record,view){
+  const key=reportProductTypeKey(record);
+  if(view==='ALL')return true;
+  if(view==='MOTOR_TOTAL')return key==='NEW_MOTOR'||key==='SECOND_HAND_MOTOR';
+  return key===view;
+}
+
+function reportProductViewLabel(view){
+  return({ALL:'All products',MOTOR_TOTAL:'Total motor (New + 2nd hand)',NEW_MOTOR:'New motor',SECOND_HAND_MOTOR:'2nd hand motor',HANDPHONE:'Handphone'})[view]||'All products';
+}
+
 function downloadAdminReport(report){
   const rows=[
     ['JomKaki Motor CRM Administrator Report'],
     ['Generated',new Intl.DateTimeFormat('en-MY',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kuala_Lumpur'}).format(new Date())],
     ['Period',report.period==='ALL'?'All time':'Last '+report.period+' days'],
+    ['Product view',reportProductViewLabel(report.productView)],
     ['Region',report.region==='ALL'?'All regions':pretty(report.region)],
     ['Branch',report.branch==='ALL'?'All branches':report.branch],
     ['Staff',report.staff==='ALL'?'All Staff':report.staff],
@@ -475,6 +494,7 @@ function reportsLegacy(){
   }
 
   const period=state.reportPeriod||'ALL';
+  const productView=state.reportProductView||'ALL';
   const region=state.reportRegion||'ALL';
   const branch=state.reportBranch||'ALL';
   const staff=state.reportStaff||'ALL';
@@ -487,12 +507,12 @@ function reportsLegacy(){
   const stageAllowed=value=>stage==='ALL'||String(value||'UNASSIGNED')===stage;
   const allLeadRegions=Object.fromEntries(state.data.leads.map(lead=>[lead.id,reportRegionKey(lead.region)]));
   const allAppRegions=Object.fromEntries(state.data.applications.map(application=>[application.id,reportRegionKey(application.region||allLeadRegions[application.leadId])]));
-  const baseApplications=state.data.applications.filter(application=>!isSyntheticApplication(application)&&regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)&&stageAllowed(application.stage));
+  const baseApplications=state.data.applications.filter(application=>!isSyntheticApplication(application)&&reportProductAllowed(application,productView)&&regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)&&stageAllowed(application.stage));
   const applications=baseApplications.filter(application=>reportWithin(application,period,['created','updated']));
   const baseApplicationIds=new Set(baseApplications.map(application=>application.id));
   const applicationLeadIds=new Set(applications.map(application=>application.leadId).filter(Boolean));
   const baseApplicationLeadIds=new Set(baseApplications.map(application=>application.leadId).filter(Boolean));
-  const baseLeads=state.data.leads.filter(lead=>!isSyntheticLead(lead)&&regionAllowed(lead.region)&&(branch==='ALL'||branchAllowed(lead.branch)||baseApplicationLeadIds.has(lead.id))&&(staff==='ALL'||staffAllowed(lead.sa)||baseApplicationLeadIds.has(lead.id))&&(stage==='ALL'||baseApplicationLeadIds.has(lead.id)));
+  const baseLeads=state.data.leads.filter(lead=>!isSyntheticLead(lead)&&(productView==='ALL'||reportProductAllowed(lead,productView)||baseApplicationLeadIds.has(lead.id))&&regionAllowed(lead.region)&&(branch==='ALL'||branchAllowed(lead.branch)||baseApplicationLeadIds.has(lead.id))&&(staff==='ALL'||staffAllowed(lead.sa)||baseApplicationLeadIds.has(lead.id))&&(stage==='ALL'||baseApplicationLeadIds.has(lead.id)));
   const leads=baseLeads.filter(lead=>reportWithin(lead,period,['created','time']));
   const baseLeadIds=new Set(baseLeads.map(lead=>lead.id));
   const recordAllowed=record=>(baseApplicationIds.has(record.applicationId)||baseLeadIds.has(record.leadId))&&regionAllowed(allAppRegions[record.applicationId]||allLeadRegions[record.leadId]);
@@ -531,18 +551,21 @@ function reportsLegacy(){
     return created&&completed?Math.max(0,(completed.valueOf()-created.valueOf())/86400000):0;
   }).filter(Boolean);
   const averageDocumentDays=collectionDurations.length?Math.round(collectionDurations.reduce((sum,value)=>sum+value,0)/collectionDurations.length*10)/10:0;
-  const activeCatalog=state.data.catalog.filter(item=>item.active);
-  const catalogImageIssues=state.data.catalog.filter(item=>item.active&&(!item.imageApproved||!item.imageUrl));
-  const activePricing=state.data.pricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED');
-  const pricingGaps=state.data.pricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||!price.year3||!price.year4||!price.year5));
-  const activePromotions=state.data.pricing.filter(price=>price.promotion&&price.promotionActive&&String(price.promotionStatus).toUpperCase()==='APPROVED');
+  const reportCatalog=state.data.catalog.filter(item=>reportProductAllowed(item,productView));
+  const reportPricing=state.data.pricing.filter(price=>reportProductAllowed(price,productView));
+  const activeCatalog=reportCatalog.filter(item=>item.active);
+  const catalogImageIssues=reportCatalog.filter(item=>item.active&&(!item.imageApproved||!item.imageUrl));
+  const activePricing=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED');
+  const pricingGaps=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||(!price.year3&&!price.month12)||(!price.year4&&!price.month24)||(!price.year5&&!price.month36)));
+  const activePromotions=reportPricing.filter(price=>price.promotion&&price.promotionActive&&String(price.promotionStatus).toUpperCase()==='APPROVED');
   const enabledAccounts=state.data.users.filter(user=>user.loginEnabled);
   const acceptingStaff=state.data.team.filter(member=>String(member.accepting).toUpperCase()==='TRUE');
-  const secondHandBase=(state.data.secondHandMotors||[]).filter(motor=>
+  const showSecondHandReport=['ALL','MOTOR_TOTAL','SECOND_HAND_MOTOR'].includes(productView);
+  const secondHandBase=showSecondHandReport?(state.data.secondHandMotors||[]).filter(motor=>
     regionAllowed(motor.region)&&branchAllowed(motor.branchId)&&
     (secondHandStatus==='ALL'||String(motor.status).toUpperCase()===secondHandStatus)&&
     (!secondHandQuery||Object.values(motor).flat().join(' ').toLowerCase().includes(secondHandQuery))
-  );
+  ):[];
   const secondHandMotors=secondHandBase.filter(motor=>reportWithin(motor,period,['updated','lastVerified']));
   const secondHandAvailable=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='AVAILABLE');
   const secondHandVisible=secondHandAvailable.filter(motor=>motor.customerVisible&&motor.imageApproved&&motor.photos?.length&&motor.location);
@@ -556,6 +579,10 @@ function reportsLegacy(){
   const secondHandRows=secondHandMotors.slice().sort((a,b)=>String(a.region).localeCompare(String(b.region))||String(a.branch).localeCompare(String(b.branch))||String(a.brand+' '+a.model).localeCompare(String(b.brand+' '+b.model))).map(motor=>[
     motor.id,[motor.brand,motor.model,motor.variant].filter(Boolean).join(' '),motor.year||'',pretty(motor.region),motor.branch||motor.branchId||'',motor.location||'',pretty(motor.status),motor.conditionGrade||'',motor.mileageKm||'',motor.price?`RM ${Number(motor.price).toLocaleString('en-MY')}`:'',motor.customerVisible?'Yes':'No',motor.imageApproved?'Approved':'Pending',motor.lastVerified||''
   ]);
+  const productMixGroups=adminGroup(applications,application=>reportProductViewLabel(reportProductTypeKey(application)));
+  const newMotorApplications=applications.filter(application=>reportProductTypeKey(application)==='NEW_MOTOR');
+  const secondHandApplications=applications.filter(application=>reportProductTypeKey(application)==='SECOND_HAND_MOTOR');
+  const handphoneApplications=applications.filter(application=>reportProductTypeKey(application)==='HANDPHONE');
 
   const regionKeys=region==='ALL'?['EAST_MALAYSIA','WEST_MALAYSIA']:[region];
   const regionRows=regionKeys.map(key=>{
@@ -637,6 +664,9 @@ function reportsLegacy(){
     'Quoted deposit total':`RM ${quotedDepositTotal.toLocaleString('en-MY')}`,
     'Average monthly instalment':`RM ${averageMonthly.toLocaleString('en-MY')}`,
     'Failed messages':failedMessages.length,
+    'New motor applications':newMotorApplications.length,
+    '2nd hand motor applications':secondHandApplications.length,
+    'Handphone applications':handphoneApplications.length,
     '2nd hand units':secondHandMotors.length,
     '2nd hand available':secondHandAvailable.length,
     '2nd hand AI-visible':secondHandVisible.length,
@@ -675,7 +705,7 @@ function reportsLegacy(){
   const lmsReportingRows=lmsIntegration.reportingReady?[
     ['Submitted to LMS',lmsSubmittedApplications.length],['Pending decision',lmsPending.length],['Approved',lmsApproved.length],['Rejected',lmsRejected.length],['Submission errors',lmsErrors.length],['Average decision time',averageLmsDecisionDays+' days']
   ]:[];
-  const report={period,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows};
+  const report={period,productView,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows};
   const accountRoleRows=Object.entries(adminGroup(state.data.users,user=>user.role)).map(entry=>[entry[0],entry[1]]);
   const branchOptions=[...new Map([...reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId]),...secondHandBase.filter(motor=>motor.branchId).map(motor=>[motor.branchId,motor.branch||motor.branchId])]).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const staffOptions=reportTeam.filter(member=>branch==='ALL'||member.branchId===branch).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
@@ -685,14 +715,16 @@ function reportsLegacy(){
   app.innerHTML=head('Company Reports & Analytics','Administrator view across every region, branch, customer workflow, team and control record.')+
     '<div class="smart-toolbar report-toolbar"><label>Report period<select id="reportPeriod">'+
       reportOption('ALL','All time',period)+reportOption('7','Last 7 days',period)+reportOption('30','Last 30 days',period)+reportOption('90','Last 90 days',period)+
+    '</select></label><label>Product view<select id="reportProductView">'+
+      reportOption('ALL','All products',productView)+reportOption('MOTOR_TOTAL','Total motor (New + 2nd hand)',productView)+reportOption('NEW_MOTOR','New motor',productView)+reportOption('SECOND_HAND_MOTOR','2nd hand motor',productView)+reportOption('HANDPHONE','Handphone',productView)+
     '</select></label><label>Region<select id="reportRegion">'+
       reportOption('ALL','All regions',region)+reportOption('EAST_MALAYSIA','East Malaysia',region)+reportOption('WEST_MALAYSIA','West Malaysia',region)+
     '</select></label><label>Branch<select id="reportBranch">'+reportOption('ALL','All branches',branch)+branchOptions.map(option=>reportOption(option[0],option[1],branch)).join('')+
     '</select></label><label>Staff<select id="reportStaff">'+reportOption('ALL','All Staff',staff)+staffOptions.map(member=>reportOption(member.id,member.name+' · '+member.id,staff)).join('')+
     '</select></label><label>Stage<select id="reportStage">'+reportOption('ALL','All stages',stage)+stageOptions.map(value=>reportOption(value,pretty(value),stage)).join('')+
-    '</select></label><label>2nd hand status<select id="reportSecondHandStatus">'+
+    '</select></label>'+(showSecondHandReport?'<label>2nd hand status<select id="reportSecondHandStatus">'+
       reportOption('ALL','All stock statuses',secondHandStatus)+reportOption('AVAILABLE','Available',secondHandStatus)+reportOption('RESERVED','Reserved',secondHandStatus)+reportOption('HOLD','Hold',secondHandStatus)+reportOption('SOLD','Sold',secondHandStatus)+reportOption('INACTIVE','Inactive',secondHandStatus)+
-    '</select></label><label>2nd hand model / location<input id="reportSecondHandQuery" value="'+esc(state.reportSecondHandQuery||'')+'" placeholder="All models and locations"></label><div class="toolbar-spacer"></div><button class="secondary" data-clear-second-hand-report>Clear 2H filter</button><button class="secondary" data-export-admin-report>Download complete CSV</button></div>'+
+    '</select></label><label>2nd hand model / location<input id="reportSecondHandQuery" value="'+esc(state.reportSecondHandQuery||'')+'" placeholder="All models and locations"></label>':'')+'<div class="toolbar-spacer"></div>'+(showSecondHandReport?'<button class="secondary" data-clear-second-hand-report>Clear 2H filter</button>':'')+'<button class="secondary" data-export-admin-report>Download complete CSV</button></div>'+
     '<div class="security-banner admin-report-banner"><div><strong>Administrator company-wide visibility</strong><p>This report includes every permitted company record. Customer IC numbers, original document links, passwords and integration secrets remain protected.</p></div><span class="pill green">ALL COMPANY DATA</span></div>'+
     '<div class="metric-grid">'+
       metric('Leads',leads.length,leadComparison.label)+
@@ -711,16 +743,20 @@ function reportsLegacy(){
       metric('Average instalment',averageMonthly?`RM ${averageMonthly.toLocaleString('en-MY')}`:'—',quotedApplications.length+' quoted applications')+
       metric('Promotions used',promotionApplications,'Applications with promotion')+
       metric('Failed messages',failedMessages.length,'Outbox recovery needed')+
-      metric('2nd hand units',secondHandMotors.length,'Current report filters')+
+      metric('New motor applications',newMotorApplications.length,'Selected product and operating filters')+
+      metric('2nd hand applications',secondHandApplications.length,'Linked to a used motor record')+
+      metric('Handphone applications',handphoneApplications.length,'Kept separate from motor totals')+
+      (showSecondHandReport?metric('2nd hand units',secondHandMotors.length,'Current report filters')+
       metric('2nd hand available',secondHandAvailable.length,secondHandVisible.length+' AI-visible')+
       metric('2nd hand reserved',secondHandReserved.length,'Held units')+
       metric('2nd hand sold',secondHandSold.length,'Status records')+
       metric('2nd hand stock value',`RM ${secondHandStockValue.toLocaleString('en-MY')}`,'Available selling prices')+
       metric('2nd hand stale',secondHandStale.length,'Not verified for 7+ days')+
-      metric('2nd hand photo issues',secondHandPhotoIssues.length,'Available but photo pending')+
+      metric('2nd hand photo issues',secondHandPhotoIssues.length,'Available but photo pending'):'')+
     '</div>'+
     '<div class="report-grid">'+
-      '<section class="report-card wide second-hand-report-card"><div class="panel-head"><div><h3>2nd hand inventory by region, branch and status</h3><p>Uses the selected period, Region, Branch, stock status and model/location filters together.</p></div></div><div class="report-split"><div><h4>Stock status</h4>'+adminBars(secondHandStatusGroups,10)+'</div><div><h4>Region</h4>'+adminBars(secondHandRegionGroups,5)+'</div></div>'+adminReportTable(['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],secondHandRows)+'</section>'+
+      '<section class="report-card"><h3>Product application mix</h3>'+adminBars(productMixGroups,10)+'</section>'+
+      (showSecondHandReport?'<section class="report-card wide second-hand-report-card"><div class="panel-head"><div><h3>2nd hand inventory by region, branch and status</h3><p>Uses the selected period, Product view, Region, Branch, stock status and model/location filters together.</p></div></div><div class="report-split"><div><h4>Stock status</h4>'+adminBars(secondHandStatusGroups,10)+'</div><div><h4>Region</h4>'+adminBars(secondHandRegionGroups,5)+'</div></div>'+adminReportTable(['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],secondHandRows)+'</section>':'')+
       integrationReportCard('WhatsApp Meta Cloud performance',metaIntegration,'<div class="metric-grid compact-metrics">'+
         metric('Cloud inbound',metaInbound.length,'Customer messages received')+
         metric('Cloud outbound',metaOutbound.length,'Messages sent through API')+
@@ -770,13 +806,14 @@ function reportsLegacy(){
     '</div>';
 
   document.getElementById('reportPeriod').onchange=event=>{state.reportPeriod=event.target.value;reports()};
+  document.getElementById('reportProductView').onchange=event=>{state.reportProductView=event.target.value;reports()};
   document.getElementById('reportRegion').onchange=event=>{state.reportRegion=event.target.value;state.reportBranch='ALL';state.reportStaff='ALL';reports()};
   document.getElementById('reportBranch').onchange=event=>{state.reportBranch=event.target.value;state.reportStaff='ALL';reports()};
   document.getElementById('reportStaff').onchange=event=>{state.reportStaff=event.target.value;reports()};
   document.getElementById('reportStage').onchange=event=>{state.reportStage=event.target.value;reports()};
-  document.getElementById('reportSecondHandStatus').onchange=event=>{state.reportSecondHandStatus=event.target.value;reports()};
-  document.getElementById('reportSecondHandQuery').onchange=event=>{state.reportSecondHandQuery=event.target.value;reports()};
-  document.querySelector('[data-clear-second-hand-report]').onclick=()=>{state.reportSecondHandStatus='ALL';state.reportSecondHandQuery='';reports()};
+  document.getElementById('reportSecondHandStatus')?.addEventListener('change',event=>{state.reportSecondHandStatus=event.target.value;reports()});
+  document.getElementById('reportSecondHandQuery')?.addEventListener('change',event=>{state.reportSecondHandQuery=event.target.value;reports()});
+  document.querySelector('[data-clear-second-hand-report]')?.addEventListener('click',()=>{state.reportSecondHandStatus='ALL';state.reportSecondHandQuery='';reports()});
   document.querySelector('[data-export-admin-report]').onclick=()=>downloadAdminReport(report);
 }
 
