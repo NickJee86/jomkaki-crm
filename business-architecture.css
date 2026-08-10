@@ -10,4 +10,37 @@
 .business-pill.handphone{background:#fff0e8;color:#b94710}
 .business-architecture-banner{border-left:4px solid #f26522}
 .vacancy-ready{border-color:#acd8cf!important;background:#f5fbfa!important}
-@media(max-width:680px){.business-type-picker{grid-template-columns:1fr}}
+.locked-business-pill{display:inline-flex;align-items:center;min-height:38px;border:1px solid #cfe2df;border-radius:999px;padding:0 14px;background:#eef8f6;color:#087f73;font-size:12px;font-weight:800;letter-spacing:.03em;white-space:nowrap}
+.locked-business-pill.handphone{border-color:#f4c7ae;background:#fff3ec;color:#ad4618}
+.handphone-catalog-overview{position:relative;overflow:hidden;margin-bottom:16px;border:1px solid #f3c5ac;border-radius:22px;padding:26px;background:linear-gradient(122deg,#fff8f3 0%,#fff 58%,#f4fbfa 100%);box-shadow:0 14px 30px rgba(80,45,25,.07)}
+.handphone-catalog-overview:after{content:'17';position:absolute;right:26px;top:-28px;color:rgba(242,101,34,.08);font:800 150px Manrope,sans-serif;line-height:1;pointer-events:none}
+.handphone-overview-copy{position:relative;z-index:1;max-width:760px}
+.catalog-family-badge{display:inline-flex;border-radius:999px;padding:6px 10px;background:#f26522;color:#fff;font-size:10px;font-weight:800;letter-spacing:.12em}
+.handphone-overview-copy h2{margin:12px 0 7px;color:#0a293a;font:800 24px Manrope,sans-serif}
+.handphone-overview-copy p{max-width:660px;margin:0;color:#607584;line-height:1.55}
+.handphone-summary-stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.handphone-summary-stats span{display:inline-flex;align-items:baseline;gap:5px;border:1px solid #e3e9ec;border-radius:12px;padding:8px 11px;background:rgba(255,255,255,.84);color:#607584;font-size:12px}
+.handphone-summary-stats strong{color:#0a293a;font:800 17px Manrope,sans-serif}
+.handphone-family-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:14px;margin-bottom:18px}
+.handphone-family-card{overflow:hidden;border:1px solid #dde7eb;border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(10,41,58,.06)}
+.handphone-family-image{display:flex;height:185px;align-items:center;justify-content:center;padding:20px;background:linear-gradient(145deg,#f8fafb,#eef3f4)}
+.handphone-family-image img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 12px 11px rgba(10,41,58,.12))}
+.handphone-family-image span{color:#78909c;font-size:12px}
+.handphone-family-body{padding:17px}
+.product-brand{color:#f26522;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.handphone-family-body h3{margin:4px 0 14px;color:#0a293a;font:800 18px Manrope,sans-serif}
+.option-label{margin:10px 0 6px;color:#768a96;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.option-chip-row,.colour-option-list,.catalog-option-line{display:flex;flex-wrap:wrap;gap:6px}
+.product-option-chip{display:inline-flex;align-items:center;border:1px solid #d8e4e8;border-radius:999px;padding:4px 8px;background:#f7fafb;color:#274555;font-size:11px;font-weight:700;white-space:nowrap}
+.colour-option{display:inline-flex;align-items:center;gap:5px;border:1px solid #e3e9ec;border-radius:999px;padding:4px 8px;background:#fff;color:#4b626f;font-size:11px;white-space:nowrap}
+.colour-option i{width:12px;height:12px;border:1px solid rgba(10,41,58,.18);border-radius:50%;background:var(--colour);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22)}
+.colour-option.compact{padding:3px 7px}
+.catalog-option-line{margin:6px 0}
+.official-product-link{display:inline-flex;margin-top:14px;color:#087f73;font-size:11px;font-weight:800;text-decoration:none}
+.official-product-link:hover{text-decoration:underline}
+.catalog-toolbar{margin-top:2px}
+.pricing-safety-banner{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px;border:1px solid #f0c29f;border-left:4px solid #f26522;border-radius:14px;padding:14px 16px;background:#fff8f2;color:#6b4a39}
+.pricing-safety-banner strong{flex:0 0 auto;color:#a54113}
+.pricing-safety-banner span{line-height:1.5}
+.pricing-pending{color:#a65a32;font-weight:800}
+@media(max-width:680px){.business-type-picker{grid-template-columns:1fr}.handphone-catalog-overview{padding:20px}.handphone-summary-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.handphone-family-grid{grid-template-columns:1fr}.pricing-safety-banner{display:block}.pricing-safety-banner strong{display:block;margin-bottom:5px}}

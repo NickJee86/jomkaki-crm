@@ -7,13 +7,37 @@
   const unitLabel = unit => unit === 'HANDPHONE' ? 'Handphone' : 'Motor';
   const unitOptions = selected => allowedUnits().map(unit => `<option value="${unit}" ${unit === selected ? 'selected' : ''}>${unitLabel(unit)}</option>`).join('');
   const productCatalogOptions = (unit, selected = '') => state.data.catalog.filter(item => item.active && unitOf(item) === unit).map(item => `<option value="${esc(item.id)}" ${item.id === selected ? 'selected' : ''}>${esc([item.brand, item.model, item.variant].filter(Boolean).join(' '))} · ${esc(item.id)}</option>`).join('');
+  const isHandphoneCatalogView = () => state.view === 'handphoneCatalog';
+  const isHandphonePricingView = () => state.view === 'handphonePricing';
+  const optionParts = variant => String(variant || '').split('·').map(part => part.trim()).filter(Boolean);
+  const pendingMoney = value => Number(value) > 0 ? money(value) : '<span class="pricing-pending">Pending</span>';
+  const colourTone = colour => ({
+    'Black': '#24262b', 'White': '#f6f3eb', 'Soft Pink': '#efd2d0', 'Mist Blue': '#b9ccd8',
+    'Sage': '#aeb9a4', 'Lavender': '#c9bfd7', 'Space Black': '#303033', 'Cloud White': '#f4f1e9',
+    'Light Gold': '#e3d2ad', 'Sky Blue': '#b9cbd8', 'Silver': '#d6d8da', 'Cosmic Orange': '#c7653c',
+    'Deep Blue': '#334c66'
+  }[colour] || '#dce5e8');
 
-  document.querySelector('[data-view="catalog"]')?.lastChild && (document.querySelector('[data-view="catalog"]').lastChild.textContent = 'Product Catalog');
-  document.querySelector('[data-view="pricing"]')?.lastChild && (document.querySelector('[data-view="pricing"]').lastChild.textContent = 'Product Pricing');
+  function handphoneCatalogShowcase(rows) {
+    const activeRows = rows.filter(item => item.active);
+    const families = [...activeRows.reduce((map, item) => {
+      const entry = map.get(item.model) || { model: item.model, brand: item.brand, image: item.image, productPageUrl: item.productPageUrl, storage: new Set(), colours: new Set() };
+      const [storage, colour] = optionParts(item.variant);
+      if (storage) entry.storage.add(storage);
+      if (colour) entry.colours.add(colour);
+      if (!entry.image && item.image) entry.image = item.image;
+      if (!entry.productPageUrl && item.productPageUrl) entry.productPageUrl = item.productPageUrl;
+      map.set(item.model, entry);
+      return map;
+    }, new Map()).values()];
+    const capacities = new Set(activeRows.map(item => optionParts(item.variant)[0]).filter(Boolean));
+    const colours = new Set(activeRows.map(item => optionParts(item.variant)[1]).filter(Boolean));
+    return `<section class="handphone-catalog-overview"><div class="handphone-overview-copy"><span class="catalog-family-badge">APPLE · IPHONE 17 FAMILY</span><h2>All current models, storage and colours</h2><p>Choose the exact option below. Stock is confirmed with the warehouse before the customer receives a final quote.</p><div class="handphone-summary-stats"><span><strong>${families.length}</strong> models</span><span><strong>${capacities.size}</strong> storage sizes</span><span><strong>${colours.size}</strong> colours</span><span><strong>${activeRows.length}</strong> selectable options</span></div></div></section><section class="handphone-family-grid">${families.map(family => `<article class="handphone-family-card"><div class="handphone-family-image">${family.image ? `<img src="${esc(family.image)}" alt="${esc(`${family.brand} ${family.model}`)}">` : '<span>No approved image</span>'}</div><div class="handphone-family-body"><span class="product-brand">${esc(family.brand)}</span><h3>${esc(family.model)}</h3><p class="option-label">Storage</p><div class="option-chip-row">${[...family.storage].map(storage => `<span class="product-option-chip">${esc(storage)}</span>`).join('')}</div><p class="option-label">Colours</p><div class="colour-option-list">${[...family.colours].map(colour => `<span class="colour-option"><i style="--colour:${colourTone(colour)}"></i>${esc(colour)}</span>`).join('')}</div>${family.productPageUrl ? `<a class="official-product-link" href="${esc(family.productPageUrl)}" target="_blank" rel="noopener">Official Apple product page</a>` : ''}</div></article>`).join('')}</section>`;
+  }
 
   function productCatalogTable(rows) {
     const admin = state.user?.role === 'ADMIN';
-    return `<div class="table-card"><table class="data-table"><thead><tr><th>Product & admin actions</th><th>Business</th><th>Category</th><th>Image</th><th>Stock check</th><th>Status</th></tr></thead><tbody>${rows.map(item => `<tr><td><strong>${esc(`${item.brand} ${item.model}`)}</strong><small>${esc(item.variant)} · ${esc(item.id)}</small>${admin ? `<div class="inline-admin-actions"><button class="row-action" data-product-edit="${esc(item.id)}">Edit</button><button class="row-action secondary" data-product-toggle="${esc(item.id)}">${item.active ? 'Disable' : 'Restore'}</button></div>` : ''}</td><td><span class="business-pill ${unitOf(item) === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(unitOf(item))}</span><small>${esc(item.operatingSystem || item.fuel || '')}</small></td><td>${pretty(item.category)}<small>${pretty(item.tier)}</small></td><td>${item.image ? `<img src="${esc(item.image)}" alt="${esc(`${item.brand} ${item.model}`)}" class="catalog-thumb">` : item.imageUrl ? 'Waiting for approval' : 'No image'}</td><td>${pretty(item.stock)}<small>${esc(item.regionAvailability || item.branchAvailability || item.warehouseAvailability || 'Confirm availability')}</small></td><td>${pill(item.active ? 'Active' : 'Inactive', item.active)}<small>${item.imageApproved ? 'Image approved' : 'Image not approved'}</small></td></tr>`).join('') || empty(6)}</tbody></table></div>`;
+    return `<div class="table-card"><table class="data-table"><thead><tr><th>Product & admin actions</th><th>Business</th><th>Category</th><th>Image</th><th>Stock check</th><th>Status</th></tr></thead><tbody>${rows.map(item => { const [storage, colour] = optionParts(item.variant); return `<tr><td><strong>${esc(`${item.brand} ${item.model}`)}</strong><div class="catalog-option-line">${storage ? `<span class="product-option-chip">${esc(storage)}</span>` : ''}${colour ? `<span class="colour-option compact"><i style="--colour:${colourTone(colour)}"></i>${esc(colour)}</span>` : ''}</div><small>${esc(item.id)}</small>${admin ? `<div class="inline-admin-actions"><button class="row-action" data-product-edit="${esc(item.id)}">Edit</button><button class="row-action secondary" data-product-toggle="${esc(item.id)}">${item.active ? 'Disable' : 'Restore'}</button></div>` : ''}</td><td><span class="business-pill ${unitOf(item) === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(unitOf(item))}</span><small>${esc(item.operatingSystem || item.fuel || '')}</small></td><td>${pretty(item.category)}<small>${pretty(item.tier)}</small></td><td>${item.image ? `<img src="${esc(item.image)}" alt="${esc(`${item.brand} ${item.model}`)}" class="catalog-thumb">` : item.imageUrl ? 'Waiting for approval' : 'No image'}</td><td>${pretty(item.stock)}<small>${esc(item.regionAvailability || item.branchAvailability || item.warehouseAvailability || 'Confirm availability')}</small></td><td>${pill(item.active ? 'Active' : 'Inactive', item.active)}<small>${item.imageApproved ? 'Image approved' : 'Image not approved'}</small></td></tr>`; }).join('') || empty(6)}</tbody></table></div>`;
   }
 
   function bindProductCatalog() {
@@ -30,10 +54,11 @@
   }
 
   async function refreshProductCatalog() {
+    const returnView = state.view === 'handphoneCatalog' ? 'handphoneCatalog' : 'catalog';
     const response = await get('catalog');
     state.data.catalog = response.records || [];
     loadedResources.add('catalog');
-    state.view = 'catalog';
+    state.view = returnView;
     render();
   }
 
@@ -48,11 +73,12 @@
   }
 
   catalog = function () {
-    const accessUnits = allowedUnits(), selected = accessUnits.includes(state.catalogBusiness) ? state.catalogBusiness : accessUnits[0];
+    const selected = isHandphoneCatalogView() ? 'HANDPHONE' : 'MOTOR';
     state.catalogBusiness = selected;
     const rows = state.data.catalog.filter(item => unitOf(item) === selected), admin = state.user?.role === 'ADMIN';
-    app.innerHTML = head('Product Catalog', admin ? 'Manage Motor and Handphone models in separate controlled catalogs.' : `Approved active ${unitLabel(selected)} products.`) + `<div class="smart-toolbar"><input id="catalogSearch" placeholder="Search brand, model, category or Catalog ID"><label>Business<select id="catalogBusiness">${unitOptions(selected)}</select></label><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product>+ Add ${unitLabel(selected)} product</button>` : ''}</div><section class="panel" id="catalogResults">${productCatalogTable(rows)}</section>`;
-    document.getElementById('catalogBusiness').onchange = event => { state.catalogBusiness = event.target.value; catalog(); };
+    const heading = selected === 'HANDPHONE' ? 'Handphone Catalog' : 'Motor Catalog';
+    const description = admin ? `Manage ${unitLabel(selected)} models, options, images and availability in this dedicated catalog.` : `Approved active ${unitLabel(selected)} products.`;
+    app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? handphoneCatalogShowcase(rows) : '') + `<div class="smart-toolbar catalog-toolbar"><input id="catalogSearch" placeholder="Search brand, model, colour, storage or Catalog ID"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product>+ Add ${unitLabel(selected)} product</button>` : ''}</div><section class="panel"><div class="panel-heading"><div><span class="eyebrow">ADMIN OPTIONS</span><h2>${unitLabel(selected)} option records</h2></div><span>${rows.length} records</span></div><div id="catalogResults">${productCatalogTable(rows)}</div></section>`;
     document.getElementById('catalogSearch').oninput = event => { const query = event.target.value.toLowerCase(); document.getElementById('catalogResults').innerHTML = productCatalogTable(rows.filter(item => Object.values(item).join(' ').toLowerCase().includes(query))); bindProductCatalog(); };
     document.querySelector('[data-new-product]')?.addEventListener('click', () => editProductCatalog({ businessUnit: selected }));
     bindProductCatalog();
@@ -60,10 +86,10 @@
 
   function productPricingTable(rows) {
     const admin = state.user?.role === 'ADMIN';
-    return `<div class="table-card"><table class="data-table"><thead><tr><th>Product & admin actions</th><th>Zone</th><th>Standard financing</th><th>Promotion</th><th>Validity</th><th>Status</th></tr></thead><tbody>${rows.map(item => { const handphone = unitOf(item) === 'HANDPHONE'; const instalments = handphone ? `${money(item.month12)} / ${money(item.month24)} / ${money(item.month36)} for 12 / 24 / 36 months${item.month48 ? ` · ${money(item.month48)} for 48 months` : ''}` : `${money(item.year3)} / ${money(item.year4)} / ${money(item.year5)} for 3 / 4 / 5 years`; return `<tr><td><strong>${esc(`${item.brand} ${item.model}`)}</strong><small>${unitLabel(unitOf(item))} · ${esc(item.variant)} · ${esc(item.id)}</small>${admin ? `<div class="inline-admin-actions"><button class="row-action" data-product-price-edit="${esc(item.id)}">Edit</button><button class="row-action secondary" data-product-price-toggle="${esc(item.id)}">${item.active ? 'Disable price' : 'Enable price'}</button>${item.promotion ? `<button class="row-action secondary" data-product-promotion-toggle="${esc(item.id)}">${item.promotionActive ? 'Disable promotion' : 'Enable promotion'}</button>` : ''}</div>` : ''}</td><td>${pretty(item.zone)}</td><td>${handphone && item.productPrice ? `${money(item.productPrice)} product price<br>` : ''}${money(item.baseDeposit || item.deposit)} deposit<small>${instalments}</small></td><td><strong>${esc(item.promotion || 'No promotion')}</strong><small>${item.promotionDeposit ? `${money(item.promotionDeposit)} deposit` : ''}</small></td><td>${esc(item.effective || 'No start')}<small>to ${esc(item.effectiveTo || 'No end')}</small></td><td>${pill(item.active ? item.status : 'Inactive', item.active && item.status === 'APPROVED')}<small>${item.promotion ? `Promotion: ${pretty(item.promotionStatus)} · ${item.promotionActive ? 'Enabled' : 'Disabled'}` : 'Standard pricing'}</small></td></tr>`; }).join('') || empty(6)}</tbody></table></div>`;
+    return `<div class="table-card"><table class="data-table"><thead><tr><th>Product & admin actions</th><th>Zone</th><th>Standard financing</th><th>Promotion</th><th>Validity</th><th>Status</th></tr></thead><tbody>${rows.map(item => { const handphone = unitOf(item) === 'HANDPHONE'; const instalments = handphone ? `${pendingMoney(item.month12)} / ${pendingMoney(item.month24)} / ${pendingMoney(item.month36)} for 12 / 24 / 36 months${item.month48 ? ` · ${money(item.month48)} for 48 months` : ' · 48 months Pending'}` : `${pendingMoney(item.year3)} / ${pendingMoney(item.year4)} / ${pendingMoney(item.year5)} for 3 / 4 / 5 years`; return `<tr><td><strong>${esc(`${item.brand} ${item.model}`)}</strong><small>${unitLabel(unitOf(item))} · ${esc(item.variant)} · ${esc(item.id)}</small>${admin ? `<div class="inline-admin-actions"><button class="row-action" data-product-price-edit="${esc(item.id)}">Edit</button><button class="row-action secondary" data-product-price-toggle="${esc(item.id)}">${item.active ? 'Disable price' : 'Enable price'}</button>${item.promotion ? `<button class="row-action secondary" data-product-promotion-toggle="${esc(item.id)}">${item.promotionActive ? 'Disable promotion' : 'Enable promotion'}</button>` : ''}</div>` : ''}</td><td>${pretty(item.zone)}</td><td>${handphone ? `<strong>${pendingMoney(item.productPrice)}</strong> product price<br>` : ''}${pendingMoney(item.baseDeposit || item.deposit)} deposit<small>${instalments}</small></td><td><strong>${esc(item.promotion || 'No promotion')}</strong><small>${item.promotionDeposit ? `${money(item.promotionDeposit)} deposit` : 'No active offer'}</small></td><td>${esc(item.effective || 'No start')}<small>to ${esc(item.effectiveTo || 'No end')}</small></td><td>${pill(item.active ? item.status : 'Draft / disabled', item.active && item.status === 'APPROVED')}<small>${item.promotion ? `Promotion: ${pretty(item.promotionStatus)} · ${item.promotionActive ? 'Enabled' : 'Disabled'}` : 'Standard pricing'}</small></td></tr>`; }).join('') || empty(6)}</tbody></table></div>`;
   }
 
-  async function refreshProductPricing() { const [pricingResponse, catalogResponse] = await Promise.all([get('pricing'), get('catalog')]); state.data.pricing = pricingResponse.records || []; state.data.catalog = catalogResponse.records || []; loadedResources.add('pricing'); loadedResources.add('catalog'); state.view = 'pricing'; render(); }
+  async function refreshProductPricing() { const returnView = state.view === 'handphonePricing' ? 'handphonePricing' : 'pricing'; const [pricingResponse, catalogResponse] = await Promise.all([get('pricing'), get('catalog')]); state.data.pricing = pricingResponse.records || []; state.data.catalog = catalogResponse.records || []; loadedResources.add('pricing'); loadedResources.add('catalog'); state.view = returnView; render(); }
 
   function bindProductPricing() {
     document.querySelectorAll('[data-product-price-edit]').forEach(button => button.onclick = () => editProductPricing(state.data.pricing.find(item => item.id === button.dataset.productPriceEdit)));
@@ -84,11 +110,12 @@
   }
 
   pricing = function () {
-    const accessUnits = allowedUnits(), selected = accessUnits.includes(state.pricingBusiness) ? state.pricingBusiness : accessUnits[0];
+    const selected = isHandphonePricingView() ? 'HANDPHONE' : 'MOTOR';
     state.pricingBusiness = selected;
     const rows = state.data.pricing.filter(item => unitOf(item) === selected), admin = state.user?.role === 'ADMIN';
-    app.innerHTML = head('Product Pricing & Promotions', admin ? 'Manage Motor and Handphone prices, financing and promotions without leaving CRM.' : `Approved ${unitLabel(selected)} customer pricing.`) + `<div class="smart-toolbar"><input id="pricingSearch" placeholder="Search product, zone, promotion or Pricing ID"><label>Business<select id="pricingBusiness">${unitOptions(selected)}</select></label><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product-price>+ Add ${unitLabel(selected)} price</button>` : ''}</div><section class="panel" id="pricingResults">${productPricingTable(rows)}</section>`;
-    document.getElementById('pricingBusiness').onchange = event => { state.pricingBusiness = event.target.value; pricing(); };
+    const heading = selected === 'HANDPHONE' ? 'Handphone Pricing' : 'Motor Pricing & Promotions';
+    const description = selected === 'HANDPHONE' ? 'Apple Malaysia retail prices are references only. Deposit and monthly instalments remain Draft until Admin approves JomKaki terms.' : (admin ? 'Manage Motor prices, financing and promotions without leaving CRM.' : 'Approved Motor customer pricing.');
+    app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? `<div class="pricing-safety-banner"><strong>Draft pricing safeguard</strong><span>These iPhone 17 prices are official Apple Malaysia retail references. They cannot be quoted to customers until Admin enters the approved deposit and monthly instalments, changes the status to Approved and enables the row.</span></div>` : '') + `<div class="smart-toolbar"><input id="pricingSearch" placeholder="Search product, colour, storage, zone, promotion or Pricing ID"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin ? `<button class="primary" data-new-product-price>+ Add ${unitLabel(selected)} price</button>` : ''}</div><section class="panel" id="pricingResults">${productPricingTable(rows)}</section>`;
     document.getElementById('pricingSearch').oninput = event => { const query = event.target.value.toLowerCase(); document.getElementById('pricingResults').innerHTML = productPricingTable(rows.filter(item => Object.values(item).join(' ').toLowerCase().includes(query))); bindProductPricing(); };
     document.querySelector('[data-new-product-price]')?.addEventListener('click', () => editProductPricing({ businessUnit: selected }));
     bindProductPricing();
