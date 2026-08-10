@@ -7,7 +7,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const api=fs.readFileSync(new URL('../api/crm.js',import.meta.url),'utf8');
 
 test('Administrator report loads every company control resource',()=>{
-  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity','integrations','channels'\]/);
+  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity','integrations','channels','secondHandMotors'\]/);
   assert.match(app,/state\.user\?\.role!=='ADMIN'/);
   assert.match(app,/reportsScoped\(\)/);
 });
@@ -25,6 +25,7 @@ test('Administrator report covers the complete operating view',()=>{
     'Eligibility status',
     'CAD status',
     'Rejection and exception reasons',
+    '2nd hand inventory by region, branch and status',
     'Regional performance',
     'Branch performance',
     'Staff workload and performance',
@@ -47,6 +48,8 @@ test('Administrator report supports filters and aggregate export',()=>{
   assert.match(app,/id="reportBranch"/);
   assert.match(app,/id="reportStaff"/);
   assert.match(app,/id="reportStage"/);
+  assert.match(app,/id="reportSecondHandStatus"/);
+  assert.match(app,/id="reportSecondHandQuery"/);
   assert.match(app,/Download complete CSV/);
   assert.match(app,/downloadAdminReport\(report\)/);
   assert.match(app,/reportPeriodComparison/);
@@ -71,7 +74,7 @@ test('Report API exposes stable created dates and attribution fields',()=>{
 });
 
 test('Report deployment uses a fresh cache version',()=>{
-  assert.match(html,/v2\.css\?v=20260808-admin-reports-layout/);
+  assert.match(html,/v2\.css\?v=20260810-secondhand-report/);
   assert.match(html,/design-refresh\.css\?v=20260808-readiness-1/);
-  assert.match(html,/app-v2\.js\?v=20260810-auditfix2/);
+  assert.match(html,/app-v2\.js\?v=20260810-secondhand-report/);
 });

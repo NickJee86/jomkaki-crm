@@ -7,6 +7,8 @@ const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const api = read('../api/crm.js');
 const ui = read('../second-hand-motor.js');
 const index = read('../index.html');
+const app = read('../app-v2.js');
+const makeBlueprint = JSON.parse(read('../../S03C-production.blueprint.json'));
 
 const motor = (id, model, price, region = 'EAST_MALAYSIA', status = 'AVAILABLE') => ({
   'Inventory ID': id, Brand: 'Yamaha', Model: model, Region: region, 'Selling Price (RM)': price,
@@ -40,3 +42,23 @@ test('CRM exposes secure inventory management, phone photo upload, location and 
   assert.match(index, /data-view="usedMotorInventory"/);
 });
 
+test('Make routes second-hand questions through live stock, price, region and same-number reply rules', () => {
+  const router = makeBlueprint.flow.find(module => module.id === 9);
+  const route = router.routes.find(item => item.filter?.name === 'Second-hand motor live inventory');
+  assert.ok(route, 'second-hand Make route must exist');
+  const modules = new Map(route.flow.map(module => [module.id, module]));
+  assert.equal(modules.get(31).mapper.sheetId, 'Second_Hand_Motor_Inventory');
+  assert.match(modules.get(33).mapper.input, /exact requested model in the same region/i);
+  assert.match(modules.get(33).mapper.input, /closest-price alternatives/i);
+  assert.equal(modules.get(34).mapper.values['25'], 'AI_SAME_INBOUND_CHANNEL');
+});
+
+test('Administrator reports split second-hand inventory with flexible combined filters and CSV export', () => {
+  assert.match(app, /secondHandMotors/);
+  assert.match(app, /reportSecondHandStatus/);
+  assert.match(app, /reportSecondHandQuery/);
+  assert.match(app, /regionAllowed\(motor\.region\).*branchAllowed\(motor\.branchId\)/s);
+  assert.match(app, /2nd hand inventory by region, branch and status/i);
+  assert.match(app, /2nd hand available stock value/i);
+  assert.match(app, /report\.secondHandRows/);
+});
