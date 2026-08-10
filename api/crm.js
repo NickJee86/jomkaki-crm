@@ -187,6 +187,7 @@ const validUrl = (value, label) => {
   if (url && !/^https?:\/\//i.test(url)) throw new Error(`${label} must start with http:// or https://`);
   return url;
 };
+const storageFromVariant = value => clean(value).split(/\s*(?:Â·|·)\s*/)[0] || 'Standard';
 const promotionApplies = row => {
   const today = now().slice(0, 10), start = clean(row['Promotion Start']), end = clean(row['Promotion End']);
   return truth(row['Promotion Active']) && clean(row['Promotion Approval Status']).toUpperCase() === 'APPROVED' && clean(row['Promotion Deposit (RM)']) !== '' && (!start || start <= today) && (!end || end >= today);
@@ -579,17 +580,18 @@ export default async function handler(req, res) {
           return res.status(200).json({ live: true, catalogId, enabled, businessUnit });
         }
         if (action === 'setPricingEnabled' || action === 'setPromotionEnabled') {
-          const pricingId = clean(body.pricingId), enabled = truth(body.enabled);
-          if (!pricingId) throw new Error('Pricing ID is required');
+          const pricingId = clean(body.pricingId), requestedPricingIds = Array.isArray(body.pricingIds) ? body.pricingIds.map(clean).filter(Boolean) : [], pricingIds = [...new Set(requestedPricingIds.length ? requestedPricingIds : [pricingId])], enabled = truth(body.enabled);
+          if (!pricingIds.length) throw new Error('Pricing ID is required');
           const [rows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]);
-          const record = rowsToObjects(rows).find(row => clean(row['Pricing ID']) === pricingId);
-          if (!record) throw new Error('Pricing record was not found');
-          if (action === 'setPromotionEnabled' && enabled && (!clean(record['Promotion Name']) || clean(record['Promotion Deposit (RM)']) === '')) throw new Error('Add a promotion name and deposit before enabling it');
+          const allRecords = rowsToObjects(rows), records = pricingIds.map(id => allRecords.find(row => clean(row['Pricing ID']) === id));
+          if (records.some(record => !record)) throw new Error('One or more pricing records were not found');
+          if (action === 'setPromotionEnabled' && enabled && records.some(record => !clean(record['Promotion Name']) || clean(record['Promotion Deposit (RM)']) === '')) throw new Error('Add a promotion name and deposit before enabling it');
           const changes = action === 'setPricingEnabled' ? { Active: enabled ? 'TRUE' : 'FALSE' } : { 'Promotion Active': enabled ? 'TRUE' : 'FALSE' };
-          await updateObject(req, config.pricing, 'Pricing ID', pricingId, { ...changes, 'Last Updated At': now(), 'Updated By': session.username }, config.pricingMax);
+          for (const id of pricingIds) await updateObject(req, config.pricing, 'Pricing ID', id, { ...changes, 'Last Updated At': now(), 'Updated By': session.username }, config.pricingMax);
           const subject = action === 'setPricingEnabled' ? 'pricing' : 'promotion';
-          await writeActivity(req, session, { type: `CRM_${subject.toUpperCase()}_${enabled ? 'ENABLED' : 'DISABLED'}`, description: `${businessUnit} ${record.Brand} ${record.Model} ${record['Price Zone']} ${subject} ${enabled ? 'enabled' : 'disabled'}` });
-          return res.status(200).json({ live: true, pricingId, enabled, businessUnit });
+          const record = records[0], storage = businessUnit === 'HANDPHONE' ? ` ${storageFromVariant(record.Variant)}` : '';
+          await writeActivity(req, session, { type: `CRM_${subject.toUpperCase()}_${enabled ? 'ENABLED' : 'DISABLED'}`, description: `${businessUnit} ${record.Brand} ${record.Model}${storage} ${record['Price Zone']} ${subject} ${enabled ? 'enabled' : 'disabled'} for ${pricingIds.length} record(s)` });
+          return res.status(200).json({ live: true, pricingId: pricingIds[0], pricingIds, updated: pricingIds.length, enabled, businessUnit });
         }
         if (action === 'saveCatalogItem') {
           const catalogId = clean(body.catalogId), brand = clean(body.brand), model = clean(body.model), variant = clean(body.variant) || 'Standard';
@@ -650,11 +652,44 @@ export default async function handler(req, res) {
           'Promotion Approval Status': promotionStatus, 'Promotion Notes': clean(body.promotionNotes)
         };
         if (truth(body.promotionActive) && (!clean(body.promotionName) || pricingRecord['Promotion Deposit (RM)'] === '')) throw new Error('An active promotion requires a name and promotion deposit');
+        const sharedHandphoneScope = businessUnit === 'HANDPHONE' && clean(body.pricingScope).toUpperCase() === 'MODEL_STORAGE_ZONE';
+        const requestedPricingIds = Array.isArray(body.pricingIds) ? [...new Set(body.pricingIds.map(clean).filter(Boolean))] : [];
+        if (sharedHandphoneScope && requestedPricingIds.length) {
+          const [pricingRows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]);
+          const allPricing = rowsToObjects(pricingRows), targets = requestedPricingIds.map(id => allPricing.find(row => clean(row['Pricing ID']) === id));
+          if (targets.some(record => !record)) throw new Error('One or more colour pricing records were not found');
+          const targetStorage = storageFromVariant(catalogRecord.Variant);
+          if (targets.some(record => clean(record.Brand) !== clean(catalogRecord.Brand) || clean(record.Model) !== clean(catalogRecord.Model) || storageFromVariant(record.Variant) !== targetStorage || clean(record['Price Zone']).toUpperCase() !== zone)) throw new Error('Shared Handphone pricing records must use the same model, storage and zone');
+          for (const record of targets) {
+            const id = clean(record['Pricing ID']), synchronizedRecord = { ...pricingRecord, 'Catalog ID': record['Catalog ID'], Brand: record.Brand, Model: record.Model, Variant: record.Variant || catalogRecord.Variant };
+            await updateObject(req, config.pricing, 'Pricing ID', id, synchronizedRecord, config.pricingMax);
+            await setPricingDerivedFormulas(req, id, businessUnit);
+          }
+          await writeActivity(req, session, { type: 'CRM_HANDPHONE_SHARED_PRICING_UPDATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing synchronized across ${requestedPricingIds.length} colour SKU(s)` });
+          return res.status(200).json({ live: true, pricingId: requestedPricingIds[0], pricingIds: requestedPricingIds, updated: requestedPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE' });
+        }
         if (pricingId) {
           await updateObject(req, config.pricing, 'Pricing ID', pricingId, pricingRecord, config.pricingMax);
           await setPricingDerivedFormulas(req, pricingId, businessUnit);
           await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_UPDATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion updated` });
           return res.status(200).json({ live: true, pricingId, businessUnit });
+        }
+        if (sharedHandphoneScope) {
+          const targetStorage = storageFromVariant(catalogRecord.Variant), catalogObjects = rowsToObjects(catalogRows);
+          const colourCatalogRecords = catalogObjects.filter(record => truth(record.Active) && clean(record.Brand) === clean(catalogRecord.Brand) && clean(record.Model) === clean(catalogRecord.Model) && storageFromVariant(record.Variant) === targetStorage);
+          if (!colourCatalogRecords.length) throw new Error('No active colour options were found for this model and storage');
+          const [pricingRows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]), existingPricing = rowsToObjects(pricingRows);
+          const candidates = colourCatalogRecords.filter(record => !existingPricing.some(price => clean(price['Catalog ID']) === clean(record['Catalog ID']) && clean(price['Price Zone']).toUpperCase() === zone));
+          if (!candidates.length) throw new Error('A shared price already exists for this model, storage and zone');
+          const createdPricingIds = [];
+          for (const [index, record] of candidates.entries()) {
+            const newPricingId = `PRICE-${config.idPrefix}-${slug(zone)}-${Date.now().toString(36).toUpperCase()}-${index + 1}`;
+            await appendObject(req, config.pricing, { 'Pricing ID': newPricingId, ...pricingRecord, 'Catalog ID': record['Catalog ID'], Brand: record.Brand, Model: record.Model, Variant: record.Variant || catalogRecord.Variant });
+            await setPricingDerivedFormulas(req, newPricingId, businessUnit);
+            createdPricingIds.push(newPricingId);
+          }
+          await writeActivity(req, session, { type: 'CRM_HANDPHONE_SHARED_PRICING_CREATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing created for ${createdPricingIds.length} colour SKU(s)` });
+          return res.status(201).json({ live: true, pricingId: createdPricingIds[0], pricingIds: createdPricingIds, created: createdPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE' });
         }
         const newPricingId = `PRICE-${config.idPrefix}-${slug(zone)}-${Date.now().toString(36).toUpperCase()}`;
         await appendObject(req, config.pricing, { 'Pricing ID': newPricingId, ...pricingRecord });
