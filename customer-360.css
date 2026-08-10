@@ -104,11 +104,25 @@
 .customer-360-demo-banner strong{font:800 10px Manrope}.customer-360-demo-banner span{font-size:8px;line-height:1.45;text-align:right}
 .customer-360-demo-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:2px 4px}
 .customer-360-demo-notice strong{color:var(--c360-orange);font:800 10px Manrope}.customer-360-demo-notice span{color:var(--c360-muted);font-size:8px}
+.demo-feature-banner{display:grid;grid-template-columns:auto minmax(260px,1fr) auto auto;align-items:center;gap:12px;margin:0 0 16px;padding:14px 16px;border:1px solid #f1b795;border-radius:14px;background:linear-gradient(110deg,#fff4ed,#fffaf7 55%,#effaf8);box-shadow:0 8px 24px rgba(7,28,43,.05)}
+.demo-feature-icon{display:grid;place-items:center;width:50px;height:50px;border-radius:13px;background:linear-gradient(135deg,var(--c360-orange),#ff8c55);color:#fff;font:900 9px Manrope;letter-spacing:.6px;box-shadow:0 7px 18px rgba(245,94,23,.22)}
+.demo-feature-banner strong{display:block;color:var(--c360-navy);font:800 11px Manrope}
+.demo-feature-banner p{margin:4px 0 0;color:var(--c360-muted);font-size:8px;line-height:1.5}
+.demo-feature-banner button{white-space:nowrap}
+.data-table tr.demo-row>td{background:#fffaf6;border-color:#f6d7c4}
+.data-table tr.demo-row:hover>td{background:#fff4ec}
+.data-table tr.demo-row>td:first-child{box-shadow:inset 3px 0 0 var(--c360-orange)}
+.demo-label{display:table;width:max-content;margin:0 0 5px;padding:3px 6px;border-radius:999px;background:#fff0e7;color:#b94d18;font:900 7px Manrope;letter-spacing:.45px;text-transform:uppercase}
+.demo-label.complete{background:#e6f7f3;color:#05766c}
+.demo-open{border-color:#e8976f!important;background:#fff!important;color:#b64b18!important}
+.demo-open:hover{background:#fff1e9!important}
+button[data-export-admin-report]:disabled{cursor:not-allowed;opacity:.7}
 @media(max-width:900px){
   .customer-360-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
   .customer-360-grid{grid-template-columns:1fr}
   .customer-360-conversation{max-height:480px}
   .customer-360-demo-grid{grid-template-columns:1fr}
+  .demo-feature-banner{grid-template-columns:auto 1fr}.demo-feature-banner button{grid-column:2}
 }
 @media(max-width:620px){
   .customer-360-drawer{width:100vw}
@@ -125,4 +139,5 @@
   .customer-360-demo-head,.customer-360-demo-banner{display:block}
   .customer-360-demo-banner span{display:block;margin-top:5px;text-align:left}
   .customer-360-demo-card{grid-template-columns:auto 1fr}.customer-360-demo-card b{grid-column:2}
+  .demo-feature-banner{display:grid;grid-template-columns:1fr}.demo-feature-banner>*{grid-column:1}.demo-feature-icon{display:none}
 }
