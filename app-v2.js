@@ -881,7 +881,11 @@ function demoOpenButton(record,label='Open demo'){const demo=demoForRecord(recor
 function demoFeatureBanner(){return `<section class="demo-feature-banner"><span class="demo-feature-icon">DEMO</span><div><strong>Feature preview with 2 connected sample customers</strong><p>Alicia shows an AI-complete case; Jason shows an incomplete-document human handover. Preview rows are never saved to Google Sheets, sent to WhatsApp, written to Make, or included in CSV exports.</p></div><button class="secondary" data-demo-customer="demo-complete">Open complete case</button><button class="secondary" data-demo-customer="demo-handover">Open handover case</button></section>`}
 function applyDemoFeatureBanner(){
   if(state.user?.role!=='ADMIN'||!demoFeatureViews.has(state.view))return;
+  if(state.view==='dashboard'){bindCustomer360Demos();return;}
   const strip=app.querySelector('.status-strip');if(strip&&!app.querySelector('.demo-feature-banner'))strip.insertAdjacentHTML('afterend',demoFeatureBanner());
+  const toolbarCount=app.querySelector('.smart-toolbar .pill');
+  if(toolbarCount&&state.view==='leads')toolbarCount.textContent=`${state.data.leads.filter(record=>!isDemoRecord(record)).length} live + ${state.data.leads.filter(isDemoRecord).length} demo`;
+  if(toolbarCount&&state.view==='applications')toolbarCount.textContent=`${state.data.applications.filter(record=>!isDemoRecord(record)).length} live + ${state.data.applications.filter(isDemoRecord).length} demo`;
   app.querySelectorAll('[data-export-admin-report]').forEach(button=>{button.disabled=true;button.onclick=null;button.textContent='CSV export disabled in Demo preview';button.title='Sample rows are never exported.'});
   bindCustomer360Demos();
 }
