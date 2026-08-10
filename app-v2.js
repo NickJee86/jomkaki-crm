@@ -886,7 +886,6 @@ function applyDemoFeatureBanner(){
   const toolbarCount=app.querySelector('.smart-toolbar .pill');
   if(toolbarCount&&state.view==='leads')toolbarCount.textContent=`${state.data.leads.filter(record=>!isDemoRecord(record)).length} live + ${state.data.leads.filter(isDemoRecord).length} demo`;
   if(toolbarCount&&state.view==='applications')toolbarCount.textContent=`${state.data.applications.filter(record=>!isDemoRecord(record)).length} live + ${state.data.applications.filter(isDemoRecord).length} demo`;
-  app.querySelectorAll('[data-export-admin-report]').forEach(button=>{button.disabled=true;button.onclick=null;button.textContent='CSV export disabled in Demo preview';button.title='Sample rows are never exported.'});
   bindCustomer360Demos();
 }
 function leadTable(rows){return `<div class="table-card"><table class="data-table"><thead><tr><th>Customer</th><th>Motor</th><th>Application</th><th>Region</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr class="${isDemoRecord(x)?'demo-row':''}"><td>${demoLabel(x)}<strong>${esc(x.name)}</strong><small>${esc(x.id)} · ${esc(x.phone)}</small></td><td>${esc(x.model)}</td><td>${x.applicationId?`${esc(x.applicationId)}<br>${pretty(x.applicationStatus)}`:'—'}</td><td>${pretty(x.region)}</td><td>${pill(x.status,true)}</td><td>${esc(x.sa)}</td><td>${isDemoRecord(x)?demoOpenButton(x):`<button class="row-action" data-lead="${esc(x.id)}">Open</button>`}</td></tr>`).join('')||empty(7)}</tbody></table></div>`}
@@ -977,15 +976,16 @@ function appendWhatsAppChannelReport(source){
 }
 
 function reports(){
-  const source=channelReportSource(),selected=state.reportChannel||'ALL';let backup=null;
+  const source=channelReportSource(),selected=state.reportChannel||'ALL';
+  const backup={leads:state.data.leads,applications:state.data.applications,documents:state.data.documents,inbox:state.data.inbox,outbox:state.data.outbox,activity:state.data.activity};
+  Object.assign(state.data,source);
   if(state.user?.role==='ADMIN'&&selected!=='ALL'&&loadedResources.has('channels')){
     const leadIds=new Set(source.leads.filter(lead=>(lead.primaryChannelId||lead.channelId)===selected).map(lead=>lead.id));
     const applications=source.applications.filter(item=>leadIds.has(item.leadId)),applicationIds=new Set(applications.map(item=>item.id));
-    backup={leads:state.data.leads,applications:state.data.applications,documents:state.data.documents,inbox:state.data.inbox,outbox:state.data.outbox,activity:state.data.activity};
     state.data.leads=source.leads.filter(lead=>leadIds.has(lead.id));state.data.applications=applications;state.data.documents=source.documents.filter(item=>leadIds.has(item.leadId)||applicationIds.has(item.applicationId));state.data.inbox=source.inbox.filter(item=>item.channelId===selected);state.data.outbox=source.outbox.filter(item=>item.channelId===selected);state.data.activity=source.activity.filter(item=>leadIds.has(item.leadId)||applicationIds.has(item.applicationId));
   }
   reportsLegacy();
-  if(backup)Object.assign(state.data,backup);
+  Object.assign(state.data,backup);
   appendWhatsAppChannelReport(source);
 }
 
