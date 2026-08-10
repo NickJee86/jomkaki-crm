@@ -7,7 +7,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const api=fs.readFileSync(new URL('../api/crm.js',import.meta.url),'utf8');
 
 test('Administrator report loads every company control resource',()=>{
-  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity','integrations'\]/);
+  assert.match(app,/const resources=\['inbox','outbox','catalog','pricing','users','activity','integrations','channels'\]/);
   assert.match(app,/state\.user\?\.role!=='ADMIN'/);
   assert.match(app,/reportsScoped\(\)/);
 });
@@ -53,6 +53,10 @@ test('Administrator report supports filters and aggregate export',()=>{
   assert.match(app,/reportMissingDocumentGroups/);
   assert.match(app,/reportIsOverdue/);
   assert.match(app,/\['created','updated'\]/);
+  assert.match(app,/const source=channelReportSource\(\)/);
+  assert.match(app,/Object\.assign\(state\.data,source\)/);
+  assert.match(app,/Object\.assign\(state\.data,backup\)/);
+  assert.doesNotMatch(app,/CSV export disabled in Demo preview/);
 });
 
 test('Report API exposes stable created dates and attribution fields',()=>{
@@ -69,5 +73,5 @@ test('Report API exposes stable created dates and attribution fields',()=>{
 test('Report deployment uses a fresh cache version',()=>{
   assert.match(html,/v2\.css\?v=20260808-admin-reports-layout/);
   assert.match(html,/design-refresh\.css\?v=20260808-readiness-1/);
-  assert.match(html,/app-v2\.js\?v=20260808-readiness-2/);
+  assert.match(html,/app-v2\.js\?v=20260810-functionaudit-1/);
 });
