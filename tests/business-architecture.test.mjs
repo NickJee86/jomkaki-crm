@@ -38,5 +38,8 @@ test('Vacant Supervisor positions use a Regional Manager fallback',()=>{
   assert.match(ui,/Regional fallback active/);
   assert.match(ui,/Vacant Supervisor positions/);
   assert.match(ui,/Motor branches awaiting a Supervisor/);
+  assert.match(ui,/HANDPHONE\|IPHONE\|SMARTPHONE/);
+  assert.match(ui,/row\.remove\(\)/);
+  assert.match(fs.readFileSync(new URL('../app-v2.js',import.meta.url),'utf8'),/\['BRANCH_SUPERVISOR','BRANCH_MANAGER'\]\.includes\(user\.role\)/);
   assert.match(api,/ensureSheetHeaders\(req, 'CRM_User_Access', \['Business Access'\]\)/);
 });
