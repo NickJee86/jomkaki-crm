@@ -50,6 +50,13 @@ test('Administrator report supports filters and aggregate export',()=>{
   assert.match(app,/id="reportStage"/);
   assert.match(app,/id="reportSecondHandStatus"/);
   assert.match(app,/id="reportSecondHandQuery"/);
+  assert.match(app,/id="reportProductView"/);
+  assert.match(app,/Total motor \(New \+ 2nd hand\)/);
+  assert.match(app,/NEW_MOTOR/);
+  assert.match(app,/SECOND_HAND_MOTOR/);
+  assert.match(app,/HANDPHONE/);
+  assert.match(app,/Product application mix/);
+  assert.match(app,/reportProductAllowed/);
   assert.match(app,/Download complete CSV/);
   assert.match(app,/downloadAdminReport\(report\)/);
   assert.match(app,/reportPeriodComparison/);
@@ -76,5 +83,5 @@ test('Report API exposes stable created dates and attribution fields',()=>{
 test('Report deployment uses a fresh cache version',()=>{
   assert.match(html,/v2\.css\?v=20260810-secondhand-report/);
   assert.match(html,/design-refresh\.css\?v=20260808-readiness-1/);
-  assert.match(html,/app-v2\.js\?v=20260810-secondhand-report/);
+  assert.match(html,/app-v2\.js\?v=20260810-product-report/);
 });
