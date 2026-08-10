@@ -11,6 +11,7 @@ const index = read('../index.html');
 const appUi = read('../app-v2.js');
 const productUi = read('../product-business.js');
 const businessUi = read('../business-architecture.js');
+const businessCss = read('../business-architecture.css');
 const s02 = JSON.parse(read('../../S02 — AI Exception Staff Round Robin.blueprint.json'));
 const s03Motor = JSON.parse(read('../../S03C-production.blueprint.json'));
 const s03HandphoneRaw = read('../../S03H — Handphone Product & Financing.blueprint.json');
@@ -107,6 +108,7 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(productUi, /!\/TEMPLATE\/i/);
   assert.match(businessUi, /motorTenureField\.hidden=unit!=='MOTOR'/);
   assert.match(businessUi, /motorBranchField\.hidden=unit!=='MOTOR'/);
+  assert.match(businessCss, /\.crm-form \[hidden\]\{display:none!important\}/);
   assert.match(businessUi, /\['productBrand','productModel','productVariant'\]/);
 });
 
