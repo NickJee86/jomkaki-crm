@@ -53,6 +53,7 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 - `WHATSAPP_ACCESS_TOKEN` (Sensitive; required only for Cloud mode)
 - `WHATSAPP_PHONE_NUMBER_ID` (required only for Cloud mode)
 - `WHATSAPP_GRAPH_VERSION` (optional; defaults to `v25.0`)
+- `WHATSAPP_DISPATCH_SECRET` (Sensitive; shared only with the protected Make outbox dispatcher)
 - `WHATSAPP_VERIFY_TOKEN` (Sensitive; used to verify the Meta webhook)
 - `META_APP_SECRET` (Sensitive; used to verify webhook signatures)
 
@@ -67,6 +68,7 @@ Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
 - Inbound webhooks store Internal Channel ID, Phone Number ID, display number, WABA ID and conversation key. CRM replies resolve the exact inbound channel before sending.
 - A disabled or unregistered bound channel blocks Cloud sending instead of silently switching the customer to another number.
 - Tokens never belong in Google Sheets, browser forms, reports or audit descriptions.
+- Make's outbox sender must call `/api/whatsapp-outbox-send` with the protected dispatcher secret. The endpoint rejects missing, inactive, unregistered or mismatched channels and never falls back to a different official number.
 
 ## AI-first document, assignment and LMS flow
 
