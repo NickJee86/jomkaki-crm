@@ -132,7 +132,7 @@ function settingsLegacy(){
   const activeImageIssues=state.data.catalog.filter(item=>item.active&&(!item.imageApproved||!item.imageUrl));
   const approvedPricingGaps=state.data.pricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||!price.year3||!price.year4||!price.year5));
   const branchEntries=[...new Map(state.data.team.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
-  const managedBranches=new Set(state.data.users.filter(user=>user.role==='BRANCH_MANAGER'&&user.loginEnabled).map(user=>user.branchId).filter(Boolean));
+  const managedBranches=new Set(state.data.users.filter(user=>['BRANCH_SUPERVISOR','BRANCH_MANAGER'].includes(user.role)&&user.loginEnabled).map(user=>user.branchId).filter(Boolean));
   const missingManagerBranches=branchEntries.filter(([branchId])=>!managedBranches.has(branchId));
   const pendingIntegrations=state.data.integrations.filter(integration=>!integration.automaticActionsEnabled);
   const readinessItems=[
