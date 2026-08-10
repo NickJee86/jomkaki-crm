@@ -51,4 +51,15 @@
 .pricing-safety-banner strong{flex:0 0 auto;color:#a54113}
 .pricing-safety-banner span{line-height:1.5}
 .pricing-pending{color:#a65a32;font-weight:800}
+.handphone-pricing-summary{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px;border:1px solid #f0d4c4;border-radius:18px;padding:20px;background:linear-gradient(135deg,#fffaf6 0%,#fff 62%,#f1faf8 100%)}
+.handphone-pricing-summary h2{margin:10px 0 6px;color:#0a293a;font:800 22px Manrope,sans-serif}
+.handphone-pricing-summary p{max-width:720px;margin:0;color:#607584;line-height:1.55}
+.handphone-pricing-summary .handphone-summary-stats{flex:0 0 auto;margin:0}
+.compact-list{max-width:250px}
+.pricing-muted{color:#70838f;font-size:12px}
+.pricing-structure-note{margin-top:14px}
+.handphone-shared-price-note{display:flex;flex-direction:column;gap:4px;border:1px solid #f0c29f;border-left:4px solid #f26522;border-radius:12px;padding:13px 15px;background:#fff8f2}
+.handphone-shared-price-note strong{color:#9d4218}
+.handphone-shared-price-note span{color:#607584;line-height:1.45}
+@media(max-width:900px){.handphone-pricing-summary{align-items:flex-start;flex-direction:column}.handphone-pricing-summary .handphone-summary-stats{width:100%}}
 @media(max-width:680px){.business-type-picker{grid-template-columns:1fr}.handphone-catalog-overview{padding:20px}.handphone-summary-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.handphone-family-grid{grid-template-columns:1fr}.pricing-safety-banner{display:block}.pricing-safety-banner strong{display:block;margin-bottom:5px}}
