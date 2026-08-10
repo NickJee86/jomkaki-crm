@@ -8,7 +8,7 @@ const PROJECT_NUMBER = process.env.GOOGLE_PROJECT_NUMBER;
 const POOL_ID = process.env.GOOGLE_WIF_POOL_ID || 'vercel-production';
 const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-production';
 const clean = value => String(value ?? '').trim();
-const customerAmount = value => clean(value).replace(/^RM\s*/i, '');
+const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const canonicalRole = value => clean(value).toUpperCase() === 'BRANCH_MANAGER' ? 'BRANCH_SUPERVISOR' : clean(value).toUpperCase();
 const canonicalBusinessAccess = (value, role = '') => {
