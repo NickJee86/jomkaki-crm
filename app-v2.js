@@ -25,7 +25,7 @@ async function ensureCustomer360Data(){const resources=['inbox','outbox','activi
 function customerSearchCandidates(){const seen=new Set(),results=[];const add=item=>{const key=item.leadId||item.applicationId||normalizePhone(item.phone)||String(item.name||'').toLowerCase();if(!key||seen.has(key))return;seen.add(key);results.push(item)};state.data.leads.forEach(lead=>add({leadId:lead.id,applicationId:lead.applicationId,phone:lead.phone,name:lead.name,motor:lead.model,status:lead.status,search:Object.values(lead).join(' ')}));state.data.applications.forEach(application=>add({leadId:application.leadId,applicationId:application.id,phone:application.phone,name:application.customer,motor:application.product,status:application.stage||application.status,search:Object.values(application).join(' ')}));state.data.inbox.forEach(message=>add({leadId:message.leadId,applicationId:message.applicationId,phone:message.phone,name:message.customer,motor:'',status:message.status,search:Object.values(message).join(' ')}));return results}
 function bindCustomerProfileButtons(){document.querySelectorAll('[data-customer-profile]').forEach(button=>button.onclick=()=>openCustomer360({leadId:button.dataset.leadId||'',applicationId:button.dataset.applicationId||'',phone:button.dataset.phone||''}).catch(error=>alert(error.message)))}
 async function runGlobalSearch(query){const q=String(query||'').trim();if(!q)return;await ensureCustomer360Data();const matches=customerSearchCandidates().filter(item=>`${item.name} ${item.phone} ${item.motor} ${item.status} ${item.search}`.toLowerCase().includes(q.toLowerCase())).slice(0,40);drawer('Customer search',`${matches.length} result${matches.length===1?'':'s'} for "${esc(q)}"`,`<div class="customer-search-results">${matches.map(item=>`<button class="customer-search-card" data-customer-profile data-lead-id="${esc(item.leadId||'')}" data-application-id="${esc(item.applicationId||'')}" data-phone="${esc(item.phone||'')}"><span><strong>${esc(item.name||item.phone||'Customer')}</strong><small>${esc([item.phone,item.motor].filter(Boolean).join(' | '))}</small></span>${pill(item.status||'Open',true)}</button>`).join('')||'<div class="customer-360-empty"><strong>No matching customer found</strong><p>Try a name, phone number, Lead ID, Application ID or motorcycle model.</p></div>'}</div>`,'customer-search-drawer');bindCustomerProfileButtons()}
-async function load(){app.innerHTML='<div class="v2-loading"><div class="spinner"></div><p>Loading live CRM…</p></div>';try{const [session,dashboard,leads,applications,documents,team]=await Promise.all([get('session'),get('dashboard'),get('leads'),optional('applications'),optional('documents'),optional('team')]);state.user=session.user;state.summary=dashboard.summary;Object.assign(state.data,{leads:leads.records||[],applications:applications.records||[],documents:documents.records||[],team:team.records||[],inbox:[],outbox:[],catalog:[],pricing:[],activity:[],integrations:[],channels:[]});loadedResources.clear();['leads','applications','documents','team'].forEach(x=>loadedResources.add(x));state.loaded=true;shell.hidden=false;gate.classList.add('hidden');document.getElementById('profileName').textContent=state.user.name;document.getElementById('profileRole').textContent=state.user.role==='ADMIN'?'Administrator':state.user.role==='STAFF'?`Sales Advisor · ${state.user.saId}`:state.user.role==='BRANCH_MANAGER'?`Branch Manager · ${state.user.branchId}`:`${pretty(state.user.region)} Manager`;document.querySelector('.integration-card small').textContent=state.user.whatsappMode==='CLOUD'?'Cloud API connected':'Manual ready · Cloud pending';document.getElementById('leadBadge').textContent=state.summary.leads||0;document.getElementById('applicationBadge').textContent=state.summary.applications||0;document.getElementById('inboxBadge').textContent=state.summary.unreadInbox||0;document.getElementById('workBadge').textContent=state.summary.needsAttention||0;document.querySelector('[aria-label="Notifications"] em').textContent=state.summary.needsAttention||0;render();return true}catch(e){shell.hidden=true;gate.classList.remove('hidden');return false}}
+async function load(){app.innerHTML='<div class="v2-loading"><div class="spinner"></div><p>Loading live CRM…</p></div>';try{const [session,dashboard,leads,applications,documents,team]=await Promise.all([get('session'),get('dashboard'),get('leads'),optional('applications'),optional('documents'),optional('team')]);state.user=session.user;state.summary=dashboard.summary;Object.assign(state.data,{leads:leads.records||[],applications:applications.records||[],documents:documents.records||[],team:team.records||[],inbox:[],outbox:[],catalog:[],pricing:[],activity:[],integrations:[],channels:[],secondHandMotors:[]});loadedResources.clear();['leads','applications','documents','team'].forEach(x=>loadedResources.add(x));state.loaded=true;shell.hidden=false;gate.classList.add('hidden');document.getElementById('profileName').textContent=state.user.name;document.getElementById('profileRole').textContent=state.user.role==='ADMIN'?'Administrator':state.user.role==='STAFF'?`Sales Advisor · ${state.user.saId}`:state.user.role==='BRANCH_MANAGER'?`Branch Manager · ${state.user.branchId}`:`${pretty(state.user.region)} Manager`;document.querySelector('.integration-card small').textContent=state.user.whatsappMode==='CLOUD'?'Cloud API connected':'Manual ready · Cloud pending';document.getElementById('leadBadge').textContent=state.summary.leads||0;document.getElementById('applicationBadge').textContent=state.summary.applications||0;document.getElementById('inboxBadge').textContent=state.summary.unreadInbox||0;document.getElementById('workBadge').textContent=state.summary.needsAttention||0;document.querySelector('[aria-label="Notifications"] em').textContent=state.summary.needsAttention||0;render();return true}catch(e){shell.hidden=true;gate.classList.remove('hidden');return false}}
 function dashboard(){const s=state.summary;app.innerHTML=head('Command Centre','AI-managed applications, exception queues and LMS readiness in your permitted scope.')+`<div class="metric-grid">${metric('Total leads',s.leads,'Your permitted scope')}${metric('Applications',s.applications,'Financing cases')}${metric('AI exceptions',s.aiExceptions||0,'Assigned only when AI cannot finish')}${metric('Ready for LMS',s.lmsReady||0,'Documents verified complete')}${metric('Human handovers',s.humanHandovers,'Manager attention')}${metric('Needs attention',s.needsAttention,'Exceptions and recovery')}${metric('Completed',s.completed,'Finished cases')}${metric('Unread inbox',s.unreadInbox,'Customer replies')}</div><section class="panel" style="margin-top:16px"><div class="panel-head"><h3>Latest applications</h3></div>${applicationTable(state.data.applications.slice(0,10))}</section>`}
 function leadTable(rows){return `<div class="table-card"><table class="data-table"><thead><tr><th>Customer</th><th>Motor</th><th>Application</th><th>Region</th><th>Status</th><th>Owner</th><th></th></tr></thead><tbody>${rows.map(x=>`<tr><td><strong>${esc(x.name)}</strong><small>${esc(x.id)} · ${esc(x.phone)}</small></td><td>${esc(x.model)}</td><td>${x.applicationId?`${esc(x.applicationId)}<br>${pretty(x.applicationStatus)}`:'—'}</td><td>${pretty(x.region)}</td><td>${pill(x.status,true)}</td><td>${esc(x.sa)}</td><td><button class="row-action" data-lead="${esc(x.id)}">Open</button></td></tr>`).join('')||empty(7)}</tbody></table></div>`}
 function leads(){app.innerHTML=head('Lead Pipeline','Customer, motorcycle interest, application status and ownership in one view.')+`<div class="smart-toolbar"><input id="search" placeholder="Search customer, phone, motorcycle or Lead ID"><div class="toolbar-spacer"></div>${pill(`${state.data.leads.length} live leads`,true)}</div><section class="panel" id="results">${leadTable(state.data.leads)}</section>`;document.getElementById('search').oninput=e=>{const q=e.target.value.toLowerCase();document.getElementById('results').innerHTML=leadTable(state.data.leads.filter(x=>Object.values(x).join(' ').toLowerCase().includes(q)))};bind()}
@@ -192,6 +192,11 @@ form.onsubmit=async e=>{e.preventDefault();const error=document.getElementById('
 setInterval(()=>{if(state.loaded&&state.user?.mustChangePassword&&!document.querySelector('.drawer-backdrop'))changePassword(true)},500);
 const ensureViewDataBase=ensureViewData;
 ensureViewData=async function(view){
+  if(view==='reports'&&!loadedResources.has('secondHandMotors')){
+    const response=await optional('secondHandMotors');
+    state.data.secondHandMotors=response.records||[];
+    loadedResources.add('secondHandMotors');
+  }
   if(view==='settings'&&state.user?.role==='ADMIN'&&!['integrations','catalog','pricing','users','qa','channels'].every(resource=>loadedResources.has(resource))){
     app.innerHTML='<div class="v2-loading"><div class="spinner"></div><p>Loading go-live readiness...</p></div>';
     const resources=['integrations','catalog','pricing','users','qa','channels'];
@@ -205,7 +210,7 @@ ensureViewData=async function(view){
 load();
 
 async function loadAdminReportData(){
-  const resources=['inbox','outbox','catalog','pricing','users','activity','integrations','channels'];
+  const resources=['inbox','outbox','catalog','pricing','users','activity','integrations','channels','secondHandMotors'];
   const responses=await Promise.all(resources.map(async resource=>{
     if(loadedResources.has(resource))return{resource,records:state.data[resource]||[]};
     const response=await optional(resource);
@@ -399,6 +404,8 @@ function downloadAdminReport(report){
     ['Branch',report.branch==='ALL'?'All branches':report.branch],
     ['Staff',report.staff==='ALL'?'All Staff':report.staff],
     ['Stage',report.stage==='ALL'?'All stages':pretty(report.stage)],
+    ['2nd hand status',report.secondHandStatus==='ALL'?'All stock statuses':pretty(report.secondHandStatus)],
+    ['2nd hand search',report.secondHandQuery||'All models and locations'],
     [],
     ['Executive summary'],
     ['Metric','Value'],
@@ -428,6 +435,10 @@ function downloadAdminReport(report){
     ['Reason','Applications'],
     ...report.rejectionRows,
     [],
+    ['2nd hand motor inventory'],
+    ['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],
+    ...report.secondHandRows,
+    [],
     ['Regional performance'],
     ['Region','Leads','Applications','Conversion','Documents complete','Ready for LMS','Overdue','Approved','Completed'],
     ...report.regionRows,
@@ -454,7 +465,7 @@ function reportsLegacy(){
     reportsScoped();
     return;
   }
-  const required=['inbox','outbox','catalog','pricing','users','activity','integrations','channels'];
+  const required=['inbox','outbox','catalog','pricing','users','activity','integrations','channels','secondHandMotors'];
   if(required.some(resource=>!loadedResources.has(resource))){
     app.innerHTML='<div class="v2-loading"><div class="spinner"></div><p>Loading full company reports…</p></div>';
     if(!state.adminReportLoading){
@@ -468,6 +479,8 @@ function reportsLegacy(){
   const branch=state.reportBranch||'ALL';
   const staff=state.reportStaff||'ALL';
   const stage=state.reportStage||'ALL';
+  const secondHandStatus=state.reportSecondHandStatus||'ALL';
+  const secondHandQuery=String(state.reportSecondHandQuery||'').trim().toLowerCase();
   const regionAllowed=value=>region==='ALL'||reportRegionKey(value)===region;
   const branchAllowed=value=>branch==='ALL'||value===branch;
   const staffAllowed=value=>staff==='ALL'||value===staff;
@@ -525,6 +538,24 @@ function reportsLegacy(){
   const activePromotions=state.data.pricing.filter(price=>price.promotion&&price.promotionActive&&String(price.promotionStatus).toUpperCase()==='APPROVED');
   const enabledAccounts=state.data.users.filter(user=>user.loginEnabled);
   const acceptingStaff=state.data.team.filter(member=>String(member.accepting).toUpperCase()==='TRUE');
+  const secondHandBase=(state.data.secondHandMotors||[]).filter(motor=>
+    regionAllowed(motor.region)&&branchAllowed(motor.branchId)&&
+    (secondHandStatus==='ALL'||String(motor.status).toUpperCase()===secondHandStatus)&&
+    (!secondHandQuery||Object.values(motor).flat().join(' ').toLowerCase().includes(secondHandQuery))
+  );
+  const secondHandMotors=secondHandBase.filter(motor=>reportWithin(motor,period,['updated','lastVerified']));
+  const secondHandAvailable=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='AVAILABLE');
+  const secondHandVisible=secondHandAvailable.filter(motor=>motor.customerVisible&&motor.imageApproved&&motor.photos?.length&&motor.location);
+  const secondHandReserved=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='RESERVED');
+  const secondHandSold=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='SOLD');
+  const secondHandStale=secondHandAvailable.filter(motor=>reportAgeDays(motor,['lastVerified','updated'])>7);
+  const secondHandPhotoIssues=secondHandAvailable.filter(motor=>!motor.imageApproved||!motor.photos?.length);
+  const secondHandStockValue=secondHandAvailable.reduce((sum,motor)=>sum+reportNumber(motor.price),0);
+  const secondHandStatusGroups=adminGroup(secondHandMotors,motor=>motor.status||'Not recorded');
+  const secondHandRegionGroups=adminGroup(secondHandMotors,motor=>reportRegionKey(motor.region));
+  const secondHandRows=secondHandMotors.slice().sort((a,b)=>String(a.region).localeCompare(String(b.region))||String(a.branch).localeCompare(String(b.branch))||String(a.brand+' '+a.model).localeCompare(String(b.brand+' '+b.model))).map(motor=>[
+    motor.id,[motor.brand,motor.model,motor.variant].filter(Boolean).join(' '),motor.year||'',pretty(motor.region),motor.branch||motor.branchId||'',motor.location||'',pretty(motor.status),motor.conditionGrade||'',motor.mileageKm||'',motor.price?`RM ${Number(motor.price).toLocaleString('en-MY')}`:'',motor.customerVisible?'Yes':'No',motor.imageApproved?'Approved':'Pending',motor.lastVerified||''
+  ]);
 
   const regionKeys=region==='ALL'?['EAST_MALAYSIA','WEST_MALAYSIA']:[region];
   const regionRows=regionKeys.map(key=>{
@@ -605,7 +636,12 @@ function reportsLegacy(){
     'Average document collection days':averageDocumentDays,
     'Quoted deposit total':`RM ${quotedDepositTotal.toLocaleString('en-MY')}`,
     'Average monthly instalment':`RM ${averageMonthly.toLocaleString('en-MY')}`,
-    'Failed messages':failedMessages.length
+    'Failed messages':failedMessages.length,
+    '2nd hand units':secondHandMotors.length,
+    '2nd hand available':secondHandAvailable.length,
+    '2nd hand AI-visible':secondHandVisible.length,
+    '2nd hand available stock value':`RM ${secondHandStockValue.toLocaleString('en-MY')}`,
+    '2nd hand stale over 7 days':secondHandStale.length
   };
   const trendRows=[...new Set([...Object.keys(leadTrendGroups),...Object.keys(applicationTrendGroups)])].map(label=>[label,leadTrendGroups[label]||0,applicationTrendGroups[label]||0]);
   const agingRows=reportObjectRows(agingGroups);
@@ -639,9 +675,9 @@ function reportsLegacy(){
   const lmsReportingRows=lmsIntegration.reportingReady?[
     ['Submitted to LMS',lmsSubmittedApplications.length],['Pending decision',lmsPending.length],['Approved',lmsApproved.length],['Rejected',lmsRejected.length],['Submission errors',lmsErrors.length],['Average decision time',averageLmsDecisionDays+' days']
   ]:[];
-  const report={period,region,branch,staff,stage,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows};
+  const report={period,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows};
   const accountRoleRows=Object.entries(adminGroup(state.data.users,user=>user.role)).map(entry=>[entry[0],entry[1]]);
-  const branchOptions=[...new Map(reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId])).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const branchOptions=[...new Map([...reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId]),...secondHandBase.filter(motor=>motor.branchId).map(motor=>[motor.branchId,motor.branch||motor.branchId])]).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const staffOptions=reportTeam.filter(member=>branch==='ALL'||member.branchId===branch).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const stageOptions=[...new Set(state.data.applications.filter(application=>!isSyntheticApplication(application)&&regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)).map(application=>application.stage).filter(Boolean))].sort();
   const auditRows=activity.slice(0,15).map(event=>[when(event.time),pretty(event.type),event.applicationId||event.leadId||'—',event.description||'—',event.actor||'System']);
@@ -654,7 +690,9 @@ function reportsLegacy(){
     '</select></label><label>Branch<select id="reportBranch">'+reportOption('ALL','All branches',branch)+branchOptions.map(option=>reportOption(option[0],option[1],branch)).join('')+
     '</select></label><label>Staff<select id="reportStaff">'+reportOption('ALL','All Staff',staff)+staffOptions.map(member=>reportOption(member.id,member.name+' · '+member.id,staff)).join('')+
     '</select></label><label>Stage<select id="reportStage">'+reportOption('ALL','All stages',stage)+stageOptions.map(value=>reportOption(value,pretty(value),stage)).join('')+
-    '</select></label><div class="toolbar-spacer"></div><button class="secondary" data-export-admin-report>Download complete CSV</button></div>'+
+    '</select></label><label>2nd hand status<select id="reportSecondHandStatus">'+
+      reportOption('ALL','All stock statuses',secondHandStatus)+reportOption('AVAILABLE','Available',secondHandStatus)+reportOption('RESERVED','Reserved',secondHandStatus)+reportOption('HOLD','Hold',secondHandStatus)+reportOption('SOLD','Sold',secondHandStatus)+reportOption('INACTIVE','Inactive',secondHandStatus)+
+    '</select></label><label>2nd hand model / location<input id="reportSecondHandQuery" value="'+esc(state.reportSecondHandQuery||'')+'" placeholder="All models and locations"></label><div class="toolbar-spacer"></div><button class="secondary" data-clear-second-hand-report>Clear 2H filter</button><button class="secondary" data-export-admin-report>Download complete CSV</button></div>'+
     '<div class="security-banner admin-report-banner"><div><strong>Administrator company-wide visibility</strong><p>This report includes every permitted company record. Customer IC numbers, original document links, passwords and integration secrets remain protected.</p></div><span class="pill green">ALL COMPANY DATA</span></div>'+
     '<div class="metric-grid">'+
       metric('Leads',leads.length,leadComparison.label)+
@@ -673,8 +711,16 @@ function reportsLegacy(){
       metric('Average instalment',averageMonthly?`RM ${averageMonthly.toLocaleString('en-MY')}`:'—',quotedApplications.length+' quoted applications')+
       metric('Promotions used',promotionApplications,'Applications with promotion')+
       metric('Failed messages',failedMessages.length,'Outbox recovery needed')+
+      metric('2nd hand units',secondHandMotors.length,'Current report filters')+
+      metric('2nd hand available',secondHandAvailable.length,secondHandVisible.length+' AI-visible')+
+      metric('2nd hand reserved',secondHandReserved.length,'Held units')+
+      metric('2nd hand sold',secondHandSold.length,'Status records')+
+      metric('2nd hand stock value',`RM ${secondHandStockValue.toLocaleString('en-MY')}`,'Available selling prices')+
+      metric('2nd hand stale',secondHandStale.length,'Not verified for 7+ days')+
+      metric('2nd hand photo issues',secondHandPhotoIssues.length,'Available but photo pending')+
     '</div>'+
     '<div class="report-grid">'+
+      '<section class="report-card wide second-hand-report-card"><div class="panel-head"><div><h3>2nd hand inventory by region, branch and status</h3><p>Uses the selected period, Region, Branch, stock status and model/location filters together.</p></div></div><div class="report-split"><div><h4>Stock status</h4>'+adminBars(secondHandStatusGroups,10)+'</div><div><h4>Region</h4>'+adminBars(secondHandRegionGroups,5)+'</div></div>'+adminReportTable(['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],secondHandRows)+'</section>'+
       integrationReportCard('WhatsApp Meta Cloud performance',metaIntegration,'<div class="metric-grid compact-metrics">'+
         metric('Cloud inbound',metaInbound.length,'Customer messages received')+
         metric('Cloud outbound',metaOutbound.length,'Messages sent through API')+
@@ -728,6 +774,9 @@ function reportsLegacy(){
   document.getElementById('reportBranch').onchange=event=>{state.reportBranch=event.target.value;state.reportStaff='ALL';reports()};
   document.getElementById('reportStaff').onchange=event=>{state.reportStaff=event.target.value;reports()};
   document.getElementById('reportStage').onchange=event=>{state.reportStage=event.target.value;reports()};
+  document.getElementById('reportSecondHandStatus').onchange=event=>{state.reportSecondHandStatus=event.target.value;reports()};
+  document.getElementById('reportSecondHandQuery').onchange=event=>{state.reportSecondHandQuery=event.target.value;reports()};
+  document.querySelector('[data-clear-second-hand-report]').onclick=()=>{state.reportSecondHandStatus='ALL';state.reportSecondHandQuery='';reports()};
   document.querySelector('[data-export-admin-report]').onclick=()=>downloadAdminReport(report);
 }
 

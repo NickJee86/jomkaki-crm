@@ -24,6 +24,8 @@ body{background:var(--v2-bg);color:var(--v2-text)}
 
 .report-toolbar label{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;color:var(--v2-muted)}
 .report-toolbar label select{min-width:150px}
+.report-toolbar label input{min-width:190px}
+.report-split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;margin-bottom:18px}.report-split h4{margin:0 0 12px;font:800 11px Manrope;color:var(--v2-navy)}
 .admin-report-banner{align-items:center}
 .admin-report-banner .pill{white-space:nowrap}
 .report-table{width:100%;max-width:100%;max-height:430px;overflow:auto}
@@ -35,7 +37,8 @@ body{background:var(--v2-bg);color:var(--v2-text)}
 @media(max-width:720px){
   .report-toolbar{align-items:stretch}
   .report-toolbar label{width:100%;justify-content:space-between}
-  .report-toolbar label select{flex:1;min-width:0}
+  .report-toolbar label select,.report-toolbar label input{flex:1;min-width:0;width:auto}
+  .report-split{grid-template-columns:1fr}
   .admin-report-banner{align-items:flex-start}
 }
 .crm-form{display:grid;grid-template-columns:1fr 1fr;gap:14px}.crm-form label{display:grid;gap:6px;font-size:10px;font-weight:700;color:var(--v2-text)}.crm-form input,.crm-form select,.crm-form textarea{width:100%;border:1px solid var(--v2-line);border-radius:9px;padding:10px;font:11px "DM Sans";background:#fbfcfc}.crm-form input,.crm-form select{height:40px}.crm-form textarea{resize:vertical}.form-wide{grid-column:1/-1}.form-actions,.drawer-actions{display:flex;justify-content:flex-end;gap:8px}.drawer-actions{margin-bottom:15px}.form-actions button,.drawer-actions button{border:0;border-radius:9px;padding:10px 14px;background:var(--v2-teal);color:#fff;font-weight:700;cursor:pointer}.form-actions button.secondary{background:#edf3f4;color:var(--v2-text)}.form-actions button:disabled{opacity:.55}.notice{font-size:9px;color:var(--v2-muted)}.row-actions{display:flex;flex-direction:column;gap:7px;min-width:142px}.row-actions .row-action{white-space:nowrap}.upload-banner{margin-bottom:14px}
