@@ -8,6 +8,10 @@ const PROJECT_NUMBER = process.env.GOOGLE_PROJECT_NUMBER;
 const POOL_ID = process.env.GOOGLE_WIF_POOL_ID || 'vercel-production';
 const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-production';
 const clean = value => String(value ?? '').trim();
+const sheetIdentifier = value => {
+  const text = clean(value);
+  return text ? `'${text}` : '';
+};
 const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const canonicalRole = value => clean(value).toUpperCase() === 'BRANCH_MANAGER' ? 'BRANCH_SUPERVISOR' : clean(value).toUpperCase();
@@ -659,13 +663,13 @@ export default async function handler(req, res) {
         if ((inboundEnabled || outboundEnabled) && !active) throw new Error('Activate the channel before enabling inbound or outbound routing');
         const timestamp = now(), record = {
           'Channel Name': clean(body.name) || `${region === 'EAST_MALAYSIA' ? 'East' : 'West'} Malaysia Official ${slot}`,
-          'Phone Number ID': phoneNumberId, 'Display Number': displayNumber, 'WABA ID': wabaId, 'Meta App ID': clean(body.appId),
-          'Business Portfolio ID': clean(body.portfolioId), 'Branch ID': branchId, 'Campaign Source': clean(body.campaignSource) || 'ALL',
+          'Phone Number ID': sheetIdentifier(phoneNumberId), 'Display Number': sheetIdentifier(displayNumber), 'WABA ID': sheetIdentifier(wabaId), 'Meta App ID': sheetIdentifier(body.appId),
+          'Business Portfolio ID': sheetIdentifier(body.portfolioId), 'Branch ID': branchId, 'Campaign Source': clean(body.campaignSource) || 'ALL',
           'Default Team / SA': clean(body.defaultOwner), 'Inbound Enabled': inboundEnabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': outboundEnabled ? 'TRUE' : 'FALSE',
           Active: active ? 'TRUE' : 'FALSE', 'Make Connection Alias': clean(body.connectionAlias), 'Webhook Route Key': clean(body.webhookRouteKey) || `JKM-WA-${region === 'EAST_MALAYSIA' ? 'EAST' : 'WEST'}-${slot}`,
           Environment: clean(body.environment).toUpperCase() === 'TEST' ? 'TEST' : 'PRODUCTION', 'Last Verified At': clean(body.lastVerified), 'Updated By': session.username,
           'Internal Notes': clean(body.notes), 'Data Status': active ? 'CONNECTED' : (phoneNumberId ? 'READY_FOR_CONNECTION' : 'PENDING_PHONE_SETUP'), Region: region,
-          'Channel Slot': slot, 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp,
+          'Channel Slot': sheetIdentifier(slot), 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp,
           'Business Unit': businessUnit, 'Team ID': clean(body.teamId)
         };
         if (active && !channelCredentials({ ...(existing || {}), ...record }).accessToken) throw new Error(`Add the protected ${record['Credential Key']}_ACCESS_TOKEN secret in Vercel before activating this channel`);
