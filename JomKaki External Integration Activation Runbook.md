@@ -1,19 +1,25 @@
 # JomKaki External Integration Activation Runbook
 
-Prepared: 8 August 2026  
+Updated: 11 August 2026  
 Production safety rule: all Make schedules, WhatsApp Cloud automation and LMSPRO production submission remain OFF until the relevant acceptance gate is signed off.
 
 ## 1. Meta WhatsApp Cloud gate
 
-- Use only `JomKaki WhatsApp +60109726558` in Coexistence mode.
-- Confirm Meta asset `Jom Kaki Motor` and WABA `373043319376718`.
-- Never modify or reuse the LoanBuddy WhatsApp connection.
-- Confirm the sender phone number and display name before saving the Make module.
-- Map Receiver, Message Type and Message Text from the JomKaki `Message_Outbox` row.
-- Keep the Make schedule OFF during the synthetic acceptance test.
-- Test with synthetic CRM data and an approved test phone only.
-- Verify inbound webhook, outbound delivery, status update, duplicate prevention and Manager handover.
-- Enable production scheduling only after the owner signs off the test evidence.
+- Use only the JomKaki Motor production app and official number. Never modify or reuse any LoanBuddy Meta or WhatsApp connection.
+- Meta Business Portfolio ID: `3324547997776070`.
+- Meta App ID: `2355506515274797` (`JomKaki Motor AI CRM`).
+- WABA ID: `1450874216868670`.
+- Official number: `+60147952387`; Phone Number ID: `1212389721965743`; approved display name: `JomKaki Motor`.
+- Webhook callback: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`.
+- The App Secret has been rotated and stored only as the Sensitive Vercel variable `META_APP_SECRET`. The verification token is stored only as `WHATSAPP_VERIFY_TOKEN`; never copy either value into Google Sheets, Make notes or this file.
+- Keep `WHATSAPP_SEND_MODE=MANUAL` and keep the West 01 channel inactive until all remaining gates pass.
+- Wait for Meta's verification-code rate limit to clear, then verify `+60147952387` once. Do not repeatedly request codes.
+- Save the callback in Meta and subscribe the app to the WhatsApp `messages` webhook field.
+- Create a permanent production access token with the minimum WhatsApp permissions and store it only as `WHATSAPP_WEST_01_ACCESS_TOKEN` in Vercel.
+- Confirm the sender number and display name before saving the Make module. Map Receiver, Message Type and Message Text from the JomKaki `Message_Outbox` row.
+- Keep the Make schedule OFF during the synthetic acceptance test. Test with synthetic CRM data and an approved test phone only.
+- Verify inbound webhook, exact-number outbound routing, delivery/read status, duplicate prevention, AI reply, document collection and Manager handover.
+- Change to `WHATSAPP_SEND_MODE=CLOUD` and enable production scheduling only after the owner signs off the test evidence.
 
 ## 2. SharePoint document gate
 
@@ -75,7 +81,10 @@ Planned environment keys after the vendor package is approved:
 ## 6. Current status
 
 - Google Sheet dashboard and application state alignment: completed.
-- Staff account mapping and role tests: completed; seven Branch Manager placeholders remain pending because the branch owners are still `TBD`.
+- CRM automated suite: 55 tests passed with zero failures on 11 August 2026; syntax checks passed for 29 JavaScript files.
+- Staff account mapping and role tests: completed; vacant Branch Supervisor positions continue to use the Regional Manager fallback.
 - SharePoint Entra permission: `Sites.Selected` is configured and granted; site-specific write verification remains required.
-- Meta Make connection: prepared as JomKaki Coexistence; Meta authorization and synthetic message test remain required.
+- Meta Vercel preparation: rotated App Secret, verification token and West 01 Phone Number ID are stored; Production was redeployed `Ready`; the deployed callback challenge test passed.
+- Meta remaining blockers: the developer Webhook Configuration panel is currently failing to load, the official number is still `Unverified` because of Meta rate limiting, the `messages` subscription is not yet saved and the permanent access token is not yet available. Manual mode remains active.
+- Make business-aware blueprints and safety controls are prepared and tested locally; keep the WhatsApp sender OFF until the Meta acceptance sequence passes.
 - LMSPRO: preparation layer completed; vendor contract, sandbox and credentials remain external blockers.

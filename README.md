@@ -59,6 +59,13 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 
 Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
 
+Current Meta staging status (11 August 2026):
+
+- The Meta App Secret has been rotated. `META_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_WEST_01_PHONE_NUMBER_ID` and `WHATSAPP_SEND_MODE=MANUAL` are stored in Vercel.
+- Production was redeployed after the environment update and the callback challenge test passed.
+- The official West 01 number is `+60147952387` with Phone Number ID `1212389721965743` and WABA ID `1450874216868670`.
+- Keep West 01 inactive and do not change to `CLOUD` until Meta phone verification, the `messages` Webhook subscription, a protected permanent access token and one synthetic end-to-end test are complete.
+
 ## East / West Malaysia multi-number routing
 
 - `WhatsApp_Number_Master` reserves `JKM-WA-EAST-01` through `JKM-WA-EAST-05` and `JKM-WA-WEST-01` through `JKM-WA-WEST-05`.
@@ -126,7 +133,7 @@ Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not u
 
 ## External blockers
 
-- WhatsApp Business Cloud remains pending until Meta phone verification rate limiting clears and the Make connection can be authorized.
+- WhatsApp Business Cloud remains pending until Meta phone verification rate limiting clears, the Meta Webhook panel can save the callback and `messages` subscription, and a permanent West 01 access token is stored securely.
 - LMSPRO remains disabled until the official vendor API contract, sandbox endpoint and secured test credentials are provided.
 - The business-aware Make blueprints are prepared and tested locally. Keep new or replaced scenarios OFF until their Google/OpenAI connections are reselected after import and one synthetic run passes.
 

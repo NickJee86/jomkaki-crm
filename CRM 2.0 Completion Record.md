@@ -56,16 +56,19 @@ Production: https://jomkaki-crm.vercel.app/
 
 ## Verification completed
 
-- JavaScript syntax checks passed for the frontend and both production APIs.
+- The complete automated suite passed on 11 August 2026: 55 tests, 0 failures.
+- JavaScript syntax checks passed for 29 frontend, API and test files.
 - Authentication/session tests passed.
 - Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
 - AI document-readiness tests passed for complete, missing and exception cases.
 - Motor/Handphone number isolation, shared Customer ID, monthly Handphone tenure and Make business/team routing tests passed.
 - Handphone catalog, stock, pricing, regional approval, Admin price-floor exception and safe-version replacement tests passed.
 - Character-encoding checks passed for the frontend, index and README.
-- Vercel reported the final deployment `Ready` in Production.
+- The Meta App Secret was rotated; the new secret, verification token and official West 01 Phone Number ID were stored as protected Vercel environment variables.
+- Vercel was redeployed after the Meta environment update and reported `Ready` in Production.
+- The deployed Meta callback challenge returned the exact expected challenge, confirming that the Vercel Webhook verification path and current verification token are working.
 
 ## External activation blockers
 
 - LMSPRO: official API contract, sandbox endpoint and secured test credentials are still required before real case submission can be enabled.
-- WhatsApp Cloud: Meta authorization and production credentials are still required; Manual WhatsApp Business mode remains usable for testing.
+- WhatsApp Cloud: the official number remains `Unverified` because Meta is rate-limiting verification-code requests. The Meta Webhook Configuration panel is also failing to load, so the callback and `messages` subscription have not yet been saved in Meta. A permanent production access token is still required. `WHATSAPP_SEND_MODE=MANUAL` remains the safe active setting.
