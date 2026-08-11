@@ -75,8 +75,8 @@ test('reply fallback cannot cross Motor and Handphone official numbers', () => {
 });
 
 test('CRM supports separate Handphone catalog, pricing, access and shared customer identity', () => {
-  assert.match(crm, /Handphone_Model_Catalog!A1:Q1000/);
-  assert.match(crm, /Handphone_Loan_Pricing!A1:AB1000/);
+  assert.match(crm, /Handphone_Model_Catalog!A1:AB1000/);
+  assert.match(crm, /Handphone_Loan_Pricing!A1:AO1000/);
   assert.match(crm, /replace\(\/,\/g, ''\)/);
   assert.match(crm, /Loan Tenure Months/);
   assert.match(crm, /Business Access/);
