@@ -645,8 +645,9 @@ export default async function handler(req, res) {
         const parsed = channelId.match(channelIdPattern), region = canonicalRegion(body.region || (parsed ? `${parsed[1]}_MALAYSIA` : channelRegion(existing, branches)));
         if (!['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(region)) throw new Error('Select East Malaysia or West Malaysia');
         if (parsed && region !== `${parsed[1]}_MALAYSIA`) throw new Error('The channel slot must match its East or West region');
-        const slot = clean(body.slot || (parsed ? parsed[2] : existing?.['Channel Slot']));
-        if (parsed && slot !== parsed[2]) throw new Error('The channel slot number cannot be changed');
+        const reservedSlot = parsed ? `0${parsed[2]}` : '';
+        const slot = clean(body.slot || reservedSlot || existing?.['Channel Slot']);
+        if (parsed && slot !== reservedSlot) throw new Error('The channel slot number cannot be changed');
         const branchId = clean(body.branchId), branch = branches.find(row => clean(row['Branch ID']) === branchId);
         if (branchId && (!branch || canonicalRegion(branch.Region) !== region)) throw new Error('The selected branch does not belong to this channel region');
         const phoneNumberId = clean(body.phoneNumberId), displayNumber = clean(body.displayNumber), wabaId = clean(body.wabaId);
