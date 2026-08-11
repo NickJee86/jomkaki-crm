@@ -455,7 +455,7 @@ function downloadAdminReport(report){
     ...report.rejectionRows,
     [],
     ['2nd hand motor inventory'],
-    ['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],
+    ['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Approval status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],
     ...report.secondHandRows,
     [],
     ['Regional performance'],
@@ -568,7 +568,9 @@ function reportsLegacy(){
   ):[];
   const secondHandMotors=secondHandBase.filter(motor=>reportWithin(motor,period,['updated','lastVerified']));
   const secondHandAvailable=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='AVAILABLE');
-  const secondHandVisible=secondHandAvailable.filter(motor=>motor.customerVisible&&motor.imageApproved&&motor.photos?.length&&motor.location);
+  const secondHandVisible=secondHandAvailable.filter(motor=>String(motor.approvalStatus||'APPROVED').toUpperCase()==='APPROVED'&&motor.customerVisible&&motor.imageApproved&&motor.photos?.length&&motor.location);
+  const secondHandPendingApproval=secondHandMotors.filter(motor=>String(motor.approvalStatus||'APPROVED').toUpperCase()==='PENDING_APPROVAL');
+  const secondHandRejected=secondHandMotors.filter(motor=>String(motor.approvalStatus||'APPROVED').toUpperCase()==='REJECTED');
   const secondHandReserved=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='RESERVED');
   const secondHandSold=secondHandMotors.filter(motor=>String(motor.status).toUpperCase()==='SOLD');
   const secondHandStale=secondHandAvailable.filter(motor=>reportAgeDays(motor,['lastVerified','updated'])>7);
@@ -577,7 +579,7 @@ function reportsLegacy(){
   const secondHandStatusGroups=adminGroup(secondHandMotors,motor=>motor.status||'Not recorded');
   const secondHandRegionGroups=adminGroup(secondHandMotors,motor=>reportRegionKey(motor.region));
   const secondHandRows=secondHandMotors.slice().sort((a,b)=>String(a.region).localeCompare(String(b.region))||String(a.branch).localeCompare(String(b.branch))||String(a.brand+' '+a.model).localeCompare(String(b.brand+' '+b.model))).map(motor=>[
-    motor.id,[motor.brand,motor.model,motor.variant].filter(Boolean).join(' '),motor.year||'',pretty(motor.region),motor.branch||motor.branchId||'',motor.location||'',pretty(motor.status),motor.conditionGrade||'',motor.mileageKm||'',motor.price?`RM ${Number(motor.price).toLocaleString('en-MY')}`:'',motor.customerVisible?'Yes':'No',motor.imageApproved?'Approved':'Pending',motor.lastVerified||''
+    motor.id,[motor.brand,motor.model,motor.variant].filter(Boolean).join(' '),motor.year||'',pretty(motor.region),motor.branch||motor.branchId||'',motor.location||'',pretty(motor.status),pretty(motor.approvalStatus||'APPROVED'),motor.conditionGrade||'',motor.mileageKm||'',motor.price?`RM ${Number(motor.price).toLocaleString('en-MY')}`:'',motor.customerVisible?'Yes':'No',motor.imageApproved?'Approved':'Pending',motor.lastVerified||''
   ]);
   const productMixGroups=adminGroup(applications,application=>reportProductViewLabel(reportProductTypeKey(application)));
   const newMotorApplications=applications.filter(application=>reportProductTypeKey(application)==='NEW_MOTOR');
@@ -670,6 +672,8 @@ function reportsLegacy(){
     '2nd hand units':secondHandMotors.length,
     '2nd hand available':secondHandAvailable.length,
     '2nd hand AI-visible':secondHandVisible.length,
+    '2nd hand pending approval':secondHandPendingApproval.length,
+    '2nd hand rejected':secondHandRejected.length,
     '2nd hand available stock value':`RM ${secondHandStockValue.toLocaleString('en-MY')}`,
     '2nd hand stale over 7 days':secondHandStale.length
   };
@@ -748,6 +752,8 @@ function reportsLegacy(){
       metric('Handphone applications',handphoneApplications.length,'Kept separate from motor totals')+
       (showSecondHandReport?metric('2nd hand units',secondHandMotors.length,'Current report filters')+
       metric('2nd hand available',secondHandAvailable.length,secondHandVisible.length+' AI-visible')+
+      metric('Pending approval',secondHandPendingApproval.length,'Regional Manager or Admin review')+
+      metric('Rejected submissions',secondHandRejected.length,'Branch correction required')+
       metric('2nd hand reserved',secondHandReserved.length,'Held units')+
       metric('2nd hand sold',secondHandSold.length,'Status records')+
       metric('2nd hand stock value',`RM ${secondHandStockValue.toLocaleString('en-MY')}`,'Available selling prices')+
@@ -756,7 +762,7 @@ function reportsLegacy(){
     '</div>'+
     '<div class="report-grid">'+
       '<section class="report-card"><h3>Product application mix</h3>'+adminBars(productMixGroups,10)+'</section>'+
-      (showSecondHandReport?'<section class="report-card wide second-hand-report-card"><div class="panel-head"><div><h3>2nd hand inventory by region, branch and status</h3><p>Uses the selected period, Product view, Region, Branch, stock status and model/location filters together.</p></div></div><div class="report-split"><div><h4>Stock status</h4>'+adminBars(secondHandStatusGroups,10)+'</div><div><h4>Region</h4>'+adminBars(secondHandRegionGroups,5)+'</div></div>'+adminReportTable(['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],secondHandRows)+'</section>':'')+
+      (showSecondHandReport?'<section class="report-card wide second-hand-report-card"><div class="panel-head"><div><h3>2nd hand inventory by region, branch and status</h3><p>Uses the selected period, Product view, Region, Branch, stock status and model/location filters together.</p></div></div><div class="report-split"><div><h4>Stock status</h4>'+adminBars(secondHandStatusGroups,10)+'</div><div><h4>Region</h4>'+adminBars(secondHandRegionGroups,5)+'</div></div>'+adminReportTable(['Inventory ID','Motor','Year','Region','Branch','Customer location','Status','Approval status','Condition','Mileage KM','Selling price','Customer visible','Image approval','Last verified'],secondHandRows)+'</section>':'')+
       integrationReportCard('WhatsApp Meta Cloud performance',metaIntegration,'<div class="metric-grid compact-metrics">'+
         metric('Cloud inbound',metaInbound.length,'Customer messages received')+
         metric('Cloud outbound',metaOutbound.length,'Messages sent through API')+
