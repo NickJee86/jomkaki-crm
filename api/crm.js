@@ -29,8 +29,44 @@ const rowBusinessUnit = row => {
 };
 const businessAllows = (access, unit) => canonicalBusinessAccess(access) === 'BOTH' || canonicalBusinessAccess(access) === canonicalBusinessUnit(unit);
 const businessSheets = unit => canonicalBusinessUnit(unit) === 'HANDPHONE'
-  ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'Q', pricingMax: 'AB', idPrefix: 'HP' }
+  ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'AB', pricingMax: 'AO', idPrefix: 'HP' }
   : { unit: 'MOTOR', catalog: 'Motor_Model_Catalog', pricing: 'Motor_Loan_Pricing', catalogMax: 'Q', pricingMax: 'Z', idPrefix: 'MTR' };
+const handphoneCatalogApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Branch Availability', 'Supersedes Catalog ID'];
+const handphonePricingApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Promotion Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Minimum Product Price (RM)', 'Admin Review Required', 'Supersedes Pricing ID'];
+const handphoneCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Operating System', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image Caption (MS)', 'Stock Check Mode', 'Region Availability', 'Warehouse Availability', 'Search Keywords'];
+const handphonePricingPublishFields = ['Catalog ID', 'Brand', 'Model', 'Variant', 'Price Zone', 'Product Price (RM)', 'Deposit (RM)', 'Monthly 12 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 48 Months (RM)', 'Effective From', 'Effective To', 'Internal Notes', 'Promotion Name', 'Promotion Deposit (RM)', 'Promotion Start', 'Promotion End', 'Promotion Notes'];
+const selectedFields = (row, fields) => Object.fromEntries(fields.map(field => [field, row[field]]));
+export const handphoneApprovalStatus = row => clean(row?.['Approval Status']).toUpperCase() || (clean(row?.['Submitted By']) ? 'PENDING_APPROVAL' : 'APPROVED');
+const handphoneRowRegion = row => canonicalRegion(row?.['Submitted Region'] || row?.['Region Availability'] || row?.['Price Zone']);
+const handphoneSubmitRoles = new Set(['ADMIN', 'REGION_MANAGER', 'BRANCH_SUPERVISOR', 'BUSINESS_MANAGER']);
+export const canSubmitHandphone = session => {
+  const access = canonicalBusinessAccess(session?.businessAccess, session?.role);
+  return handphoneSubmitRoles.has(canonicalRole(session?.role)) && (access === 'BOTH' || access === 'HANDPHONE');
+};
+export const canReviewHandphone = (session, row) => {
+  const role = canonicalRole(session?.role);
+  if (role === 'ADMIN') return true;
+  const access = canonicalBusinessAccess(session?.businessAccess, session?.role);
+  if (role !== 'REGION_MANAGER' || !['BOTH', 'HANDPHONE'].includes(access)) return false;
+  return clean(session?.username) !== clean(row?.['Submitted By']) && canonicalRegion(session?.region) === handphoneRowRegion(row);
+};
+const handphoneVisibleToSession = (session, row, kind) => {
+  if (!businessPermitted(session, { 'Business Unit': 'HANDPHONE' })) return false;
+  const role = canonicalRole(session?.role), approved = handphoneApprovalStatus(row) === 'APPROVED';
+  if (role === 'ADMIN') return true;
+  if (approved && truth(row.Active) && (kind !== 'pricing' || clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED')) {
+    if (kind !== 'pricing' || clean(row['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(row['Price Zone']) === canonicalRegion(session.region)) return true;
+  }
+  if (role === 'REGION_MANAGER') return canonicalRegion(session.region) === handphoneRowRegion(row);
+  if (role === 'BRANCH_SUPERVISOR') return clean(row['Submitted Branch ID']) === clean(session.branchId);
+  if (role === 'BUSINESS_MANAGER') return clean(row['Submitted By']) === clean(session.username);
+  return false;
+};
+const handphoneBranchStockEntries = value => clean(value).split(';').map(entry => entry.trim()).filter(Boolean).map(entry => {
+  const [branchId, status, quantity, updatedAt] = entry.split(':');
+  return { branchId: clean(branchId), status: clean(status).toUpperCase(), quantity: Number(quantity) || 0, updatedAt: clean(updatedAt) };
+}).filter(entry => entry.branchId);
+const handphoneBranchStockText = entries => entries.map(entry => `${entry.branchId}:${entry.status}:${Math.max(0, Number(entry.quantity) || 0)}:${entry.updatedAt || now().slice(0, 10)}`).join(';');
 const secondHandSheet = 'Second_Hand_Motor_Inventory';
 const secondHandRange = `${secondHandSheet}!A1:AM2000`;
 const secondHandApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested'];
@@ -740,11 +776,99 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { type: 'CRM_SECOND_HAND_MOTOR_SUBMITTED_FOR_APPROVAL', description: `${brand} ${model} added and submitted for approval at ${location || branchId}` });
         return res.status(201).json({ live: true, inventoryId: newInventoryId, approvalStatus: 'PENDING_APPROVAL' });
       }
-      if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled'].includes(action)) {
-        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+      if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled', 'reviewHandphoneCatalog', 'reviewHandphonePricing', 'setHandphoneStockAvailability'].includes(action)) {
         const businessUnit = canonicalBusinessUnit(body.businessUnit) || 'MOTOR';
         const config = businessSheets(businessUnit);
+        const admin = canonicalRole(session.role) === 'ADMIN';
+        if (businessUnit === 'MOTOR' && !admin) return res.status(403).json({ live: false, error: 'Administrator access is required for Motor catalog and pricing.' });
+        if (businessUnit === 'HANDPHONE' && !canSubmitHandphone(session)) return res.status(403).json({ live: false, error: 'Handphone catalog access is required.' });
+        if (businessUnit === 'HANDPHONE') {
+          await ensureSheetHeaders(req, config.catalog, handphoneCatalogApprovalHeaders);
+          await ensureSheetHeaders(req, config.pricing, handphonePricingApprovalHeaders);
+        }
+        if (action === 'setHandphoneStockAvailability') {
+          if (businessUnit !== 'HANDPHONE') throw new Error('Branch stock updates are available for Handphone only');
+          const catalogId = clean(body.catalogId), branchId = clean(body.branchId || session.branchId), status = clean(body.status).toUpperCase(), quantity = amount(body.quantity, 'Stock quantity', true);
+          if (!catalogId || !branchId || !['IN_STOCK', 'LOW_STOCK', 'OUT_OF_STOCK'].includes(status)) throw new Error('Catalog item, branch and a valid stock status are required');
+          const [catalogRows, branchRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`, 'Branch_Master!A1:S1000']);
+           const record = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId), branch = rowsToObjects(branchRows).find(row => clean(row['Branch ID']) === branchId && truth(row.Active));
+           if (!record || !branch) throw new Error('Active Handphone item and branch are required');
+           if (handphoneApprovalStatus(record) !== 'APPROVED') throw new Error('Approve the Handphone catalog item before updating branch stock');
+          const branchRegion = canonicalRegion(branch.Region), role = canonicalRole(session.role);
+          if (role === 'BRANCH_SUPERVISOR' && branchId !== clean(session.branchId)) return res.status(403).json({ live: false, error: 'Branch Supervisor may update their own branch stock only.' });
+          if (!admin && role !== 'BRANCH_SUPERVISOR' && canonicalRegion(session.region) !== branchRegion) return res.status(403).json({ live: false, error: 'This branch is outside your permitted region.' });
+          if (!admin && canonicalRegion(session.region) !== branchRegion) return res.status(403).json({ live: false, error: 'This branch is outside your permitted region.' });
+          const entries = handphoneBranchStockEntries(record['Branch Availability']).filter(entry => entry.branchId !== branchId);
+          entries.push({ branchId, status, quantity, updatedAt: now().slice(0, 10) });
+          await updateObject(req, config.catalog, 'Catalog ID', catalogId, { 'Branch Availability': handphoneBranchStockText(entries), 'Last Verified At': now().slice(0, 10) }, config.catalogMax);
+          await writeActivity(req, session, { type: 'CRM_HANDPHONE_BRANCH_STOCK_UPDATED', description: `${record.Brand} ${record.Model} ${record.Variant} at ${branchId} set to ${status} (${quantity})` });
+          return res.status(200).json({ live: true, catalogId, branchId, status, quantity });
+        }
+        if (action === 'reviewHandphoneCatalog') {
+          const catalogId = clean(body.catalogId), decision = clean(body.decision).toUpperCase(), notes = clean(body.notes);
+          const [rows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
+          const catalogRecords = rowsToObjects(rows), record = catalogRecords.find(row => clean(row['Catalog ID']) === catalogId);
+          if (!record) throw new Error('Handphone catalog item was not found');
+          if (handphoneApprovalStatus(record) !== 'PENDING_APPROVAL') throw new Error('Only a pending Handphone catalog submission can be reviewed');
+          if (!canReviewHandphone(session, record)) return res.status(403).json({ live: false, error: 'Admin or a different Regional Manager for this region must review this submission.' });
+          if (!['APPROVED', 'REJECTED'].includes(decision)) throw new Error('Select Approve or Reject');
+          if (decision === 'REJECTED' && !notes) throw new Error('Add a rejection reason so the branch can correct the item');
+          const approved = decision === 'APPROVED', publish = approved && truth(record['Publish Requested']), supersedesCatalogId = clean(record['Supersedes Catalog ID']);
+          if (publish && !clean(record['Image URL'])) throw new Error('Add a product image before approving publication');
+          if (approved && supersedesCatalogId) {
+            const current = catalogRecords.find(row => clean(row['Catalog ID']) === supersedesCatalogId);
+            if (!current) throw new Error('The approved catalog version to replace was not found');
+            await updateObject(req, config.catalog, 'Catalog ID', supersedesCatalogId, {
+              ...selectedFields(record, handphoneCatalogPublishFields), Active: publish ? 'TRUE' : 'FALSE', 'Image Approved': clean(record['Image URL']) ? 'TRUE' : 'FALSE', 'Last Verified At': now().slice(0, 10),
+              'Approval Status': 'APPROVED', 'Submitted By': record['Submitted By'], 'Submitted At': record['Submitted At'], 'Approved By': session.username, 'Approved At': now(), 'Approval Notes': notes,
+              'Publish Requested': record['Publish Requested'], 'Submitted Region': record['Submitted Region'], 'Submitted Branch ID': record['Submitted Branch ID'], 'Supersedes Catalog ID': ''
+            }, config.catalogMax);
+            await updateObject(req, config.catalog, 'Catalog ID', catalogId, { 'Approval Status': 'MERGED', Active: 'FALSE', 'Image Approved': 'FALSE', 'Approved By': session.username, 'Approved At': now(), 'Approval Notes': `Published into ${supersedesCatalogId}${notes ? ` - ${notes}` : ''}` }, config.catalogMax);
+            await writeActivity(req, session, { type: 'CRM_HANDPHONE_CATALOG_APPROVED', description: `${record.Brand} ${record.Model} ${record.Variant} approved and published into ${supersedesCatalogId}${notes ? ` - ${notes}` : ''}` });
+            return res.status(200).json({ live: true, catalogId: supersedesCatalogId, proposalId: catalogId, approvalStatus: 'APPROVED' });
+          }
+          await updateObject(req, config.catalog, 'Catalog ID', catalogId, { 'Approval Status': decision, 'Approved By': approved ? session.username : '', 'Approved At': approved ? now() : '', 'Approval Notes': notes, Active: publish ? 'TRUE' : 'FALSE', 'Image Approved': approved && clean(record['Image URL']) ? 'TRUE' : 'FALSE', 'Last Verified At': now().slice(0, 10) }, config.catalogMax);
+          await writeActivity(req, session, { type: `CRM_HANDPHONE_CATALOG_${decision}`, description: `${record.Brand} ${record.Model} ${record.Variant} ${decision.toLowerCase()}${notes ? ` - ${notes}` : ''}` });
+          return res.status(200).json({ live: true, catalogId, approvalStatus: decision });
+        }
+        if (action === 'reviewHandphonePricing') {
+          const requestedIds = Array.isArray(body.pricingIds) ? body.pricingIds.map(clean).filter(Boolean) : [clean(body.pricingId)].filter(Boolean), pricingIds = [...new Set(requestedIds)], decision = clean(body.decision).toUpperCase(), notes = clean(body.notes);
+          if (!pricingIds.length || !['APPROVED', 'REJECTED'].includes(decision)) throw new Error('Pricing record and decision are required');
+          if (decision === 'REJECTED' && !notes) throw new Error('Add a rejection reason so the branch can correct the pricing');
+          const [rows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]), allRecords = rowsToObjects(rows), records = pricingIds.map(id => allRecords.find(row => clean(row['Pricing ID']) === id));
+          if (records.some(record => !record)) throw new Error('One or more Handphone pricing records were not found');
+          if (records.some(record => handphoneApprovalStatus(record) !== 'PENDING_APPROVAL')) throw new Error('Only pending Handphone pricing submissions can be reviewed');
+          if (records.some(record => !canReviewHandphone(session, record))) return res.status(403).json({ live: false, error: 'Admin or a different Regional Manager for this region must review these prices.' });
+          if (!admin && decision === 'APPROVED' && records.some(record => truth(record['Admin Review Required']))) return res.status(403).json({ live: false, error: 'This price is below the approved floor and requires Admin approval.' });
+          const approved = decision === 'APPROVED';
+          for (const record of records) {
+            const publish = approved && truth(record['Publish Requested']), promotionPublish = approved && truth(record['Promotion Publish Requested']) && clean(record['Promotion Name']);
+            const currentFloor = Number(customerAmount(record['Minimum Product Price (RM)'])) || Number(customerAmount(record['Product Price (RM)'])) || 0, supersedesPricingId = clean(record['Supersedes Pricing ID']);
+            if (approved && supersedesPricingId) {
+              const current = allRecords.find(row => clean(row['Pricing ID']) === supersedesPricingId);
+              if (!current) throw new Error('The approved pricing version to replace was not found');
+              await updateObject(req, config.pricing, 'Pricing ID', supersedesPricingId, {
+                ...selectedFields(record, handphonePricingPublishFields), Active: publish ? 'TRUE' : 'FALSE', 'Quote Approval Status': 'APPROVED', 'Promotion Active': promotionPublish ? 'TRUE' : 'FALSE', 'Promotion Approval Status': clean(record['Promotion Name']) ? 'APPROVED' : 'DRAFT',
+                'Approval Status': 'APPROVED', 'Submitted By': record['Submitted By'], 'Submitted At': record['Submitted At'], 'Approved By': session.username, 'Approved At': now(), 'Approval Notes': notes,
+                'Publish Requested': record['Publish Requested'], 'Promotion Publish Requested': record['Promotion Publish Requested'], 'Submitted Region': record['Submitted Region'], 'Submitted Branch ID': record['Submitted Branch ID'],
+                'Minimum Product Price (RM)': currentFloor, 'Admin Review Required': 'FALSE', 'Supersedes Pricing ID': '', 'Last Updated At': now(), 'Updated By': session.username
+              }, config.pricingMax);
+              await setPricingDerivedFormulas(req, supersedesPricingId, businessUnit);
+              await updateObject(req, config.pricing, 'Pricing ID', record['Pricing ID'], { 'Approval Status': 'MERGED', Active: 'FALSE', 'Quote Approval Status': 'DRAFT', 'Promotion Active': 'FALSE', 'Promotion Approval Status': 'DRAFT', 'Approved By': session.username, 'Approved At': now(), 'Approval Notes': `Published into ${supersedesPricingId}${notes ? ` - ${notes}` : ''}`, 'Admin Review Required': 'FALSE', 'Last Updated At': now(), 'Updated By': session.username }, config.pricingMax);
+              continue;
+            }
+            await updateObject(req, config.pricing, 'Pricing ID', record['Pricing ID'], {
+              'Approval Status': decision, 'Approved By': approved ? session.username : '', 'Approved At': approved ? now() : '', 'Approval Notes': notes,
+              Active: publish ? 'TRUE' : 'FALSE', 'Quote Approval Status': approved ? 'APPROVED' : 'DRAFT', 'Promotion Active': promotionPublish ? 'TRUE' : 'FALSE', 'Promotion Approval Status': approved && clean(record['Promotion Name']) ? 'APPROVED' : 'DRAFT',
+              'Minimum Product Price (RM)': currentFloor, 'Admin Review Required': approved ? 'FALSE' : (truth(record['Admin Review Required']) ? 'TRUE' : 'FALSE'), 'Last Updated At': now(), 'Updated By': session.username
+            }, config.pricingMax);
+          }
+          const first = records[0];
+          await writeActivity(req, session, { type: `CRM_HANDPHONE_PRICING_${decision}`, description: `${first.Brand} ${first.Model} ${storageFromVariant(first.Variant)} ${first['Price Zone']} ${decision.toLowerCase()} for ${records.length} colour SKU(s)${notes ? ` - ${notes}` : ''}` });
+          return res.status(200).json({ live: true, pricingIds, approvalStatus: decision });
+        }
         if (action === 'setCatalogItemEnabled') {
+          if (!admin) return res.status(403).json({ live: false, error: 'Only Admin can directly enable or disable a catalog item.' });
           const catalogId = clean(body.catalogId), enabled = truth(body.enabled);
           if (!catalogId) throw new Error('Catalog ID is required');
           const [rows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
@@ -755,6 +879,7 @@ export default async function handler(req, res) {
           return res.status(200).json({ live: true, catalogId, enabled, businessUnit });
         }
         if (action === 'setPricingEnabled' || action === 'setPromotionEnabled') {
+          if (!admin) return res.status(403).json({ live: false, error: 'Only Admin can directly enable or disable pricing and promotions.' });
           const pricingId = clean(body.pricingId), requestedPricingIds = Array.isArray(body.pricingIds) ? body.pricingIds.map(clean).filter(Boolean) : [], pricingIds = [...new Set(requestedPricingIds.length ? requestedPricingIds : [pricingId])], enabled = truth(body.enabled);
           if (!pricingIds.length) throw new Error('Pricing ID is required');
           const [rows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]);
@@ -777,84 +902,121 @@ export default async function handler(req, res) {
           if (businessUnit === 'HANDPHONE' && !operatingSystem) throw new Error('Operating system is required for Handphone');
           if (!['PRIMARY', 'SECONDARY', 'ON_REQUEST'].includes(tier)) throw new Error('A valid popularity tier is required');
           if (!['CHECK_BRANCH', 'CHECK_WAREHOUSE', 'CONFIRMED_AVAILABLE', 'UNAVAILABLE'].includes(stock)) throw new Error('A valid stock check mode is required');
-          const timestamp = now(), record = {
+          const [catalogRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]), existingCatalog = rowsToObjects(catalogRows), existingRecord = existingCatalog.find(row => clean(row['Catalog ID']) === catalogId);
+          if (catalogId && !existingRecord) throw new Error('Catalog item was not found');
+          if (businessUnit === 'HANDPHONE' && admin && existingRecord && handphoneApprovalStatus(existingRecord) !== 'APPROVED') throw new Error('Use Approve or Reject for submitted Handphone catalog changes');
+          const delegated = businessUnit === 'HANDPHONE' && !admin, timestamp = now(), publishRequested = truth(body.publishRequested ?? body.active);
+          const submittedRegion = delegated ? canonicalRegion(session.region) : canonicalRegion(body.regionAvailability || existingRecord?.['Submitted Region']);
+          const existingApproval = existingRecord ? handphoneApprovalStatus(existingRecord) : '', supersedesCatalogId = delegated && existingRecord ? (existingApproval === 'APPROVED' ? catalogId : clean(existingRecord['Supersedes Catalog ID'])) : '';
+          if (delegated && !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(submittedRegion)) throw new Error('A valid permitted region is required for Handphone submission');
+          const record = {
             Brand: brand, Model: model, Variant: variant, Category: category, ...(businessUnit === 'HANDPHONE' ? { 'Operating System': operatingSystem } : { 'Fuel Type': fuel }), 'Popularity Tier': tier,
             'Product Page URL': validUrl(body.productPageUrl, 'Product page URL'), 'Image URL': validUrl(body.imageUrl, 'Image URL'),
-            'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': truth(body.imageApproved) ? 'TRUE' : 'FALSE',
-            Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Stock Check Mode': stock, ...(businessUnit === 'HANDPHONE' ? { 'Region Availability': clean(body.regionAvailability || body.branchAvailability) } : { 'Branch Availability': clean(body.branchAvailability) }),
-            'Warehouse Availability': clean(body.warehouseAvailability), 'Search Keywords': clean(body.searchKeywords), 'Last Verified At': timestamp.slice(0, 10)
+            'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': delegated ? 'FALSE' : (truth(body.imageApproved) ? 'TRUE' : 'FALSE'),
+            Active: delegated ? 'FALSE' : (truth(body.active) ? 'TRUE' : 'FALSE'), 'Stock Check Mode': stock, ...(businessUnit === 'HANDPHONE' ? { 'Region Availability': delegated ? clean(existingRecord?.['Region Availability'] || submittedRegion) : clean(body.regionAvailability || body.branchAvailability) } : { 'Branch Availability': clean(body.branchAvailability) }),
+            'Warehouse Availability': clean(body.warehouseAvailability), 'Search Keywords': clean(body.searchKeywords), 'Last Verified At': timestamp.slice(0, 10),
+            ...(businessUnit === 'HANDPHONE' ? { 'Approval Status': delegated ? 'PENDING_APPROVAL' : 'APPROVED', 'Submitted By': session.username, 'Submitted At': timestamp, 'Approved By': delegated ? '' : session.username, 'Approved At': delegated ? '' : timestamp, 'Approval Notes': '', 'Publish Requested': publishRequested ? 'TRUE' : 'FALSE', 'Submitted Region': submittedRegion || 'ALL', 'Submitted Branch ID': delegated ? clean(session.branchId) : clean(body.submittedBranchId || existingRecord?.['Submitted Branch ID']), 'Branch Availability': clean(existingRecord?.['Branch Availability']), 'Supersedes Catalog ID': supersedesCatalogId } : {})
           };
           if (catalogId) {
+            if (delegated && existingApproval === 'APPROVED') {
+              let proposalId = `${catalogId}-REV-${Date.now().toString(36).toUpperCase()}`;
+              while (existingCatalog.some(row => clean(row['Catalog ID']) === proposalId)) proposalId = `${proposalId}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+              await appendObject(req, config.catalog, { 'Catalog ID': proposalId, ...record });
+              await writeActivity(req, session, { type: 'CRM_HANDPHONE_CATALOG_SUBMITTED_FOR_APPROVAL', description: `${businessUnit} ${brand} ${model} change submitted for approval while ${catalogId} remains live` });
+              return res.status(201).json({ live: true, catalogId: proposalId, supersedesCatalogId: catalogId, businessUnit, approvalStatus: 'PENDING_APPROVAL' });
+            }
             await updateObject(req, config.catalog, 'Catalog ID', catalogId, record, config.catalogMax);
-            await writeActivity(req, session, { type: 'CRM_CATALOG_UPDATED', description: `${businessUnit} ${brand} ${model} catalog item updated` });
-            return res.status(200).json({ live: true, catalogId, businessUnit });
+            await writeActivity(req, session, { type: delegated ? 'CRM_HANDPHONE_CATALOG_SUBMITTED_FOR_APPROVAL' : 'CRM_CATALOG_UPDATED', description: `${businessUnit} ${brand} ${model} catalog item ${delegated ? 'submitted for approval' : 'updated'}` });
+            return res.status(200).json({ live: true, catalogId, businessUnit, approvalStatus: delegated ? 'PENDING_APPROVAL' : 'APPROVED' });
           }
-          const [catalogRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
-          const existing = rowsToObjects(catalogRows);
           let newCatalogId = `${config.idPrefix}-${slug(brand)}-${slug(model)}`;
-          if (existing.some(row => clean(row['Catalog ID']) === newCatalogId)) newCatalogId = `${newCatalogId}-${Date.now().toString(36).toUpperCase()}`;
+          if (existingCatalog.some(row => clean(row['Catalog ID']) === newCatalogId)) newCatalogId = `${newCatalogId}-${Date.now().toString(36).toUpperCase()}`;
           await appendObject(req, config.catalog, { 'Catalog ID': newCatalogId, ...record });
-          await writeActivity(req, session, { type: 'CRM_CATALOG_CREATED', description: `${brand} ${model} added to the ${businessUnit.toLowerCase()} catalog` });
-          return res.status(201).json({ live: true, catalogId: newCatalogId, businessUnit });
+          await writeActivity(req, session, { type: delegated ? 'CRM_HANDPHONE_CATALOG_SUBMITTED_FOR_APPROVAL' : 'CRM_CATALOG_CREATED', description: `${brand} ${model} ${delegated ? 'submitted for approval in' : 'added to'} the ${businessUnit.toLowerCase()} catalog` });
+          return res.status(201).json({ live: true, catalogId: newCatalogId, businessUnit, approvalStatus: delegated ? 'PENDING_APPROVAL' : 'APPROVED' });
         }
 
-        const pricingId = clean(body.pricingId), catalogId = clean(body.catalogId), zone = clean(body.zone).toUpperCase();
-        const [catalogRows, branchRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`, 'Branch_Master!A1:S1000']);
+        const pricingId = clean(body.pricingId), catalogId = clean(body.catalogId), delegatedPricing = businessUnit === 'HANDPHONE' && !admin;
+        const zone = delegatedPricing ? canonicalRegion(session.region) : clean(body.zone).toUpperCase();
+        const [catalogRows, branchRows, currentPricingRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`, 'Branch_Master!A1:S1000', `${config.pricing}!A1:${config.pricingMax}1000`]);
         const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId);
         if (!catalogRecord) throw new Error(`Select a valid ${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} catalog item`);
         const allowedZones = new Set(['ALL_BRANCHES', 'WEST_MALAYSIA', 'EAST_MALAYSIA', 'SARAWAK', ...rowsToObjects(branchRows).filter(row => truth(row.Active)).map(row => clean(row['Branch ID']))]);
         if (!allowedZones.has(zone)) throw new Error('Select a valid price zone or branch');
-        const quoteStatus = clean(body.quoteStatus).toUpperCase(), promotionStatus = clean(body.promotionStatus).toUpperCase();
+        const quoteStatus = delegatedPricing ? 'DRAFT' : clean(body.quoteStatus).toUpperCase(), promotionStatus = delegatedPricing ? 'DRAFT' : clean(body.promotionStatus).toUpperCase();
         if (!['DRAFT', 'APPROVED', 'PAUSED'].includes(quoteStatus) || !['DRAFT', 'APPROVED', 'PAUSED'].includes(promotionStatus)) throw new Error('A valid approval status is required');
         const effectiveFrom = validDate(body.effectiveFrom, 'Effective from'), effectiveTo = validDate(body.effectiveTo, 'Effective to');
         const promotionStart = validDate(body.promotionStart, 'Promotion start'), promotionEnd = validDate(body.promotionEnd, 'Promotion end');
         if (effectiveFrom && effectiveTo && effectiveFrom > effectiveTo) throw new Error('Pricing end date cannot be earlier than its start date');
         if (promotionStart && promotionEnd && promotionStart > promotionEnd) throw new Error('Promotion end date cannot be earlier than its start date');
+        const currentPricing = rowsToObjects(currentPricingRows), existingPricingRecord = currentPricing.find(row => clean(row['Pricing ID']) === pricingId);
+        if (pricingId && !existingPricingRecord) throw new Error('Pricing record was not found');
+        if (businessUnit === 'HANDPHONE' && admin && existingPricingRecord && handphoneApprovalStatus(existingPricingRecord) !== 'APPROVED') throw new Error('Use Approve or Reject for submitted Handphone pricing changes');
+        const baselinePricingRecord = existingPricingRecord && clean(existingPricingRecord['Supersedes Pricing ID']) ? currentPricing.find(row => clean(row['Pricing ID']) === clean(existingPricingRecord['Supersedes Pricing ID'])) || existingPricingRecord : existingPricingRecord;
+        const proposedProductPrice = businessUnit === 'HANDPHONE' ? amount(body.productPrice, 'Product price') : '';
+        const existingFloor = Number(customerAmount(baselinePricingRecord?.['Minimum Product Price (RM)'])) || Number(customerAmount(baselinePricingRecord?.['Product Price (RM)'])) || Number(proposedProductPrice) || 0;
+        const adminReviewRequired = delegatedPricing && Number(proposedProductPrice) < existingFloor;
+        const supersedesPricingId = delegatedPricing && existingPricingRecord ? (handphoneApprovalStatus(existingPricingRecord) === 'APPROVED' ? clean(existingPricingRecord['Pricing ID']) : clean(existingPricingRecord['Supersedes Pricing ID'])) : '';
         const timestamp = now(), pricingRecord = {
           'Catalog ID': catalogId, Brand: catalogRecord.Brand, Model: catalogRecord.Model, Variant: catalogRecord.Variant || 'Standard', 'Price Zone': zone,
           ...(businessUnit === 'HANDPHONE' ? {
-            'Product Price (RM)': amount(body.productPrice, 'Product price'), 'Deposit (RM)': amount(body.deposit, 'Deposit'),
+            'Product Price (RM)': proposedProductPrice, 'Deposit (RM)': amount(body.deposit, 'Deposit'),
             'Monthly 12 Months (RM)': amount(body.month12, '12-month instalment'), 'Monthly 24 Months (RM)': amount(body.month24, '24-month instalment'),
             'Monthly 36 Months (RM)': amount(body.month36, '36-month instalment'), 'Monthly 48 Months (RM)': amount(body.month48, '48-month instalment', true)
           } : {
             'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
             'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment')
           }),
-          Active: truth(body.active) ? 'TRUE' : 'FALSE', 'Effective From': effectiveFrom, 'Effective To': effectiveTo,
+          Active: delegatedPricing ? 'FALSE' : (truth(body.active) ? 'TRUE' : 'FALSE'), 'Effective From': effectiveFrom, 'Effective To': effectiveTo,
           'Quote Approval Status': quoteStatus, 'Last Updated At': timestamp, 'Updated By': session.username, 'Internal Notes': clean(body.internalNotes),
           'Promotion Name': clean(body.promotionName), 'Promotion Deposit (RM)': amount(body.promotionDeposit, 'Promotion deposit', true),
-          'Promotion Start': promotionStart, 'Promotion End': promotionEnd, 'Promotion Active': truth(body.promotionActive) ? 'TRUE' : 'FALSE',
-          'Promotion Approval Status': promotionStatus, 'Promotion Notes': clean(body.promotionNotes)
+          'Promotion Start': promotionStart, 'Promotion End': promotionEnd, 'Promotion Active': delegatedPricing ? 'FALSE' : (truth(body.promotionActive) ? 'TRUE' : 'FALSE'),
+          'Promotion Approval Status': promotionStatus, 'Promotion Notes': clean(body.promotionNotes),
+          ...(businessUnit === 'HANDPHONE' ? { 'Approval Status': delegatedPricing ? 'PENDING_APPROVAL' : 'APPROVED', 'Submitted By': session.username, 'Submitted At': timestamp, 'Approved By': delegatedPricing ? '' : session.username, 'Approved At': delegatedPricing ? '' : timestamp, 'Approval Notes': '', 'Publish Requested': truth(body.publishRequested ?? body.active) ? 'TRUE' : 'FALSE', 'Promotion Publish Requested': truth(body.promotionPublishRequested ?? body.promotionActive) ? 'TRUE' : 'FALSE', 'Submitted Region': delegatedPricing ? canonicalRegion(session.region) : canonicalRegion(zone), 'Submitted Branch ID': delegatedPricing ? clean(session.branchId) : clean(body.submittedBranchId || existingPricingRecord?.['Submitted Branch ID']), 'Minimum Product Price (RM)': amount(body.minimumProductPrice ?? existingFloor, 'Minimum product price', true), 'Admin Review Required': adminReviewRequired ? 'TRUE' : 'FALSE', 'Supersedes Pricing ID': supersedesPricingId } : {})
         };
         if (truth(body.promotionActive) && (!clean(body.promotionName) || pricingRecord['Promotion Deposit (RM)'] === '')) throw new Error('An active promotion requires a name and promotion deposit');
         const sharedHandphoneScope = businessUnit === 'HANDPHONE' && clean(body.pricingScope).toUpperCase() === 'MODEL_STORAGE_ZONE';
         const requestedPricingIds = Array.isArray(body.pricingIds) ? [...new Set(body.pricingIds.map(clean).filter(Boolean))] : [];
         if (sharedHandphoneScope && requestedPricingIds.length) {
-          const [pricingRows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]);
-          const allPricing = rowsToObjects(pricingRows), targets = requestedPricingIds.map(id => allPricing.find(row => clean(row['Pricing ID']) === id));
+          const allPricing = currentPricing, targets = requestedPricingIds.map(id => allPricing.find(row => clean(row['Pricing ID']) === id));
           if (targets.some(record => !record)) throw new Error('One or more colour pricing records were not found');
           const targetStorage = storageFromVariant(catalogRecord.Variant);
           if (targets.some(record => clean(record.Brand) !== clean(catalogRecord.Brand) || clean(record.Model) !== clean(catalogRecord.Model) || storageFromVariant(record.Variant) !== targetStorage || clean(record['Price Zone']).toUpperCase() !== zone)) throw new Error('Shared Handphone pricing records must use the same model, storage and zone');
-          for (const record of targets) {
-            const id = clean(record['Pricing ID']), synchronizedRecord = { ...pricingRecord, 'Catalog ID': record['Catalog ID'], Brand: record.Brand, Model: record.Model, Variant: record.Variant || catalogRecord.Variant };
-            await updateObject(req, config.pricing, 'Pricing ID', id, synchronizedRecord, config.pricingMax);
-            await setPricingDerivedFormulas(req, id, businessUnit);
+          const writtenPricingIds = [];
+          for (const [index, record] of targets.entries()) {
+            const id = clean(record['Pricing ID']), approval = handphoneApprovalStatus(record), synchronizedRecord = { ...pricingRecord, 'Catalog ID': record['Catalog ID'], Brand: record.Brand, Model: record.Model, Variant: record.Variant || catalogRecord.Variant, ...(delegatedPricing ? { 'Supersedes Pricing ID': approval === 'APPROVED' ? id : clean(record['Supersedes Pricing ID']) } : {}) };
+            if (delegatedPricing && approval === 'APPROVED') {
+              const proposalId = `${id}-REV-${Date.now().toString(36).toUpperCase()}-${index + 1}`;
+              await appendObject(req, config.pricing, { 'Pricing ID': proposalId, ...synchronizedRecord });
+              await setPricingDerivedFormulas(req, proposalId, businessUnit);
+              writtenPricingIds.push(proposalId);
+            } else {
+              await updateObject(req, config.pricing, 'Pricing ID', id, synchronizedRecord, config.pricingMax);
+              await setPricingDerivedFormulas(req, id, businessUnit);
+              writtenPricingIds.push(id);
+            }
           }
-          await writeActivity(req, session, { type: 'CRM_HANDPHONE_SHARED_PRICING_UPDATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing synchronized across ${requestedPricingIds.length} colour SKU(s)` });
-          return res.status(200).json({ live: true, pricingId: requestedPricingIds[0], pricingIds: requestedPricingIds, updated: requestedPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE' });
+          await writeActivity(req, session, { type: delegatedPricing ? 'CRM_HANDPHONE_PRICING_SUBMITTED_FOR_APPROVAL' : 'CRM_HANDPHONE_SHARED_PRICING_UPDATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing ${delegatedPricing ? 'submitted for approval' : 'synchronized'} across ${requestedPricingIds.length} colour SKU(s)` });
+          return res.status(delegatedPricing && writtenPricingIds.some(id => !requestedPricingIds.includes(id)) ? 201 : 200).json({ live: true, pricingId: writtenPricingIds[0], pricingIds: writtenPricingIds, updated: writtenPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE', approvalStatus: delegatedPricing ? 'PENDING_APPROVAL' : 'APPROVED' });
         }
         if (pricingId) {
+          if (delegatedPricing && handphoneApprovalStatus(existingPricingRecord) === 'APPROVED') {
+            const proposalId = `${pricingId}-REV-${Date.now().toString(36).toUpperCase()}`;
+            await appendObject(req, config.pricing, { 'Pricing ID': proposalId, ...pricingRecord });
+            await setPricingDerivedFormulas(req, proposalId, businessUnit);
+            await writeActivity(req, session, { type: 'CRM_HANDPHONE_PRICING_SUBMITTED_FOR_APPROVAL', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing change submitted while ${pricingId} remains live` });
+            return res.status(201).json({ live: true, pricingId: proposalId, supersedesPricingId: pricingId, businessUnit, approvalStatus: 'PENDING_APPROVAL' });
+          }
           await updateObject(req, config.pricing, 'Pricing ID', pricingId, pricingRecord, config.pricingMax);
           await setPricingDerivedFormulas(req, pricingId, businessUnit);
-          await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_UPDATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion updated` });
-          return res.status(200).json({ live: true, pricingId, businessUnit });
+          await writeActivity(req, session, { type: delegatedPricing ? 'CRM_HANDPHONE_PRICING_SUBMITTED_FOR_APPROVAL' : 'CRM_PRICING_PROMOTION_UPDATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion ${delegatedPricing ? 'submitted for approval' : 'updated'}` });
+          return res.status(200).json({ live: true, pricingId, businessUnit, approvalStatus: delegatedPricing ? 'PENDING_APPROVAL' : 'APPROVED' });
         }
         if (sharedHandphoneScope) {
           const targetStorage = storageFromVariant(catalogRecord.Variant), catalogObjects = rowsToObjects(catalogRows);
           const colourCatalogRecords = catalogObjects.filter(record => truth(record.Active) && clean(record.Brand) === clean(catalogRecord.Brand) && clean(record.Model) === clean(catalogRecord.Model) && storageFromVariant(record.Variant) === targetStorage);
           if (!colourCatalogRecords.length) throw new Error('No active colour options were found for this model and storage');
-          const [pricingRows] = await readRanges(req, [`${config.pricing}!A1:${config.pricingMax}1000`]), existingPricing = rowsToObjects(pricingRows);
-          const candidates = colourCatalogRecords.filter(record => !existingPricing.some(price => clean(price['Catalog ID']) === clean(record['Catalog ID']) && clean(price['Price Zone']).toUpperCase() === zone));
+          const candidates = colourCatalogRecords.filter(record => !currentPricing.some(price => clean(price['Catalog ID']) === clean(record['Catalog ID']) && clean(price['Price Zone']).toUpperCase() === zone));
           if (!candidates.length) throw new Error('A shared price already exists for this model, storage and zone');
           const createdPricingIds = [];
           for (const [index, record] of candidates.entries()) {
@@ -863,14 +1025,14 @@ export default async function handler(req, res) {
             await setPricingDerivedFormulas(req, newPricingId, businessUnit);
             createdPricingIds.push(newPricingId);
           }
-          await writeActivity(req, session, { type: 'CRM_HANDPHONE_SHARED_PRICING_CREATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing created for ${createdPricingIds.length} colour SKU(s)` });
-          return res.status(201).json({ live: true, pricingId: createdPricingIds[0], pricingIds: createdPricingIds, created: createdPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE' });
+          await writeActivity(req, session, { type: delegatedPricing ? 'CRM_HANDPHONE_PRICING_SUBMITTED_FOR_APPROVAL' : 'CRM_HANDPHONE_SHARED_PRICING_CREATED', description: `HANDPHONE ${catalogRecord.Brand} ${catalogRecord.Model} ${targetStorage} ${zone} shared pricing ${delegatedPricing ? 'submitted for approval' : 'created'} for ${createdPricingIds.length} colour SKU(s)` });
+          return res.status(201).json({ live: true, pricingId: createdPricingIds[0], pricingIds: createdPricingIds, created: createdPricingIds.length, businessUnit, pricingScope: 'MODEL_STORAGE_ZONE', approvalStatus: delegatedPricing ? 'PENDING_APPROVAL' : 'APPROVED' });
         }
         const newPricingId = `PRICE-${config.idPrefix}-${slug(zone)}-${Date.now().toString(36).toUpperCase()}`;
         await appendObject(req, config.pricing, { 'Pricing ID': newPricingId, ...pricingRecord });
         await setPricingDerivedFormulas(req, newPricingId, businessUnit);
-        await writeActivity(req, session, { type: 'CRM_PRICING_PROMOTION_CREATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion created` });
-        return res.status(201).json({ live: true, pricingId: newPricingId, businessUnit });
+        await writeActivity(req, session, { type: delegatedPricing ? 'CRM_HANDPHONE_PRICING_SUBMITTED_FOR_APPROVAL' : 'CRM_PRICING_PROMOTION_CREATED', description: `${businessUnit} ${catalogRecord.Brand} ${catalogRecord.Model} ${zone} pricing and promotion ${delegatedPricing ? 'submitted for approval' : 'created'}` });
+        return res.status(201).json({ live: true, pricingId: newPricingId, businessUnit, approvalStatus: delegatedPricing ? 'PENDING_APPROVAL' : 'APPROVED' });
       }
       if (action === 'createApplication') {
         const customerName = clean(body.customerName), phone = clean(body.phone), catalogId = clean(body.catalogId);
@@ -1188,7 +1350,7 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'applications') {
-      const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AA1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AB1000']);
+      const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AA1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
       const documents = rowsToObjects(documentRows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID']));
       const motorPricing = rowsToObjects(motorPricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
@@ -1251,28 +1413,30 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'pricing') {
-      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AB1000']);
-      const visible = (row, businessUnit) => businessPermitted(session, { 'Business Unit': businessUnit }) && (session.role === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && (clean(row['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(row['Price Zone']) === session.region)));
+      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
+      const visible = (row, businessUnit) => businessUnit === 'HANDPHONE' ? handphoneVisibleToSession(session, row, 'pricing') : businessPermitted(session, { 'Business Unit': businessUnit }) && (canonicalRole(session.role) === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && (clean(row['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(row['Price Zone']) === session.region)));
       const mapPricing = (row, businessUnit) => ({
         id: row['Pricing ID'], catalogId: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'], productPrice: customerAmount(row['Product Price (RM)']),
         deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']), month12: customerAmount(row['Monthly 12 Months (RM)']), month24: customerAmount(row['Monthly 24 Months (RM)']), month36: customerAmount(row['Monthly 36 Months (RM)']), month48: customerAmount(row['Monthly 48 Months (RM)']),
         effective: row['Effective From'], effectiveTo: row['Effective To'], active: truth(row.Active), status: row['Quote Approval Status'], internalNotes: session.role === 'ADMIN' ? row['Internal Notes'] : '',
         promotion: promotionApplies(row) || session.role === 'ADMIN' ? row['Promotion Name'] : '', promotionDeposit: customerAmount(row['Promotion Deposit (RM)']), promotionStart: row['Promotion Start'], promotionEnd: row['Promotion End'],
-        promotionActive: truth(row['Promotion Active']), promotionStatus: row['Promotion Approval Status'], promotionNotes: session.role === 'ADMIN' ? row['Promotion Notes'] : '', updated: row['Last Updated At'], updatedBy: row['Updated By']
+        promotionActive: truth(row['Promotion Active']), promotionStatus: row['Promotion Approval Status'], promotionNotes: canonicalRole(session.role) === 'ADMIN' ? row['Promotion Notes'] : '', updated: row['Last Updated At'], updatedBy: row['Updated By'],
+        approvalStatus: businessUnit === 'HANDPHONE' ? handphoneApprovalStatus(row) : clean(row['Quote Approval Status']).toUpperCase(), submittedBy: row['Submitted By'], submittedAt: row['Submitted At'], approvedBy: row['Approved By'], approvedAt: row['Approved At'], approvalNotes: row['Approval Notes'], publishRequested: truth(row['Publish Requested']), promotionPublishRequested: truth(row['Promotion Publish Requested']), submittedRegion: row['Submitted Region'], submittedBranchId: row['Submitted Branch ID'], minimumProductPrice: customerAmount(row['Minimum Product Price (RM)']), adminReviewRequired: truth(row['Admin Review Required']), supersedesPricingId: row['Supersedes Pricing ID'], canEdit: businessUnit === 'HANDPHONE' && canSubmitHandphone(session) && !(canonicalRole(session.role) === 'ADMIN' && handphoneApprovalStatus(row) !== 'APPROVED'), canReview: businessUnit === 'HANDPHONE' && canReviewHandphone(session, row)
       });
       const records = [...rowsToObjects(motorRows).filter(row => visible(row, 'MOTOR')).map(row => mapPricing(row, 'MOTOR')), ...rowsToObjects(handphoneRows).filter(row => visible(row, 'HANDPHONE')).map(row => mapPricing(row, 'HANDPHONE'))];
       return res.status(200).json({ live: true, records });
     }
 
     if (resource === 'catalog') {
-      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000', 'Handphone_Model_Catalog!A1:Q1000']);
+      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Model_Catalog!A1:Q1000', 'Handphone_Model_Catalog!A1:AB1000']);
       const mapCatalog = (row, businessUnit) => ({
         id: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], operatingSystem: row['Operating System'], tier: row['Popularity Tier'],
         productPageUrl: row['Product Page URL'], imageUrl: row['Image URL'], image: truth(row['Image Approved']) ? row['Image URL'] : '', imageCaption: row['Image Caption (MS)'], imageApproved: truth(row['Image Approved']),
-        active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], regionAvailability: row['Region Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At']
+        active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], branchStock: businessUnit === 'HANDPHONE' ? handphoneBranchStockEntries(row['Branch Availability']) : [], regionAvailability: row['Region Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At'],
+        approvalStatus: businessUnit === 'HANDPHONE' ? handphoneApprovalStatus(row) : (truth(row.Active) ? 'APPROVED' : 'INACTIVE'), submittedBy: row['Submitted By'], submittedAt: row['Submitted At'], approvedBy: row['Approved By'], approvedAt: row['Approved At'], approvalNotes: row['Approval Notes'], publishRequested: truth(row['Publish Requested']), submittedRegion: row['Submitted Region'], submittedBranchId: row['Submitted Branch ID'], supersedesCatalogId: row['Supersedes Catalog ID'], canEdit: businessUnit === 'HANDPHONE' && canSubmitHandphone(session) && !(canonicalRole(session.role) === 'ADMIN' && handphoneApprovalStatus(row) !== 'APPROVED'), canReview: businessUnit === 'HANDPHONE' && canReviewHandphone(session, row)
       });
       const allowed = businessUnit => businessPermitted(session, { 'Business Unit': businessUnit });
-      const records = [...(allowed('MOTOR') ? rowsToObjects(motorRows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => mapCatalog(row, 'MOTOR')) : []), ...(allowed('HANDPHONE') ? rowsToObjects(handphoneRows).filter(row => session.role === 'ADMIN' || truth(row.Active)).map(row => mapCatalog(row, 'HANDPHONE')) : [])];
+      const records = [...(allowed('MOTOR') ? rowsToObjects(motorRows).filter(row => canonicalRole(session.role) === 'ADMIN' || truth(row.Active)).map(row => mapCatalog(row, 'MOTOR')) : []), ...(allowed('HANDPHONE') ? rowsToObjects(handphoneRows).filter(row => handphoneVisibleToSession(session, row, 'catalog')).map(row => mapCatalog(row, 'HANDPHONE')) : [])];
       return res.status(200).json({ live: true, records });
     }
 
