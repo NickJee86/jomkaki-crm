@@ -371,6 +371,10 @@ const accountAccessDescription = identity => {
 
 const humanStatuses = new Set(['HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF']);
 const managerRoles = new Set(['ADMIN', 'REGION_MANAGER', 'BUSINESS_MANAGER', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER']);
+const CREDIT_CONSENT_DOCUMENT_TYPE = 'CTOS_CCRIS_CONSENT';
+const CREDIT_CONSENT_TEMPLATE_VERSION = 'BPH_V4.0_01112020';
+const CREDIT_CONSENT_TEMPLATE_PATH = '/assets/ctos-ccris-consent-bph-v4.pdf';
+const creditConsentHeaders = ['Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Consent Signed At', 'Credit Consent Verified At', 'Credit Consent Verified By', 'Credit Consent Document ID', 'Credit Check Status', 'Credit Check Requested At', 'Credit Check Requested By'];
 const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
@@ -544,7 +548,8 @@ const acceptedQuality = new Set(['GOOD', 'PASS', 'PASSED', 'ACCEPTED']);
 const incomeDocumentTypes = new Set(['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT']);
 
 export function deriveDocumentReadiness(documents = []) {
-  const accepted = documents.filter(row => {
+  const routineDocuments = documents.filter(row => clean(row['Document Type'] || row.type).toUpperCase() !== CREDIT_CONSENT_DOCUMENT_TYPE);
+  const accepted = routineDocuments.filter(row => {
     const verification = clean(row['Verification Status'] || row.verification).toUpperCase();
     const quality = clean(row['Quality Status'] || row.quality).toUpperCase();
     return acceptedVerification.has(verification) && (!quality || acceptedQuality.has(quality)) && clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() !== 'TRUE';
@@ -554,7 +559,7 @@ export function deriveDocumentReadiness(documents = []) {
   if (!types.has('IC_FRONT')) missing.push('IC_FRONT');
   if (!types.has('IC_BACK')) missing.push('IC_BACK');
   if (![...types].some(type => incomeDocumentTypes.has(type))) missing.push('INCOME_PROOF');
-  const exception = documents.some(row => clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() === 'TRUE' || ['POOR', 'BLURRY', 'FAILED', 'REJECTED'].includes(clean(row['Quality Status'] || row.quality || row['Verification Status'] || row.verification).toUpperCase()));
+  const exception = routineDocuments.some(row => clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() === 'TRUE' || ['POOR', 'BLURRY', 'FAILED', 'REJECTED'].includes(clean(row['Quality Status'] || row.quality || row['Verification Status'] || row.verification).toUpperCase()));
   return { complete: missing.length === 0 && !exception, missing, exception };
 }
 
@@ -1098,7 +1103,7 @@ export default async function handler(req, res) {
           teamId = teamId || clean(branch?.['Team ID']);
         }
         await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID']);
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID']);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...creditConsentHeaders]);
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
           'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
@@ -1118,15 +1123,95 @@ export default async function handler(req, res) {
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
           'Document Status': 'PENDING', 'Minimum Documents Complete': 'FALSE', 'Missing Documents': clean(body.missingDocuments) || 'IC_FRONT, IC_BACK, INCOME_PROOF',
+          'Credit Consent Status': 'NOT_SENT', 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED',
           'SA Review Required': 'FALSE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username, 'Updated By': session.username
         });
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} application created for ${brand} ${model}` });
         return res.status(201).json({ live: true, leadId, applicationId, businessUnit });
       }
+      if (action === 'sendCreditConsent') {
+        const applicationId = clean(body.applicationId);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
+        const scope = scopeData(session, leads, applications, branches), application = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (clean(application['Credit Consent Status']).toUpperCase() === 'VERIFIED') throw new Error('Credit consent is already verified for this application');
+        const phone = clean(application['Phone Number'] || leads.find(row => clean(row['Lead ID']) === clean(application['Lead ID']))?.['Phone Number']);
+        const normalizedPhone = whatsappPhone(phone);
+        if (!normalizedPhone) throw new Error('A valid customer phone number is required');
+        const timestamp = now(), consentUrl = `https://jomkaki-crm.vercel.app${CREDIT_CONSENT_TEMPLATE_PATH}`;
+        const message = `JomKaki Motor: Please download, complete and sign the CTOS/CCRIS Consent Authorisation form, then return the signed PDF or clear photo here. Borang kebenaran CTOS/CCRIS: ${consentUrl}`;
+        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, {
+          'Updated At': timestamp, 'Credit Consent Status': 'SENT', 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
+          'Credit Consent Sent At': timestamp, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': session.username
+        }, 'BX');
+        const outboxId = makeId('OUT');
+        await appendObject(req, 'Message_Outbox', {
+          'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': clean(application['Lead ID']), 'Application ID': applicationId, 'Phone Number': phone,
+          'Message Type': 'DOCUMENT_LINK', 'Message Text': message, 'Template Name': 'CTOS_CCRIS_CONSENT_BPH_V4', Language: 'en_MY', 'Send Status': 'MANUAL_PENDING', 'Attempt Count': '0',
+          'Error Message': '', 'Send Routing Status': 'WHATSAPP_BUSINESS_MANUAL:CONSENT_REQUEST', 'Business Unit': rowBusinessUnit(application), 'Customer ID': clean(application['Customer ID']), 'Team ID': clean(application['Team ID'])
+        });
+        await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: 'CRM_CREDIT_CONSENT_SENT', description: `CTOS/CCRIS consent ${CREDIT_CONSENT_TEMPLATE_VERSION} prepared for customer signature` });
+        return res.status(200).json({ live: true, applicationId, status: 'SENT', outboxId, mode: 'MANUAL', templateUrl: consentUrl, whatsappUrl: `https://wa.me/${normalizedPhone}?text=${encodeURIComponent(message)}` });
+      }
+      if (action === 'setCreditConsentOutcome') {
+        const applicationId = clean(body.applicationId), outcome = clean(body.outcome).toUpperCase();
+        if (!['DECLINED', 'WITHDRAWN'].includes(outcome)) throw new Error('Consent outcome must be Declined or Withdrawn');
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
+        const application = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, { 'Updated At': now(), 'Credit Consent Status': outcome, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': `BLOCKED_CONSENT_${outcome}`, 'Updated By': session.username }, 'BX');
+        await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: `CRM_CREDIT_CONSENT_${outcome}`, description: `Customer credit consent marked ${outcome}` });
+        return res.status(200).json({ live: true, applicationId, status: outcome });
+      }
+      if (action === 'verifyCreditConsent') {
+        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to verify credit consent.' });
+        const applicationId = clean(body.applicationId), decision = clean(body.decision || 'VERIFIED').toUpperCase();
+        if (!['VERIFIED', 'REJECTED'].includes(decision)) throw new Error('Consent decision must be Verified or Rejected');
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
+        const application = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        const consentDocuments = rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId && clean(row['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE);
+        const document = consentDocuments.find(row => clean(row['Document ID']) === clean(body.documentId || application['Credit Consent Document ID'])) || consentDocuments.at(-1);
+        if (!document) throw new Error('Upload the signed CTOS/CCRIS consent before verification');
+        const timestamp = now();
+        await updateObject(req, 'Document_Log', 'Document ID', document['Document ID'], {
+          'Updated At': timestamp, 'Quality Status': decision === 'VERIFIED' ? 'GOOD' : 'RESUBMISSION_REQUIRED', 'Verification Status': decision,
+          'Manual Review Required': decision === 'VERIFIED' ? 'FALSE' : 'TRUE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': timestamp
+        }, 'AA');
+        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, {
+          'Updated At': timestamp, 'Credit Consent Status': decision === 'VERIFIED' ? 'VERIFIED' : 'REJECTED_RESUBMISSION_REQUIRED',
+          'Credit Consent Template Version': clean(application['Credit Consent Template Version']) || CREDIT_CONSENT_TEMPLATE_VERSION,
+          'Credit Consent Verified At': decision === 'VERIFIED' ? timestamp : '', 'Credit Consent Verified By': decision === 'VERIFIED' ? session.username : '',
+          'Credit Consent Document ID': document['Document ID'], 'Credit Check Status': decision === 'VERIFIED' ? 'READY_FOR_CREDIT_CHECK' : 'BLOCKED_CONSENT_REJECTED', 'Updated By': session.username
+        }, 'BX');
+        await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: `CRM_CREDIT_CONSENT_${decision}`, description: `CTOS/CCRIS consent ${decision.toLowerCase()} by ${session.username}` });
+        return res.status(200).json({ live: true, applicationId, documentId: document['Document ID'], status: decision });
+      }
+      if (action === 'prepareCreditCheck') {
+        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to prepare a credit check.' });
+        const applicationId = clean(body.applicationId);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
+        const application = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (clean(application['Credit Consent Status']).toUpperCase() !== 'VERIFIED') throw new Error('Verified CTOS/CCRIS consent is required before any credit check');
+        if (clean(application['Minimum Documents Complete']).toUpperCase() !== 'TRUE' && clean(application['Missing Documents'])) throw new Error('Complete the minimum customer documents before preparing the credit check');
+        const timestamp = now();
+        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, { 'Updated At': timestamp, 'Credit Check Status': 'READY_FOR_API_CONNECTION', 'Credit Check Requested At': timestamp, 'Credit Check Requested By': session.username, 'Updated By': session.username }, 'BX');
+        await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: 'CRM_CREDIT_CHECK_PREPARED', description: 'Credit check gated successfully; CTOS/CCRIS API connection is still required before execution' });
+        return res.status(200).json({ live: true, applicationId, status: 'READY_FOR_API_CONNECTION', externalQueryExecuted: false });
+      }
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
         const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
         const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
@@ -1136,22 +1221,28 @@ export default async function handler(req, res) {
         await appendObject(req, 'Document_Log', {
           'Document ID': documentId, 'Received At': timestamp, 'Updated At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId,
           'Document Type': documentType, 'File Name': uploaded.name, 'Mime Type': clean(body.file.type), 'File URL': uploaded.webUrl || '',
-          'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
-          'Manual Review Required': 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username, 'Business Unit': rowBusinessUnit(applicationRecord || leadRecord || {}), 'Customer ID': clean(applicationRecord?.['Customer ID'] || leadRecord?.['Customer ID'])
+          'Classification Status': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'CONSENT_REVIEW_REQUIRED' : 'AI_QUEUED', 'Quality Status': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'PENDING_REVIEW' : 'PENDING_AI', 'Verification Status': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'PENDING' : 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
+          'Manual Review Required': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username, 'Business Unit': rowBusinessUnit(applicationRecord || leadRecord || {}), 'Customer ID': clean(applicationRecord?.['Customer ID'] || leadRecord?.['Customer ID'])
         });
         if (applicationRecord) {
           const requiredDocumentTypes = ['IC_FRONT', 'IC_BACK', 'INCOME_PROOF'];
           const receivedDocumentTypes = new Set(rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId && clean(row['Verification Status']).toUpperCase() !== 'REJECTED').map(row => clean(row['Document Type']).toUpperCase()));
           receivedDocumentTypes.add(documentType.toUpperCase());
           const missingDocumentTypes = requiredDocumentTypes.filter(type => !receivedDocumentTypes.has(type));
-          await updateObject(req, 'Applications', 'Application ID', applicationId, {
+          const applicationChanges = {
             'Updated At': timestamp,
             'Document Status': missingDocumentTypes.length ? 'COLLECTING' : 'AI_CHECK_PENDING',
             'Minimum Documents Complete': missingDocumentTypes.length ? 'FALSE' : 'TRUE',
             'Missing Documents': missingDocumentTypes.join(', '),
             'Current Stage': missingDocumentTypes.length ? 'DOCUMENT_COLLECTION' : 'DOCUMENT_VERIFICATION',
             'Updated By': session.username
-          }, 'BN');
+          };
+          if (documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE) Object.assign(applicationChanges, {
+            'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION', 'Credit Consent Template Version': clean(applicationRecord['Credit Consent Template Version']) || CREDIT_CONSENT_TEMPLATE_VERSION,
+            'Credit Consent Signed At': timestamp, 'Credit Consent Document ID': documentId, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_VERIFICATION'
+          });
+          await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+          await updateObject(req, 'Applications', 'Application ID', applicationId, applicationChanges, 'BX');
         }
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
@@ -1160,7 +1251,7 @@ export default async function handler(req, res) {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
         const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
-        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -1194,7 +1285,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
         if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
@@ -1202,12 +1293,21 @@ export default async function handler(req, res) {
           'Updated At': now(), 'Quality Status': quality, 'Verification Status': verification,
           'Manual Review Required': verification === 'PENDING' ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': now()
         }, 'Y');
+        if (clean(document['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE && document['Application ID']) {
+          const timestamp = now(), consentStatus = verification === 'VERIFIED' ? 'VERIFIED' : verification === 'REJECTED' ? 'REJECTED_RESUBMISSION_REQUIRED' : 'SIGNED_PENDING_VERIFICATION';
+          await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+          await updateObject(req, 'Applications', 'Application ID', document['Application ID'], {
+            'Updated At': timestamp, 'Credit Consent Status': consentStatus, 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
+            'Credit Consent Verified At': verification === 'VERIFIED' ? timestamp : '', 'Credit Consent Verified By': verification === 'VERIFIED' ? session.username : '',
+            'Credit Consent Document ID': documentId, 'Credit Check Status': verification === 'VERIFIED' ? 'READY_FOR_CREDIT_CHECK' : verification === 'REJECTED' ? 'BLOCKED_CONSENT_REJECTED' : 'BLOCKED_CONSENT_VERIFICATION', 'Updated By': session.username
+          }, 'BX');
+        }
         await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_AI_DOCUMENT_EXCEPTION_RESOLVED', description: `${document['Document Type'] || 'Document'} exception marked ${verification}` });
         return res.status(200).json({ live: true, documentId });
       }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -1238,13 +1338,13 @@ export default async function handler(req, res) {
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
         if (changes['Loan Tenure Months'] && !['12', '24', '36', '48'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be 12, 24, 36 or 48 months');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID']);
-        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BN');
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...creditConsentHeaders]);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BX');
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -1360,7 +1460,7 @@ export default async function handler(req, res) {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -1421,6 +1521,9 @@ export default async function handler(req, res) {
           reference1Name: row['Reference 1 Name'], reference1Phone: row['Reference 1 Phone'], reference1Relationship: row['Reference 1 Relationship'],
           reference2Name: row['Reference 2 Name'], reference2Phone: row['Reference 2 Phone'], reference2Relationship: row['Reference 2 Relationship'],
           bankAccountAvailable: row['Bank Account Available'], directDebitStatus: row['Direct Debit Status'], agreementStatus: row['Agreement Status'],
+          creditConsentStatus: row['Credit Consent Status'] || 'NOT_SENT', creditConsentTemplateVersion: row['Credit Consent Template Version'] || CREDIT_CONSENT_TEMPLATE_VERSION,
+          creditConsentSentAt: row['Credit Consent Sent At'], creditConsentSignedAt: row['Credit Consent Signed At'], creditConsentVerifiedAt: row['Credit Consent Verified At'], creditConsentVerifiedBy: row['Credit Consent Verified By'], creditConsentDocumentId: row['Credit Consent Document ID'],
+          creditCheckStatus: row['Credit Check Status'] || 'BLOCKED_CONSENT_REQUIRED', creditCheckRequestedAt: row['Credit Check Requested At'], creditCheckRequestedBy: row['Credit Check Requested By'], creditCheckAllowed: clean(row['Credit Consent Status']).toUpperCase() === 'VERIFIED',
           lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (docs.aiComplete ? 'READY_FOR_LMS' : 'WAITING_FOR_AI_DOCUMENTS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
           financier: row.Financier || row['Bank Name'] || row.Lender, lmsDecisionAt: row['LMS Decision At'] || row['Decision At'], rejectedAt: row['Rejected At'],
           lmsErrorCode: row['LMS Error Code'], lmsErrorMessage: row['LMS Error Message'],
