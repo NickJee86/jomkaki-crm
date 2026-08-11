@@ -88,19 +88,24 @@
     if(!confirm('Confirm readiness only. No CTOS/CCRIS query will be executed until the external API is connected.'))return;
     try{await post('prepareCreditCheck',{applicationId:application.id});await refreshConsentCustomer(application)}catch(error){alert(error.message)}
   }
-  function creditConsentSection(application){
+  function creditConsentSection(application,preview=false){
     const status=String(application.creditConsentStatus||'NOT_SENT').toUpperCase(),verified=status==='VERIFIED',signed=['SIGNED_PENDING_VERIFICATION','VERIFIED'].includes(status),sent=!['NOT_SENT','DECLINED','WITHDRAWN'].includes(status),manager=creditConsentManager();
     const actions=[`<a class="row-action consent-template-link" href="${creditConsentTemplate}" target="_blank" rel="noopener">Download consent form</a>`];
-    if(!verified)actions.push(`<button class="row-action whatsapp-action" data-consent-send>${sent?'Resend consent form':'Send via WhatsApp'}</button>`,`<button class="row-action" data-consent-upload>Upload signed consent</button>`);
-    if(manager&&signed&&!verified)actions.push('<button class="row-action" data-consent-verify>Verify consent</button>','<button class="row-action secondary" data-consent-reject>Reject / request again</button>');
-    if(manager&&verified)actions.push('<button class="row-action" data-credit-check>Prepare CTOS/CCRIS check</button>','<button class="row-action secondary" data-consent-withdraw>Mark withdrawn</button>');
-    if(!verified&&!['DECLINED','WITHDRAWN'].includes(status))actions.push('<button class="row-action secondary" data-consent-decline>Mark declined</button>');
+    if(preview)actions.push('<button class="row-action secondary" disabled>Sample only · actions disabled</button>');
+    else{
+      if(!verified)actions.push(`<button class="row-action whatsapp-action" data-consent-send>${sent?'Resend consent form':'Send via WhatsApp'}</button>`,`<button class="row-action" data-consent-upload>Upload signed consent</button>`);
+      if(manager&&signed&&!verified)actions.push('<button class="row-action" data-consent-verify>Verify consent</button>','<button class="row-action secondary" data-consent-reject>Reject / request again</button>');
+      if(manager&&verified)actions.push('<button class="row-action" data-credit-check>Prepare CTOS/CCRIS check</button>','<button class="row-action secondary" data-consent-withdraw>Mark withdrawn</button>');
+      if(!verified&&!['DECLINED','WITHDRAWN'].includes(status))actions.push('<button class="row-action secondary" data-consent-decline>Mark declined</button>');
+    }
     return `<section class="profile-section credit-consent-section"><div class="customer-360-section-head"><div><span>Legal authorisation gate</span><h3>CTOS / CCRIS consent</h3></div>${pill(pretty(status),verified)}</div><div class="consent-step-grid"><div class="${sent?'complete':''}"><span>1</span><strong>Form sent</strong><small>${esc(when(application.creditConsentSentAt))}</small></div><div class="${signed?'complete':''}"><span>2</span><strong>Signed copy</strong><small>${esc(when(application.creditConsentSignedAt))}</small></div><div class="${verified?'complete':''}"><span>3</span><strong>Manager verified</strong><small>${esc(application.creditConsentVerifiedBy||when(application.creditConsentVerifiedAt))}</small></div><div class="${application.creditCheckStatus==='READY_FOR_API_CONNECTION'?'complete':''}"><span>4</span><strong>Credit-check gate</strong><small>${pretty(application.creditCheckStatus||'BLOCKED_CONSENT_REQUIRED')}</small></div></div><div class="row-actions consent-actions">${actions.join('')}</div><p class="notice">Template ${esc(application.creditConsentTemplateVersion||'BPH V4.0 01112020')}. A signed upload never runs a credit check automatically. Verification is mandatory, and the CTOS/CCRIS API remains disconnected.</p></section>`;
   }
   const creditConsentCustomer360Base=openCustomer360;
   openCustomer360=async function(identity){
-    await creditConsentCustomer360Base(identity);const context=resolveCustomer360(identity),application=context.application;if(!application||isDemoRecord(application))return;
-    const firstColumn=document.querySelector('.customer-360-drawer .customer-360-grid > div');if(!firstColumn)return;firstColumn.insertAdjacentHTML('afterbegin',creditConsentSection(application));
+    await creditConsentCustomer360Base(identity);const context=resolveCustomer360(identity),application=context.application;if(!application)return;
+    const preview=isDemoRecord(application),displayApplication=preview?{...application,creditConsentStatus:application.id==='DEMO-APP-001'?'VERIFIED':'SIGNED_PENDING_VERIFICATION',creditConsentTemplateVersion:'BPH_V4.0_01112020',creditConsentSentAt:application.updated||application.created,creditConsentSignedAt:application.updated||application.created,creditConsentVerifiedAt:application.id==='DEMO-APP-001'?(application.updated||application.created):'',creditConsentVerifiedBy:application.id==='DEMO-APP-001'?'regional.manager':'',creditCheckStatus:application.id==='DEMO-APP-001'?'READY_FOR_CREDIT_CHECK':'BLOCKED_CONSENT_VERIFICATION'}:application;
+    const firstColumn=document.querySelector('.customer-360-drawer .customer-360-grid > div');if(!firstColumn)return;firstColumn.insertAdjacentHTML('afterbegin',creditConsentSection(displayApplication,preview));
+    if(preview)return;
     document.querySelector('[data-consent-send]')?.addEventListener('click',()=>sendCreditConsent(application));
     document.querySelector('[data-consent-upload]')?.addEventListener('click',()=>uploadDocument(application,'CTOS_CCRIS_CONSENT'));
     document.querySelector('[data-consent-verify]')?.addEventListener('click',()=>reviewCreditConsent(application,'VERIFIED'));
