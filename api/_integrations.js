@@ -3,6 +3,17 @@ import { lmsproConfigurationStatus } from './_lmspro.js';
 const clean = value => String(value ?? '').trim();
 const upper = value => clean(value).toUpperCase();
 
+function configuredWhatsAppSenders(env = {}) {
+  const senders = [];
+  if (clean(env.WHATSAPP_ACCESS_TOKEN) && clean(env.WHATSAPP_PHONE_NUMBER_ID)) senders.push('LEGACY_SINGLE');
+  Object.keys(env).forEach(key => {
+    if (!key.startsWith('WHATSAPP_') || !key.endsWith('_ACCESS_TOKEN') || key === 'WHATSAPP_ACCESS_TOKEN') return;
+    const prefix = key.slice(0, -'_ACCESS_TOKEN'.length);
+    if (clean(env[key]) && clean(env[`${prefix}_PHONE_NUMBER_ID`])) senders.push(prefix);
+  });
+  return [...new Set(senders)];
+}
+
 export const FUTURE_REPORTING_FIELDS = {
   meta: [
     'Provider Message ID',
@@ -33,12 +44,15 @@ export const FUTURE_REPORTING_FIELDS = {
 export function metaConfigurationStatus(env = process.env) {
   const mode = upper(env.WHATSAPP_SEND_MODE) === 'CLOUD' ? 'CLOUD' : 'MANUAL';
   const webhookConfigured = Boolean(clean(env.WHATSAPP_VERIFY_TOKEN) && clean(env.META_APP_SECRET));
-  const sendingConfigured = Boolean(clean(env.WHATSAPP_ACCESS_TOKEN) && clean(env.WHATSAPP_PHONE_NUMBER_ID));
+  const configuredSenders = configuredWhatsAppSenders(env);
+  const sendingConfigured = configuredSenders.length > 0;
   const productionEnabled = mode === 'CLOUD' && webhookConfigured && sendingConfigured;
   return {
     mode,
     webhookConfigured,
     sendingConfigured,
+    configuredSenderCount: configuredSenders.length,
+    credentialModel: configuredSenders.some(sender => sender !== 'LEGACY_SINGLE') ? 'MULTI_CHANNEL' : configuredSenders.length ? 'LEGACY_SINGLE' : 'NONE',
     readyForWebhook: webhookConfigured,
     productionEnabled,
     reportingReady: productionEnabled
