@@ -8,6 +8,34 @@ const PROJECT_NUMBER = process.env.GOOGLE_PROJECT_NUMBER;
 const POOL_ID = process.env.GOOGLE_WIF_POOL_ID || 'vercel-production';
 const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-production';
 const clean = value => String(value ?? '').trim();
+export const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+const uploadMimeExtensions = {
+  'application/pdf': ['pdf'],
+  'image/jpeg': ['jpg', 'jpeg'],
+  'image/png': ['png'],
+  'image/webp': ['webp'],
+  'image/heic': ['heic'],
+  'image/heif': ['heif']
+};
+export function validateUploadFile(file = {}, options = {}) {
+  const label = options.label || 'File';
+  const data = clean(file.data);
+  const match = data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\r\n]+)$/);
+  if (!match) throw new Error(`${label} encoding is invalid`);
+  const embeddedMime = clean(match[1]).toLowerCase(), declaredMime = clean(file.type).toLowerCase();
+  if (declaredMime && declaredMime !== embeddedMime) throw new Error(`${label} type does not match its content`);
+  const mimeType = declaredMime || embeddedMime;
+  if (!uploadMimeExtensions[mimeType] || (options.imageOnly && !mimeType.startsWith('image/'))) throw new Error(options.imageOnly ? 'Use a JPG, PNG, WebP or HEIC motor photo' : 'Use a PDF, JPG, PNG, WebP or HEIC document');
+  const base64 = match[2].replace(/\s/g, '');
+  if (!base64 || base64.length % 4 !== 0) throw new Error(`${label} encoding is invalid`);
+  const bytes = Buffer.from(base64, 'base64');
+  if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES) throw new Error(`${label} must be between 1 byte and 3 MB`);
+  const originalName = clean(file.name) || `${options.imageOnly ? 'photo' : 'document'}-${Date.now()}.${uploadMimeExtensions[mimeType][0]}`;
+  const extension = originalName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '';
+  if (!uploadMimeExtensions[mimeType].includes(extension)) throw new Error(`${label} filename extension does not match its type`);
+  const safeName = originalName.replace(/["*:<>?/\\|#%]/g, '-').slice(0, 180);
+  return { bytes, mimeType, safeName };
+}
 const sheetIdentifier = value => {
   const text = clean(value);
   return text ? `'${text}` : '';
@@ -209,8 +237,7 @@ async function ensureFolder(token, driveId, parentId, name) {
 }
 
 async function uploadDocument(req, file, caseId) {
-  const bytes = Buffer.from(clean(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
-  if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw new Error('Document must be between 1 byte and 4 MB');
+  const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'Document' });
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
@@ -222,17 +249,13 @@ async function uploadDocument(req, file, caseId) {
   const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
   const crmFolder = await ensureFolder(token, drive.id, root.id, 'CRM Customer Documents');
   const caseFolder = await ensureFolder(token, drive.id, crmFolder.id, caseId || 'Unassigned');
-  const safeName = (clean(file.name) || `document-${Date.now()}`).replace(/["*:<>?/\\|#%]/g, '-').slice(0, 180);
   return graph(token, `/drives/${drive.id}/items/${caseFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
-    method: 'PUT', headers: { 'content-type': clean(file.type) || 'application/octet-stream' }, body: bytes
+    method: 'PUT', headers: { 'content-type': mimeType }, body: bytes
   });
 }
 
 async function uploadSecondHandMotorPhoto(file, inventoryId) {
-  const mimeType = clean(file.type).toLowerCase();
-  if (!/^image\/(jpeg|png|webp|heic|heif)$/.test(mimeType)) throw new Error('Use a JPG, PNG, WebP or HEIC motor photo');
-  const bytes = Buffer.from(clean(file.data).replace(/^data:[^;]+;base64,/, ''), 'base64');
-  if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Motor photo must be between 1 byte and 5 MB');
+  const { bytes, mimeType } = validateUploadFile(file, { label: 'Motor photo', imageOnly: true });
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
@@ -435,7 +458,8 @@ function publicAccount(row) {
 async function writeActivity(req, session, payload) {
   await appendObject(req, 'Activity_Log', {
     'Activity ID': makeId('ACT'), 'Activity At': now(), 'Lead ID': payload.leadId || '', 'Application ID': payload.applicationId || '',
-    'Activity Type': payload.type, Description: payload.description, 'Actor ID': session.username, 'Activity Status': 'COMPLETED'
+    'Activity Type': payload.type, Description: payload.description, 'Actor Type': canonicalRole(session.role) || 'CRM_USER', 'Actor ID': session.username,
+    'Activity Status': 'COMPLETED', 'Scenario Name': 'CRM_WEB_APP', 'Scenario Run ID': clean(req.headers['x-vercel-id']), 'Synthetic Test': 'FALSE'
   });
 }
 
