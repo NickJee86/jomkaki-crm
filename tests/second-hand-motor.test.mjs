@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { rankSecondHandMotors } from '../api/crm.js';
+import { canReviewSecondHandMotor, rankSecondHandMotors, secondHandApprovalStatus } from '../api/crm.js';
 
 const read = path => fs.readFileSync(new URL(path, import.meta.url), 'utf8');
 const api = read('../api/crm.js');
@@ -30,15 +30,31 @@ test('sold or hidden motors are never recommended and similar price is used as f
   assert.equal(results[0].matchType, 'SIMILAR_PRICE');
 });
 
+test('pending branch submissions stay out of AI until Regional Manager or Admin approval', () => {
+  const pending = { ...motor('2H-PENDING', 'Y15ZR', 7800), 'Approval Status': 'PENDING_APPROVAL', 'Submitted By': 'branch-east-1' };
+  assert.equal(secondHandApprovalStatus(pending), 'PENDING_APPROVAL');
+  assert.deepEqual(rankSecondHandMotors([pending], { query: 'Y15ZR', region: 'EAST_MALAYSIA' }), []);
+  assert.equal(canReviewSecondHandMotor({ role: 'REGION_MANAGER', region: 'EAST_MALAYSIA', businessAccess: 'MOTOR' }, pending), true);
+  assert.equal(canReviewSecondHandMotor({ role: 'REGION_MANAGER', region: 'WEST_MALAYSIA', businessAccess: 'MOTOR' }, pending), false);
+  assert.equal(canReviewSecondHandMotor({ role: 'BRANCH_MANAGER', branchId: 'BR-E1', region: 'EAST_MALAYSIA', businessAccess: 'MOTOR' }, pending), false);
+  assert.equal(canReviewSecondHandMotor({ role: 'ADMIN', region: 'ALL', businessAccess: 'BOTH' }, pending), true);
+});
+
 test('CRM exposes secure inventory management, phone photo upload, location and AI preview', () => {
   assert.match(api, /Second_Hand_Motor_Inventory/);
   assert.match(api, /saveSecondHandMotor/);
   assert.match(api, /uploadSecondHandMotorPhoto/);
+  assert.match(api, /reviewSecondHandMotor/);
+  assert.match(api, /PENDING_APPROVAL/);
+  assert.match(api, /Admin or the Regional Manager for this region must approve this listing/);
   assert.match(api, /Customer Location Label/);
-  assert.match(api, /session\.role !== 'ADMIN'/);
+  assert.match(api, /canEditSecondHandMotor/);
   assert.match(ui, /capture="environment"/);
   assert.match(ui, /AI RECOMMENDATION PREVIEW/);
-  assert.match(ui, /Same region first/);
+  assert.match(ui, /same region/i);
+  assert.match(ui, /Branch submission.*Regional\/Admin approval.*Customer & AI publication/s);
+  assert.match(ui, /Submit for approval/);
+  assert.match(ui, /Approve & publish/);
   assert.match(index, /data-view="usedMotorInventory"/);
 });
 

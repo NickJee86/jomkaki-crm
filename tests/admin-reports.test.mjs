@@ -12,6 +12,13 @@ test('Administrator report loads every company control resource',()=>{
   assert.match(app,/reportsScoped\(\)/);
 });
 
+test('Administrator report includes the 2nd hand approval queue',()=>{
+  assert.match(app,/secondHandPendingApproval/);
+  assert.match(app,/Pending approval/);
+  assert.match(app,/Approval status/);
+  assert.match(app,/String\(motor\.approvalStatus\|\|'APPROVED'\).*==='APPROVED'/);
+});
+
 test('Administrator report covers the complete operating view',()=>{
   [
     'Company Reports & Analytics',
