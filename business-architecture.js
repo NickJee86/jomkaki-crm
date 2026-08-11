@@ -81,6 +81,53 @@
     form.querySelectorAll('[name="businessUnit"]').forEach(input=>input.onchange=syncBusinessFields);syncBusinessFields();
   };
 
+  const architectureNewApplicationWithProductRules=newApplication;
+  newApplication=function(){
+    architectureNewApplicationWithProductRules();
+    const form=document.getElementById('manualApplicationForm');if(!form)return;
+    const assignmentHeading=[...form.querySelectorAll('h3')].find(heading=>heading.textContent.includes('Assignment & readiness'));
+    assignmentHeading?.insertAdjacentHTML('beforebegin',`<section class="form-wide new-application-documents" aria-labelledby="newApplicationDocumentsTitle"><div class="new-application-documents-head"><div><span>Optional at creation</span><h3 id="newApplicationDocumentsTitle">Customer documents</h3><p>Choose the files available now. The application is created first, then every file is securely attached to its new Application ID.</p></div><span class="business-pill">AI check</span></div><div class="new-application-document-grid"><label>IC front<input name="icFrontDocument" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"></label><label>IC back<input name="icBackDocument" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"></label><label>Income proof<input name="incomeProofDocument" type="file" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"></label><label>Additional document type<select name="additionalDocumentType"><option value="BANK_STATEMENT">Bank statement</option><option value="DRIVING_LICENSE">Driving licence</option><option value="OTHER">Other supporting document</option></select></label><label class="additional-documents-field">Additional documents<input name="additionalDocuments" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif"><small>Multiple files may be selected under the document type above.</small></label></div><p class="new-application-document-note">Maximum 3 MB per file. PDF, JPG, PNG, WebP, HEIC and HEIF only. You may create the draft without files and upload them later.</p></section>`);
+    const submitButton=form.querySelector('[type="submit"]'),message=document.getElementById('formMessage');
+    let createdApplication=null,queuedDocuments=null;
+    const uploadedIndexes=new Set();
+    const collectDocuments=()=>{
+      const documents=[];
+      const add=(elementName,documentType)=>{const file=form.elements[elementName]?.files?.[0];if(file?.size)documents.push({documentType,file})};
+      add('icFrontDocument','IC_FRONT');add('icBackDocument','IC_BACK');add('incomeProofDocument','INCOME_PROOF');
+      [...(form.elements.additionalDocuments?.files||[])].filter(file=>file.size).forEach(file=>documents.push({documentType:form.elements.additionalDocumentType.value||'OTHER',file}));
+      return documents;
+    };
+    const refreshSubmitLabel=()=>{if(createdApplication){submitButton.textContent='Retry remaining document uploads';return}submitButton.textContent=collectDocuments().length?'Create application & upload documents':'Create draft application'};
+    form.querySelectorAll('input[type="file"]').forEach(input=>input.addEventListener('change',refreshSubmitLabel));refreshSubmitLabel();
+    form.onsubmit=async event=>{
+      event.preventDefault();submitButton.disabled=true;
+      try{
+        if(!createdApplication){
+          queuedDocuments=collectDocuments();queuedDocuments.forEach(item=>validateBrowserFile(item.file));
+          const data=Object.fromEntries(new FormData(form));
+          ['icFrontDocument','icBackDocument','incomeProofDocument','additionalDocumentType','additionalDocuments'].forEach(name=>delete data[name]);
+          data.businessUnit=form.businessUnit.value;data.catalogId=data.businessUnit==='HANDPHONE'?form.handphoneCatalogId.value:form.catalogId.value;data.region=form.region.value;
+          if(state.user?.role==='STAFF'){data.saId=state.user.saId;data.branchId=state.user.branchId}
+          if(['BRANCH_SUPERVISOR','BRANCH_MANAGER'].includes(state.user?.role))data.branchId=state.user.branchId;
+          message.textContent='Creating the application securely...';
+          createdApplication=await post('createApplication',data);
+        }
+        for(let index=0;index<queuedDocuments.length;index+=1){
+          if(uploadedIndexes.has(index))continue;
+          const item=queuedDocuments[index];message.textContent=`Application ${createdApplication.applicationId} created. Uploading document ${uploadedIndexes.size+1} of ${queuedDocuments.length}...`;
+          await post('uploadDocument',{applicationId:createdApplication.applicationId,leadId:createdApplication.leadId,documentType:item.documentType,remarks:'Uploaded during new application creation',file:{name:item.file.name,type:item.file.type,data:await fileData(item.file)}});
+          uploadedIndexes.add(index);
+        }
+        message.textContent=queuedDocuments.length?`Created ${createdApplication.applicationId} with ${uploadedIndexes.size} document${uploadedIndexes.size===1?'':'s'}.`:`Created ${createdApplication.applicationId}. Documents can be added later.`;
+        document.querySelector('.drawer-backdrop')?.remove();await load();state.view='applications';render();
+      }catch(error){
+        if(createdApplication){message.textContent=`Application ${createdApplication.applicationId} is saved. ${uploadedIndexes.size} of ${queuedDocuments.length} documents uploaded. ${error.message} Press retry to continue without creating a duplicate application.`;submitButton.textContent='Retry remaining document uploads'}
+        else message.textContent=error.message;
+        submitButton.disabled=false;
+      }
+    };
+  };
+
   architectureApplyAccountChrome();
   const architectureNewButton=document.getElementById('newLeadButton');
   if(architectureNewButton)architectureNewButton.onclick=async()=>{try{if(architectureAllows(state.user?.businessAccess,'MOTOR'))await ensureCatalogForForms();newApplication()}catch(error){alert(error.message)}};

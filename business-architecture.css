@@ -64,3 +64,15 @@
 .handphone-shared-price-note span{color:#607584;line-height:1.45}
 @media(max-width:900px){.handphone-pricing-summary{align-items:flex-start;flex-direction:column}.handphone-pricing-summary .handphone-summary-stats{width:100%}}
 @media(max-width:680px){.business-type-picker{grid-template-columns:1fr}.handphone-catalog-overview{padding:20px}.handphone-summary-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.handphone-family-grid{grid-template-columns:1fr}.pricing-safety-banner{display:block}.pricing-safety-banner strong{display:block;margin-bottom:5px}}
+.new-application-documents{margin:6px 0 2px;padding:18px;border:1px solid #d7e5e3;border-radius:16px;background:linear-gradient(145deg,#f5fbfa 0%,#fffaf6 100%)}
+.new-application-documents-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}
+.new-application-documents-head span:first-child{display:block;margin-bottom:4px;color:#d95b20;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.new-application-documents-head h3{margin:0 0 5px;color:#0c3140}
+.new-application-documents-head p,.new-application-document-note{margin:0;color:#58717b;font-size:12px;line-height:1.5}
+.new-application-document-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.new-application-document-grid label{min-width:0}
+.new-application-document-grid input[type="file"]{padding:8px;background:#fff}
+.new-application-document-grid .additional-documents-field{grid-column:1/-1}
+.new-application-document-grid small{display:block;margin-top:5px;color:#71858d;font-size:11px}
+.new-application-document-note{margin-top:12px;padding-top:10px;border-top:1px solid #dde9e7}
+@media(max-width:720px){.new-application-document-grid{grid-template-columns:1fr}.new-application-document-grid .additional-documents-field{grid-column:auto}}
