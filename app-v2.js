@@ -558,6 +558,16 @@ function reportsLegacy(){
   const activePricing=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED');
   const pricingGaps=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||(!price.year3&&!price.month12)||(!price.year4&&!price.month24)||(!price.year5&&!price.month36)));
   const activePromotions=reportPricing.filter(price=>price.promotion&&price.promotionActive&&String(price.promotionStatus).toUpperCase()==='APPROVED');
+  const handphoneCatalogReview=reportCatalog.filter(item=>String(item.businessUnit).toUpperCase()==='HANDPHONE'&&regionAllowed(item.submittedRegion||item.regionAvailability));
+  const handphonePricingReview=reportPricing.filter(price=>String(price.businessUnit).toUpperCase()==='HANDPHONE'&&regionAllowed(price.submittedRegion||price.zone));
+  const handphoneCatalogPending=handphoneCatalogReview.filter(item=>String(item.approvalStatus).toUpperCase()==='PENDING_APPROVAL');
+  const handphonePricingPending=handphonePricingReview.filter(price=>String(price.approvalStatus).toUpperCase()==='PENDING_APPROVAL');
+  const handphoneRejected=[...handphoneCatalogReview,...handphonePricingReview].filter(item=>String(item.approvalStatus).toUpperCase()==='REJECTED');
+  const handphoneAdminReview=handphonePricingPending.filter(price=>price.adminReviewRequired);
+  const handphoneApprovalRows=[
+    ...handphoneCatalogPending.map(item=>['Catalog',[item.brand,item.model,item.variant].filter(Boolean).join(' '),pretty(item.submittedRegion||item.regionAvailability),item.submittedBy||'System','Regional Manager / Admin',item.approvalNotes||'New model, image or catalog change']),
+    ...handphonePricingPending.map(price=>['Pricing',[price.brand,price.model,price.variant].filter(Boolean).join(' '),pretty(price.submittedRegion||price.zone),price.submittedBy||'System',price.adminReviewRequired?'Admin only':'Regional Manager / Admin',price.adminReviewRequired?'Below approved price floor':price.approvalNotes||'Price or promotion change'])
+  ];
   const enabledAccounts=state.data.users.filter(user=>user.loginEnabled);
   const acceptingStaff=state.data.team.filter(member=>String(member.accepting).toUpperCase()==='TRUE');
   const showSecondHandReport=['ALL','MOTOR_TOTAL','SECOND_HAND_MOTOR'].includes(productView);
@@ -669,6 +679,10 @@ function reportsLegacy(){
     'New motor applications':newMotorApplications.length,
     '2nd hand motor applications':secondHandApplications.length,
     'Handphone applications':handphoneApplications.length,
+    'Handphone catalog pending approval':handphoneCatalogPending.length,
+    'Handphone pricing pending approval':handphonePricingPending.length,
+    'Handphone Admin price exceptions':handphoneAdminReview.length,
+    'Handphone rejected submissions':handphoneRejected.length,
     '2nd hand units':secondHandMotors.length,
     '2nd hand available':secondHandAvailable.length,
     '2nd hand AI-visible':secondHandVisible.length,
@@ -709,7 +723,7 @@ function reportsLegacy(){
   const lmsReportingRows=lmsIntegration.reportingReady?[
     ['Submitted to LMS',lmsSubmittedApplications.length],['Pending decision',lmsPending.length],['Approved',lmsApproved.length],['Rejected',lmsRejected.length],['Submission errors',lmsErrors.length],['Average decision time',averageLmsDecisionDays+' days']
   ]:[];
-  const report={period,productView,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows};
+  const report={period,productView,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows,handphoneApprovalRows};
   const accountRoleRows=Object.entries(adminGroup(state.data.users,user=>user.role)).map(entry=>[entry[0],entry[1]]);
   const branchOptions=[...new Map([...reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId]),...secondHandBase.filter(motor=>motor.branchId).map(motor=>[motor.branchId,motor.branch||motor.branchId])]).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const staffOptions=reportTeam.filter(member=>branch==='ALL'||member.branchId===branch).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
@@ -750,6 +764,8 @@ function reportsLegacy(){
       metric('New motor applications',newMotorApplications.length,'Selected product and operating filters')+
       metric('2nd hand applications',secondHandApplications.length,'Linked to a used motor record')+
       metric('Handphone applications',handphoneApplications.length,'Kept separate from motor totals')+
+      metric('Phone catalog approval',handphoneCatalogPending.length,'Regional Manager or Admin review')+
+      metric('Phone pricing approval',handphonePricingPending.length,handphoneAdminReview.length+' Admin price-floor exception')+
       (showSecondHandReport?metric('2nd hand units',secondHandMotors.length,'Current report filters')+
       metric('2nd hand available',secondHandAvailable.length,secondHandVisible.length+' AI-visible')+
       metric('Pending approval',secondHandPendingApproval.length,'Regional Manager or Admin review')+
@@ -804,10 +820,13 @@ function reportsLegacy(){
         metric('Approved prices',activePricing.length,'Active customer quotes')+
         metric('Pricing gaps',pricingGaps.length,'Missing deposit or instalment')+
         metric('Live promotions',activePromotions.length,'Approved and active')+
+        metric('Phone submissions pending',handphoneCatalogPending.length+handphonePricingPending.length,handphoneAdminReview.length+' require Admin')+
+        metric('Phone submissions rejected',handphoneRejected.length,'Branch correction required')+
         metric('Enabled accounts',enabledAccounts.length,state.data.users.length+' total accounts')+
         metric('Staff accepting leads',acceptingStaff.length,team.length+' visible Staff')+
         metric('Branches',branchRows.length,'Company operating branches')+
       '</div></section>'+
+      '<section class="report-card wide"><h3>Handphone approval queue</h3><p>Catalog, image, price and promotion submissions stay internal until an authorised reviewer approves them.</p>'+adminReportTable(['Type','Product / storage','Region','Submitted by','Required reviewer','Reason / notes'],handphoneApprovalRows)+'</section>'+
       '<section class="report-card wide"><h3>Recent audit activity</h3>'+adminReportTable(['Time','Activity','Lead / Application','Description','Actor'],auditRows)+'</section>'+
     '</div>';
 

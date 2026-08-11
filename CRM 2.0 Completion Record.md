@@ -1,6 +1,6 @@
 # JomKaki Motor CRM 2.0 — Completion Record
 
-Updated: 10 August 2026  
+Updated: 11 August 2026  
 Production: https://jomkaki-crm.vercel.app/
 
 ## Current production flow
@@ -38,6 +38,12 @@ Production: https://jomkaki-crm.vercel.app/
 - East and future West Handphone operations are separated by business unit, region, team and official WhatsApp number.
 - The same customer can hold separate Motor and Handphone Leads under one Customer ID, preventing mixed conversations while keeping a complete Customer 360 record.
 - Inbound and outbound messages preserve the exact official number used by the customer; no reply may silently cross to another business or region.
+- Branch Supervisors and permitted Handphone managers can submit phone catalog, image, regional price, deposit, instalment and promotion changes inside CRM.
+- Branch Handphone stock updates take effect immediately for the permitted branch; catalog and commercial changes require approval.
+- Regional Managers can approve Handphone submissions only for their own region and cannot approve their own submissions.
+- Prices below the current approved product-price floor are escalated to Administrator approval only.
+- Existing approved Handphone catalog and pricing remain live while a replacement version is pending, rejected or corrected.
+- AI and customer quotations use only approved, enabled and date-valid Handphone records; the Admin report includes the complete approval queue.
 
 ## Automation and data configuration
 
@@ -55,6 +61,7 @@ Production: https://jomkaki-crm.vercel.app/
 - Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
 - AI document-readiness tests passed for complete, missing and exception cases.
 - Motor/Handphone number isolation, shared Customer ID, monthly Handphone tenure and Make business/team routing tests passed.
+- Handphone catalog, stock, pricing, regional approval, Admin price-floor exception and safe-version replacement tests passed.
 - Character-encoding checks passed for the frontend, index and README.
 - Vercel reported the final deployment `Ready` in Production.
 
