@@ -37,6 +37,33 @@ test('Meta reporting activates only when the full approved Cloud configuration e
   ['verify-secret','app-secret','access-secret','123456789'].forEach(secret=>assert.equal(publicJson.includes(secret),false));
 });
 
+test('Meta readiness recognises protected multi-channel credentials without requiring legacy globals',()=>{
+  const partial=metaConfigurationStatus({
+    WHATSAPP_SEND_MODE:'CLOUD',
+    WHATSAPP_VERIFY_TOKEN:'verify-secret',
+    META_APP_SECRET:'app-secret',
+    WHATSAPP_WEST_01_ACCESS_TOKEN:'west-secret'
+  });
+  assert.equal(partial.sendingConfigured,false);
+  assert.equal(partial.productionEnabled,false);
+
+  const env={
+    WHATSAPP_SEND_MODE:'CLOUD',
+    WHATSAPP_VERIFY_TOKEN:'verify-secret',
+    META_APP_SECRET:'app-secret',
+    WHATSAPP_WEST_01_ACCESS_TOKEN:'west-secret',
+    WHATSAPP_WEST_01_PHONE_NUMBER_ID:'1212389721965743'
+  };
+  const status=metaConfigurationStatus(env);
+  const publicRecord=publicIntegrationRecords(env).find(record=>record.id==='META_CLOUD');
+  assert.equal(status.sendingConfigured,true);
+  assert.equal(status.configuredSenderCount,1);
+  assert.equal(status.credentialModel,'MULTI_CHANNEL');
+  assert.equal(status.productionEnabled,true);
+  assert.equal(publicRecord.status,'CONNECTED');
+  ['verify-secret','app-secret','west-secret','1212389721965743'].forEach(secret=>assert.equal(JSON.stringify(publicRecord).includes(secret),false));
+});
+
 test('LMS reporting distinguishes sandbox preparation from production activation',()=>{
   const sandboxEnv={
     LMSPRO_ENABLED:'true',
