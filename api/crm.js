@@ -1126,7 +1126,7 @@ export default async function handler(req, res) {
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BN1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
         const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
         const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
@@ -1139,6 +1139,20 @@ export default async function handler(req, res) {
           'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
           'Manual Review Required': 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username, 'Business Unit': rowBusinessUnit(applicationRecord || leadRecord || {}), 'Customer ID': clean(applicationRecord?.['Customer ID'] || leadRecord?.['Customer ID'])
         });
+        if (applicationRecord) {
+          const requiredDocumentTypes = ['IC_FRONT', 'IC_BACK', 'INCOME_PROOF'];
+          const receivedDocumentTypes = new Set(rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId && clean(row['Verification Status']).toUpperCase() !== 'REJECTED').map(row => clean(row['Document Type']).toUpperCase()));
+          receivedDocumentTypes.add(documentType.toUpperCase());
+          const missingDocumentTypes = requiredDocumentTypes.filter(type => !receivedDocumentTypes.has(type));
+          await updateObject(req, 'Applications', 'Application ID', applicationId, {
+            'Updated At': timestamp,
+            'Document Status': missingDocumentTypes.length ? 'COLLECTING' : 'AI_CHECK_PENDING',
+            'Minimum Documents Complete': missingDocumentTypes.length ? 'FALSE' : 'TRUE',
+            'Missing Documents': missingDocumentTypes.join(', '),
+            'Current Stage': missingDocumentTypes.length ? 'DOCUMENT_COLLECTION' : 'DOCUMENT_VERIFICATION',
+            'Updated By': session.username
+          }, 'BN');
+        }
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
       }
