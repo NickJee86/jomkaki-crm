@@ -124,6 +124,8 @@
       event.preventDefault();
       const button = form.querySelector('[type=submit]'), message = document.getElementById('formMessage'), values = Object.fromEntries(new FormData(form)), files = [...form.photos.files].slice(0, 3);
       if (form.photos.files.length > 3) { message.textContent = 'Choose a maximum of three photos.'; return; }
+      try { files.forEach(file => validateBrowserFile(file, { imageOnly: true })); }
+      catch (error) { message.textContent = error.message; return; }
       button.disabled = true;
       try {
         let inventoryId = item.id || '';
