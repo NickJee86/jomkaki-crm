@@ -194,9 +194,13 @@
     const motorType=form.elements.motorType,inventory=form.elements.secondHandInventoryId,secondHandLabel=form.querySelector('[data-second-hand-field]');
     const syncSecondHand=()=>{
       const motorApplication=form.elements.businessUnit.value==='MOTOR',secondHand=motorApplication&&motorType.value==='SECOND_HAND',region=form.elements.region.value;
-      form.querySelector('[data-motor-type-field]').hidden=!motorApplication;
+      const motorTypeField=form.querySelector('[data-motor-type-field]');
+      motorTypeField.hidden=!motorApplication;
       catalogLabel.hidden=!motorApplication||secondHand;
       secondHandLabel.hidden=!secondHand;
+      motorTypeField.style.setProperty('display',motorApplication?'':'none','important');
+      catalogLabel.style.setProperty('display',motorApplication&&!secondHand?'':'none','important');
+      secondHandLabel.style.setProperty('display',secondHand?'':'none','important');
       form.elements.catalogId.required=motorApplication&&!secondHand;
       inventory.required=secondHand;
       [...inventory.options].forEach((option,index)=>{if(!index)return;option.hidden=Boolean(region&&option.dataset.region&&option.dataset.region!==region)});
