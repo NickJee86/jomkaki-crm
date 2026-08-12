@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FUTURE_REPORTING_FIELDS, integrationReadiness, metaConfigurationStatus, publicIntegrationRecords } from '../api/_integrations.js';
+import { FUTURE_REPORTING_FIELDS, integrationReadiness, metaConfigurationStatus, publicIntegrationRecords, sharePointConfigurationStatus } from '../api/_integrations.js';
 
 test('Unconfigured integrations stay safe and expose prepared reporting fields',()=>{
   const readiness=integrationReadiness({});
@@ -8,14 +8,28 @@ test('Unconfigured integrations stay safe and expose prepared reporting fields',
   assert.equal(readiness.meta.mode,'MANUAL');
   assert.equal(readiness.meta.productionEnabled,false);
   assert.equal(readiness.lms.productionEnabled,false);
+  assert.equal(readiness.sharepoint.productionEnabled,false);
   assert.equal(readiness.safety.whatsappAutomaticSendDisabled,true);
   assert.equal(readiness.safety.lmsProductionSubmissionDisabled,true);
   assert.equal(records.find(record=>record.id==='META_CLOUD').status,'MANUAL_READY');
   assert.equal(records.find(record=>record.id==='LMSPRO').status,'AWAITING_VENDOR');
+  assert.equal(records.find(record=>record.id==='SHAREPOINT').status,'AWAITING_CONFIGURATION');
   assert.ok(FUTURE_REPORTING_FIELDS.meta.includes('Delivered At'));
   assert.ok(FUTURE_REPORTING_FIELDS.meta.includes('Read At'));
   assert.ok(FUTURE_REPORTING_FIELDS.lms.includes('LMS Decision At'));
   assert.ok(FUTURE_REPORTING_FIELDS.lms.includes('LMS Error Message'));
+});
+
+test('SharePoint distinguishes protected credentials from a verified site write',()=>{
+  const credentials={SHAREPOINT_TENANT_ID:'tenant-secret',SHAREPOINT_CLIENT_ID:'client-secret',SHAREPOINT_CLIENT_SECRET:'app-secret'};
+  const prepared=sharePointConfigurationStatus(credentials);
+  assert.equal(prepared.credentialsConfigured,true);
+  assert.equal(prepared.writeVerified,false);
+  assert.equal(publicIntegrationRecords(credentials).find(record=>record.id==='SHAREPOINT').status,'CREDENTIALS_READY');
+  const verified=sharePointConfigurationStatus({...credentials,SHAREPOINT_SITE_WRITE_VERIFIED_AT:'2026-08-11T12:00:00+08:00'});
+  assert.equal(verified.productionEnabled,true);
+  const publicJson=JSON.stringify(publicIntegrationRecords({...credentials,SHAREPOINT_SITE_WRITE_VERIFIED_AT:'2026-08-11T12:00:00+08:00'}));
+  ['tenant-secret','client-secret','app-secret'].forEach(secret=>assert.equal(publicJson.includes(secret),false));
 });
 
 test('Meta reporting activates only when the full approved Cloud configuration exists',()=>{
@@ -26,7 +40,8 @@ test('Meta reporting activates only when the full approved Cloud configuration e
     WHATSAPP_VERIFY_TOKEN:'verify-secret',
     META_APP_SECRET:'app-secret',
     WHATSAPP_ACCESS_TOKEN:'access-secret',
-    WHATSAPP_PHONE_NUMBER_ID:'123456789'
+    WHATSAPP_PHONE_NUMBER_ID:'123456789',
+    WHATSAPP_PHONE_VERIFIED_AT:'2026-08-12T13:00:00+08:00'
   };
   const status=metaConfigurationStatus(env);
   const records=publicIntegrationRecords(env);
@@ -35,6 +50,21 @@ test('Meta reporting activates only when the full approved Cloud configuration e
   assert.equal(records.find(record=>record.id==='META_CLOUD').status,'CONNECTED');
   const publicJson=JSON.stringify(records);
   ['verify-secret','app-secret','access-secret','123456789'].forEach(secret=>assert.equal(publicJson.includes(secret),false));
+});
+
+test('Meta Cloud remains disabled until the official phone number is verified',()=>{
+  const env={
+    WHATSAPP_SEND_MODE:'CLOUD',
+    WHATSAPP_VERIFY_TOKEN:'verify-secret',
+    META_APP_SECRET:'app-secret',
+    WHATSAPP_ACCESS_TOKEN:'access-secret',
+    WHATSAPP_PHONE_NUMBER_ID:'123456789'
+  };
+  const status=metaConfigurationStatus(env);
+  const publicRecord=publicIntegrationRecords(env).find(record=>record.id==='META_CLOUD');
+  assert.equal(status.phoneVerified,false);
+  assert.equal(status.productionEnabled,false);
+  assert.equal(publicRecord.status,'PHONE_VERIFICATION_PENDING');
 });
 
 test('Meta readiness recognises protected multi-channel credentials without requiring legacy globals',()=>{
@@ -52,7 +82,8 @@ test('Meta readiness recognises protected multi-channel credentials without requ
     WHATSAPP_VERIFY_TOKEN:'verify-secret',
     META_APP_SECRET:'app-secret',
     WHATSAPP_WEST_01_ACCESS_TOKEN:'west-secret',
-    WHATSAPP_WEST_01_PHONE_NUMBER_ID:'1212389721965743'
+    WHATSAPP_WEST_01_PHONE_NUMBER_ID:'1212389721965743',
+    WHATSAPP_PHONE_VERIFIED_AT:'2026-08-12T13:00:00+08:00'
   };
   const status=metaConfigurationStatus(env);
   const publicRecord=publicIntegrationRecords(env).find(record=>record.id==='META_CLOUD');
