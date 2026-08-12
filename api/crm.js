@@ -375,6 +375,9 @@ const CREDIT_CONSENT_DOCUMENT_TYPE = 'CTOS_CCRIS_CONSENT';
 const CREDIT_CONSENT_TEMPLATE_VERSION = 'BPH_V4.0_01112020';
 const CREDIT_CONSENT_TEMPLATE_PATH = '/assets/ctos-ccris-consent-bph-v4.pdf';
 const creditConsentHeaders = ['Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Consent Signed At', 'Credit Consent Verified At', 'Credit Consent Verified By', 'Credit Consent Document ID', 'Credit Check Status', 'Credit Check Requested At', 'Credit Check Requested By'];
+const leadRecordHeaders = ['Lead Source', 'Created By', 'Updated By'];
+const applicationRecordHeaders = ['Product Variant', 'Motor Type', 'Second Hand Inventory ID', 'Created By', 'Updated By'];
+const documentReviewHeaders = ['Uploaded By', 'Reviewed By', 'Reviewed At'];
 const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
@@ -1073,20 +1076,30 @@ export default async function handler(req, res) {
         const businessUnit = clean(body.businessUnit || body.productCategory).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
         const productConfig = businessSheets(businessUnit);
         const requestedRegion = canonicalRegion(body.region);
+        const motorType = businessUnit === 'MOTOR' && ['SECOND_HAND', '2ND_HAND', 'USED'].includes(clean(body.motorType).toUpperCase()) ? 'SECOND_HAND' : businessUnit === 'MOTOR' ? 'NEW' : '';
+        const secondHandInventoryId = motorType === 'SECOND_HAND' ? clean(body.secondHandInventoryId || body.inventoryId) : '';
         if (!customerName || !phone || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and application type are required');
         const sessionBusinessAccess = canonicalBusinessAccess(session.businessAccess, session.role);
         if (session.role !== 'ADMIN' && sessionBusinessAccess !== 'BOTH' && sessionBusinessAccess !== businessUnit) return res.status(403).json({ live: false, error: `Your account cannot submit ${businessUnit.toLowerCase()} applications.` });
         if (session.role !== 'ADMIN' && session.region !== 'ALL' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
-        if (!catalogId) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
-        const [catalogRows, existingLeadRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AO1000']);
-        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-        if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
-        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
+        if (motorType === 'SECOND_HAND' && !secondHandInventoryId) throw new Error('Select an approved and available 2nd-hand motor');
+        if (motorType !== 'SECOND_HAND' && !catalogId) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+        const [catalogRows, existingLeadRows, secondHandRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AP1000', secondHandRange]);
+        const catalogRecord = motorType === 'SECOND_HAND' ? null : rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        const secondHandRecord = motorType === 'SECOND_HAND' ? rowsToObjects(secondHandRows).find(row => clean(row['Inventory ID']) === secondHandInventoryId) : null;
+        if (motorType !== 'SECOND_HAND' && !catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+        if (motorType === 'SECOND_HAND') {
+          if (!secondHandRecord || !secondHandApproved(secondHandRecord) || !truth(secondHandRecord['Customer Visible']) || !truth(secondHandRecord['Image Approved']) || clean(secondHandRecord['Stock Status']).toUpperCase() !== 'AVAILABLE') throw new Error('The selected 2nd-hand motor is not approved and available');
+          if (canonicalRegion(secondHandRecord.Region) !== requestedRegion) throw new Error('The selected 2nd-hand motor is outside the application region');
+          if (['STAFF', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(secondHandRecord['Branch ID']) !== clean(session.branchId)) throw new Error('The selected 2nd-hand motor is outside your branch');
+        }
+        const productRecord = secondHandRecord || catalogRecord || {};
+        const brand = clean(productRecord.Brand), model = clean(productRecord.Model), variant = clean(productRecord.Variant) || 'Standard';
         const normalizedPhone = whatsappPhone(phone), existingCustomer = rowsToObjects(existingLeadRows).find(row => whatsappPhone(row['Phone Number']) === normalizedPhone);
         const customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
-        const assignedBranchId = ['STAFF', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId);
+        const assignedBranchId = ['STAFF', 'BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) ? session.branchId : clean(body.branchId) || clean(secondHandRecord?.['Branch ID']);
         let teamId = clean(body.teamId);
         if (assignedSaId || assignedBranchId) {
           const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
@@ -1102,13 +1115,13 @@ export default async function handler(req, res) {
           }
           teamId = teamId || clean(branch?.['Team ID']);
         }
-        await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID']);
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...creditConsentHeaders]);
+        await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID', ...leadRecordHeaders]);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
-          'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL',
+          'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL', 'Source Channel': 'CRM_MANUAL',
           'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED',
-          'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username
+          'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username, 'Updated By': session.username
         });
         await appendObject(req, 'Applications', {
           'Application ID': applicationId, 'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Applicant Name': customerName,
@@ -1118,7 +1131,7 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '',
+          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': motorType, 'Second Hand Inventory ID': secondHandInventoryId, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Selling Price (RM)']) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Deposit (RM)']) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '',
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
@@ -1127,11 +1140,11 @@ export default async function handler(req, res) {
           'SA Review Required': 'FALSE', 'Next Follow Up At': clean(body.nextFollowUp), 'Created By': session.username, 'Updated By': session.username
         });
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_MANUAL_APPLICATION_CREATED', description: `${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} application created for ${brand} ${model}` });
-        return res.status(201).json({ live: true, leadId, applicationId, businessUnit });
+        return res.status(201).json({ live: true, leadId, applicationId, businessUnit, motorType, secondHandInventoryId });
       }
       if (action === 'sendCreditConsent') {
         const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches), application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1141,7 +1154,7 @@ export default async function handler(req, res) {
         if (!normalizedPhone) throw new Error('A valid customer phone number is required');
         const timestamp = now(), consentUrl = `https://jomkaki-crm.vercel.app${CREDIT_CONSENT_TEMPLATE_PATH}`;
         const message = `JomKaki Motor: Please download, complete and sign the CTOS/CCRIS Consent Authorisation form, then return the signed PDF or clear photo here. Borang kebenaran CTOS/CCRIS: ${consentUrl}`;
-        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
           'Updated At': timestamp, 'Credit Consent Status': 'SENT', 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
           'Credit Consent Sent At': timestamp, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': session.username
@@ -1158,11 +1171,11 @@ export default async function handler(req, res) {
       if (action === 'setCreditConsentOutcome') {
         const applicationId = clean(body.applicationId), outcome = clean(body.outcome).toUpperCase();
         if (!['DECLINED', 'WITHDRAWN'].includes(outcome)) throw new Error('Consent outcome must be Declined or Withdrawn');
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
-        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, { 'Updated At': now(), 'Credit Consent Status': outcome, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': `BLOCKED_CONSENT_${outcome}`, 'Updated By': session.username }, 'BX');
         await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: `CRM_CREDIT_CONSENT_${outcome}`, description: `Customer credit consent marked ${outcome}` });
         return res.status(200).json({ live: true, applicationId, status: outcome });
@@ -1171,7 +1184,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to verify credit consent.' });
         const applicationId = clean(body.applicationId), decision = clean(body.decision || 'VERIFIED').toUpperCase();
         if (!['VERIFIED', 'REJECTED'].includes(decision)) throw new Error('Consent decision must be Verified or Rejected');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1179,11 +1192,12 @@ export default async function handler(req, res) {
         const document = consentDocuments.find(row => clean(row['Document ID']) === clean(body.documentId || application['Credit Consent Document ID'])) || consentDocuments.at(-1);
         if (!document) throw new Error('Upload the signed CTOS/CCRIS consent before verification');
         const timestamp = now();
+        await ensureSheetHeaders(req, 'Document_Log', documentReviewHeaders);
         await updateObject(req, 'Document_Log', 'Document ID', document['Document ID'], {
           'Updated At': timestamp, 'Quality Status': decision === 'VERIFIED' ? 'GOOD' : 'RESUBMISSION_REQUIRED', 'Verification Status': decision,
           'Manual Review Required': decision === 'VERIFIED' ? 'FALSE' : 'TRUE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': timestamp
-        }, 'AA');
-        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        }, 'AD');
+        await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
           'Updated At': timestamp, 'Credit Consent Status': decision === 'VERIFIED' ? 'VERIFIED' : 'REJECTED_RESUBMISSION_REQUIRED',
           'Credit Consent Template Version': clean(application['Credit Consent Template Version']) || CREDIT_CONSENT_TEMPLATE_VERSION,
@@ -1196,14 +1210,14 @@ export default async function handler(req, res) {
       if (action === 'prepareCreditCheck') {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to prepare a credit check.' });
         const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         if (clean(application['Credit Consent Status']).toUpperCase() !== 'VERIFIED') throw new Error('Verified CTOS/CCRIS consent is required before any credit check');
         if (clean(application['Minimum Documents Complete']).toUpperCase() !== 'TRUE' && clean(application['Missing Documents'])) throw new Error('Complete the minimum customer documents before preparing the credit check');
         const timestamp = now();
-        await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+        await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, { 'Updated At': timestamp, 'Credit Check Status': 'READY_FOR_API_CONNECTION', 'Credit Check Requested At': timestamp, 'Credit Check Requested By': session.username, 'Updated By': session.username }, 'BX');
         await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: 'CRM_CREDIT_CHECK_PREPARED', description: 'Credit check gated successfully; CTOS/CCRIS API connection is still required before execution' });
         return res.status(200).json({ live: true, applicationId, status: 'READY_FOR_API_CONNECTION', externalQueryExecuted: false });
@@ -1211,13 +1225,14 @@ export default async function handler(req, res) {
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
         const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
         const applicationRecord = applicationRecords.find(row => clean(row['Application ID']) === applicationId), leadRecord = leadRecords.find(row => clean(row['Lead ID']) === (leadId || clean(applicationRecord?.['Lead ID'])));
         const uploaded = await uploadDocument(req, body.file, applicationId || leadId);
         const documentId = makeId('DOC'), timestamp = now();
+        await ensureSheetHeaders(req, 'Document_Log', documentReviewHeaders);
         await appendObject(req, 'Document_Log', {
           'Document ID': documentId, 'Received At': timestamp, 'Updated At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId,
           'Document Type': documentType, 'File Name': uploaded.name, 'Mime Type': clean(body.file.type), 'File URL': uploaded.webUrl || '',
@@ -1241,7 +1256,7 @@ export default async function handler(req, res) {
             'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION', 'Credit Consent Template Version': clean(applicationRecord['Credit Consent Template Version']) || CREDIT_CONSENT_TEMPLATE_VERSION,
             'Credit Consent Signed At': timestamp, 'Credit Consent Document ID': documentId, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_VERIFICATION'
           });
-          await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+          await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
           await updateObject(req, 'Applications', 'Application ID', applicationId, applicationChanges, 'BX');
         }
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
@@ -1251,7 +1266,7 @@ export default async function handler(req, res) {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
         const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
-        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -1277,7 +1292,10 @@ export default async function handler(req, res) {
           'SA Review Required': session.role === 'STAFF' ? clean(record['SA Review Required']) : clean(body.reviewRequired).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
           'Handover Reason': session.role === 'STAFF' ? clean(record['Handover Reason']) : clean(body.handoverReason), 'Updated By': session.username
         });
-        if (record['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Updated At': now() }, 'AF');
+        if (record['Lead ID']) {
+          await ensureSheetHeaders(req, 'Leads', leadRecordHeaders);
+          await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Updated At': now(), 'Updated By': session.username }, 'AP');
+        }
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICATION_UPDATED', description: `Application updated to ${stage} / ${status}` });
         return res.status(200).json({ live: true, applicationId });
       }
@@ -1285,17 +1303,18 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AA1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
         if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        await ensureSheetHeaders(req, 'Document_Log', documentReviewHeaders);
         await updateObject(req, 'Document_Log', 'Document ID', documentId, {
           'Updated At': now(), 'Quality Status': quality, 'Verification Status': verification,
           'Manual Review Required': verification === 'PENDING' ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Reviewed By': session.username, 'Reviewed At': now()
-        }, 'Y');
+        }, 'AD');
         if (clean(document['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE && document['Application ID']) {
           const timestamp = now(), consentStatus = verification === 'VERIFIED' ? 'VERIFIED' : verification === 'REJECTED' ? 'REJECTED_RESUBMISSION_REQUIRED' : 'SIGNED_PENDING_VERIFICATION';
-          await ensureSheetHeaders(req, 'Applications', creditConsentHeaders);
+          await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
           await updateObject(req, 'Applications', 'Application ID', document['Application ID'], {
             'Updated At': timestamp, 'Credit Consent Status': consentStatus, 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
             'Credit Consent Verified At': verification === 'VERIFIED' ? timestamp : '', 'Credit Consent Verified By': verification === 'VERIFIED' ? session.username : '',
@@ -1307,17 +1326,21 @@ export default async function handler(req, res) {
       }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         const businessUnit = rowBusinessUnit(record);
-        const productConfig = businessSheets(businessUnit);
-        const [catalogRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`]);
-        const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
-        if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
-        const brand = clean(catalogRecord.Brand), model = clean(catalogRecord.Model), variant = clean(catalogRecord.Variant) || 'Standard';
+        const secondHandApplication = businessUnit === 'MOTOR' && clean(record['Motor Type']).toUpperCase() === 'SECOND_HAND' && clean(record['Second Hand Inventory ID']);
+        let brand = clean(record['Product Brand']), model = clean(record['Product Model']), variant = clean(record['Product Variant']) || 'Standard';
+        if (!secondHandApplication) {
+          const productConfig = businessSheets(businessUnit);
+          const [catalogRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`]);
+          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+          if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
+          brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
+        }
         const changes = {
           'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
           'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
@@ -1328,7 +1351,7 @@ export default async function handler(req, res) {
           'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
           'Reference 2 Relationship': clean(body.reference2Relationship), 'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
-          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.loanTenureYears) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.loanTenureMonths) : '',
+          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': secondHandApplication ? 'SECOND_HAND' : businessUnit === 'MOTOR' ? 'NEW' : '', 'Second Hand Inventory ID': secondHandApplication ? clean(record['Second Hand Inventory ID']) : '', 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : clean(record['Requested Product Price (RM)']), 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : clean(record['Requested Deposit (RM)']), 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.loanTenureYears) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.loanTenureMonths) : '',
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Updated By': session.username
@@ -1338,13 +1361,13 @@ export default async function handler(req, res) {
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
         if (changes['Loan Tenure Months'] && !['12', '24', '36', '48'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be 12, 24, 36 or 48 months');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...creditConsentHeaders]);
+        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BX');
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -1417,7 +1440,10 @@ export default async function handler(req, res) {
           const handoverBusiness = rowBusinessUnit(handoverApplication || handoverLead || {});
           if (!businessAllows(advisor['Business Access'] || 'BOTH', handoverBusiness)) throw new Error(`This sales advisor cannot receive ${handoverBusiness.toLowerCase()} handovers`);
           const assignedBranchId = clean(advisor['Branch ID']);
-          if (inboxRecord['Lead ID']) await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now() }, 'AF');
+          if (inboxRecord['Lead ID']) {
+            await ensureSheetHeaders(req, 'Leads', leadRecordHeaders);
+            await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now(), 'Updated By': session.username }, 'AP');
+          }
           if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BK');
           await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': 'ASSIGNED_TO_STAFF', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
           await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: 'CRM_HANDOVER_ASSIGNED', description: `Human handover assigned to ${saId}` });
@@ -1460,7 +1486,7 @@ export default async function handler(req, res) {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AO1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:BX1000', 'Branch_Master!A1:S1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -1493,7 +1519,7 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'applications') {
-      const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AA1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
+      const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AD1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
       const documents = rowsToObjects(documentRows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID']));
       const motorPricing = rowsToObjects(motorPricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
@@ -1536,10 +1562,10 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'documents') {
-      const [rows] = await readRanges(req, ['Document_Log!A1:AA1500']);
+      const [rows] = await readRanges(req, ['Document_Log!A1:AD1500']);
       const records = rowsToObjects(rows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID'])).reverse().map(row => ({
         id: row['Document ID'], applicationId: row['Application ID'], leadId: row['Lead ID'], type: row['Document Type'], received: row['Received At'], fileName: row['File Name'], mimeType: row['Mime Type'],
-        classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, updated: row['Updated At']
+        classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, uploadedBy: row['Uploaded By'], reviewedBy: row['Reviewed By'], reviewedAt: row['Reviewed At'], updated: row['Updated At']
       }));
       return res.status(200).json({ live: true, records });
     }
@@ -1622,7 +1648,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ live: true, records });
     }
 
-    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AC1200', 'Document_Log!A1:AA1500']);
+    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AC1200', 'Document_Log!A1:AD1500']);
     const inbox = rowsToObjects(inboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID']));
