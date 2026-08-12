@@ -408,7 +408,7 @@ function publicChannel(row, branches = [], env = process.env) {
     wabaId: row['WABA ID'], appId: row['Meta App ID'], portfolioId: row['Business Portfolio ID'], branchId: row['Branch ID'], region: channelRegion(row, branches), businessUnit: canonicalBusinessUnit(row['Business Unit']) || 'UNASSIGNED', teamId: row['Team ID'],
     slot: row['Channel Slot'], campaignSource: row['Campaign Source'], defaultOwner: row['Default Team / SA'], inboundEnabled: truth(row['Inbound Enabled']),
     outboundEnabled: truth(row['Outbound Enabled']), active: truth(row.Active), connectionAlias: row['Make Connection Alias'], webhookRouteKey: row['Webhook Route Key'],
-    environment: row.Environment, lastVerified: row['Last Verified At'], lastInboundAt: row['Last Inbound At'], lastOutboundAt: row['Last Outbound At'],
+    environment: row.Environment, phoneVerified: Boolean(clean(row['Last Verified At'])), lastVerified: row['Last Verified At'], lastInboundAt: row['Last Inbound At'], lastOutboundAt: row['Last Outbound At'],
     status: row['Data Status'], notes: row['Internal Notes'], credentialKey, credentialConfigured: tokenConfigured && !!phoneNumberId
   };
 }
@@ -674,6 +674,7 @@ export default async function handler(req, res) {
           if (enabled && (!clean(existing['Phone Number ID']) || !clean(existing['Display Number']))) throw new Error('Add the official number and Meta Phone Number ID before enabling this channel');
           if (enabled && !canonicalBusinessUnit(existing['Business Unit'])) throw new Error('Select Motor or Handphone before enabling this channel');
           if (enabled && !channelCredentials(existing).accessToken) throw new Error(`Add the protected ${channelEnvironmentPrefix(existing['Credential Key'] || channelId)}_ACCESS_TOKEN secret in Vercel before enabling this channel`);
+          if (enabled && !clean(existing['Last Verified At'])) throw new Error('Record the successful Meta phone verification time before enabling this channel');
           await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { Active: enabled ? 'TRUE' : 'FALSE', 'Inbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': enabled ? 'TRUE' : 'FALSE', 'Data Status': enabled ? 'CONNECTED' : 'DISABLED', 'Updated By': session.username, 'Updated At': now() }, 'AC');
           await writeActivity(req, session, { type: enabled ? 'CRM_WHATSAPP_CHANNEL_ENABLED' : 'CRM_WHATSAPP_CHANNEL_DISABLED', description: `${channelId} ${enabled ? 'enabled for inbound and outbound routing' : 'disabled; bound conversations require approved transfer'}` });
           return res.status(200).json({ live: true, channelId, enabled });
@@ -689,9 +690,11 @@ export default async function handler(req, res) {
         const phoneNumberId = clean(body.phoneNumberId), displayNumber = clean(body.displayNumber), wabaId = clean(body.wabaId);
         if (phoneNumberId && channels.some(row => clean(row['Internal Channel ID']).toUpperCase() !== channelId && clean(row['Phone Number ID']) === phoneNumberId)) throw new Error('This Meta Phone Number ID is already assigned to another channel');
         const active = truth(body.active), inboundEnabled = truth(body.inboundEnabled), outboundEnabled = truth(body.outboundEnabled);
+        const lastVerifiedAt = clean(body.lastVerified || existing?.['Last Verified At']);
         const businessUnit = canonicalBusinessUnit(body.businessUnit || existing?.['Business Unit']);
         if ((active || inboundEnabled || outboundEnabled) && !businessUnit) throw new Error('Select Motor or Handphone before activating this channel');
         if ((active || inboundEnabled || outboundEnabled) && (!phoneNumberId || !displayNumber)) throw new Error('Official display number and Meta Phone Number ID are required before activation');
+        if ((active || inboundEnabled || outboundEnabled) && !lastVerifiedAt) throw new Error('Record the successful Meta phone verification time before enabling this channel');
         if ((inboundEnabled || outboundEnabled) && !active) throw new Error('Activate the channel before enabling inbound or outbound routing');
         const timestamp = now(), record = {
           'Channel Name': clean(body.name) || `${region === 'EAST_MALAYSIA' ? 'East' : 'West'} Malaysia Official ${slot}`,
@@ -699,7 +702,7 @@ export default async function handler(req, res) {
           'Business Portfolio ID': sheetIdentifier(body.portfolioId), 'Branch ID': branchId, 'Campaign Source': clean(body.campaignSource) || 'ALL',
           'Default Team / SA': clean(body.defaultOwner), 'Inbound Enabled': inboundEnabled ? 'TRUE' : 'FALSE', 'Outbound Enabled': outboundEnabled ? 'TRUE' : 'FALSE',
           Active: active ? 'TRUE' : 'FALSE', 'Make Connection Alias': clean(body.connectionAlias), 'Webhook Route Key': clean(body.webhookRouteKey) || `JKM-WA-${region === 'EAST_MALAYSIA' ? 'EAST' : 'WEST'}-${slot}`,
-          Environment: clean(body.environment).toUpperCase() === 'TEST' ? 'TEST' : 'PRODUCTION', 'Last Verified At': clean(body.lastVerified), 'Updated By': session.username,
+          Environment: clean(body.environment).toUpperCase() === 'TEST' ? 'TEST' : 'PRODUCTION', 'Last Verified At': lastVerifiedAt, 'Updated By': session.username,
           'Internal Notes': clean(body.notes), 'Data Status': active ? 'CONNECTED' : (phoneNumberId ? 'READY_FOR_CONNECTION' : 'PENDING_PHONE_SETUP'), Region: region,
           'Channel Slot': sheetIdentifier(slot), 'Credential Key': channelEnvironmentPrefix(body.credentialKey || channelId), 'Updated At': timestamp,
           'Business Unit': businessUnit, 'Team ID': clean(body.teamId)
@@ -1394,7 +1397,9 @@ export default async function handler(req, res) {
           const targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
           const messageBusinessUnit = rowBusinessUnit(targetApplication || targetLead || {}), customerId = clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']);
           if (cloudMode && resolved.unregisteredNumberId) throw new Error(`The customer's original WhatsApp number (${resolved.unregisteredNumberId}) is not registered in CRM. Admin must map it before replying.`);
+          if (cloudMode && !route) throw new Error('Customer is not bound to an official WhatsApp channel. Bind the customer channel before sending.');
           if (cloudMode && route && (!truth(route.Active) || !truth(route['Outbound Enabled']))) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} is disabled. Admin approval is required before transferring the conversation.`);
+          if (cloudMode && route && !clean(route['Last Verified At'])) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} has not completed Meta phone verification.`);
           let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '';
           if (cloudMode) {
             const { accessToken, phoneNumberId, version } = channelCredentials(route);

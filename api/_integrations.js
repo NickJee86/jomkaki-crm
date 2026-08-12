@@ -46,11 +46,15 @@ export function metaConfigurationStatus(env = process.env) {
   const webhookConfigured = Boolean(clean(env.WHATSAPP_VERIFY_TOKEN) && clean(env.META_APP_SECRET));
   const configuredSenders = configuredWhatsAppSenders(env);
   const sendingConfigured = configuredSenders.length > 0;
-  const productionEnabled = mode === 'CLOUD' && webhookConfigured && sendingConfigured;
+  const phoneVerifiedAt = clean(env.WHATSAPP_PHONE_VERIFIED_AT || env.META_PHONE_VERIFIED_AT);
+  const phoneVerified = Boolean(phoneVerifiedAt);
+  const productionEnabled = mode === 'CLOUD' && webhookConfigured && sendingConfigured && phoneVerified;
   return {
     mode,
     webhookConfigured,
     sendingConfigured,
+    phoneVerified,
+    phoneVerifiedAt,
     configuredSenderCount: configuredSenders.length,
     credentialModel: configuredSenders.some(sender => sender !== 'LEGACY_SINGLE') ? 'MULTI_CHANNEL' : configuredSenders.length ? 'LEGACY_SINGLE' : 'NONE',
     readyForWebhook: webhookConfigured,
@@ -94,7 +98,7 @@ export function integrationReadiness(env = process.env) {
 
 export function publicIntegrationRecords(env = process.env) {
   const { meta, lms, sharepoint } = integrationReadiness(env);
-  const metaStatus = meta.productionEnabled ? 'CONNECTED' : meta.webhookConfigured ? 'WEBHOOK_READY' : meta.mode === 'MANUAL' ? 'MANUAL_READY' : 'AWAITING_CONFIGURATION';
+  const metaStatus = meta.productionEnabled ? 'CONNECTED' : meta.webhookConfigured && meta.sendingConfigured && !meta.phoneVerified ? 'PHONE_VERIFICATION_PENDING' : meta.webhookConfigured ? 'WEBHOOK_READY' : meta.mode === 'MANUAL' ? 'MANUAL_READY' : 'AWAITING_CONFIGURATION';
   const lmsStatus = lms.productionEnabled ? 'PRODUCTION_READY' : lms.readyForSandbox ? 'SANDBOX_READY' : lms.contractConfigured ? 'CONFIGURED_DISABLED' : 'AWAITING_VENDOR';
   const sharePointStatus = sharepoint.writeVerified ? 'VERIFIED' : sharepoint.credentialsConfigured ? 'CREDENTIALS_READY' : 'AWAITING_CONFIGURATION';
   return [
@@ -105,8 +109,8 @@ export function publicIntegrationRecords(env = process.env) {
       mode: meta.mode,
       reportingReady: meta.reportingReady,
       automaticActionsEnabled: meta.productionEnabled,
-      description: meta.productionEnabled ? 'Cloud messaging and delivery reporting are enabled.' : 'Manual WhatsApp remains active. Cloud reporting will activate after Meta credentials and webhook approval.',
-      requiredNext: meta.productionEnabled ? 'Monitor delivery, read and reply metrics.' : 'Connect Meta access token, phone number ID, verify token and app secret.'
+      description: meta.productionEnabled ? 'Cloud messaging and delivery reporting are enabled for the verified production number.' : meta.webhookConfigured && meta.sendingConfigured && !meta.phoneVerified ? 'Meta credentials and webhook are ready, but the official phone number is not yet recorded as verified.' : 'Manual WhatsApp remains active. Cloud reporting will activate after Meta credentials, phone verification and webhook approval.',
+      requiredNext: meta.productionEnabled ? 'Monitor delivery, read and reply metrics.' : meta.webhookConfigured && meta.sendingConfigured && !meta.phoneVerified ? 'Verify the official number in Meta, then set WHATSAPP_PHONE_VERIFIED_AT and run a controlled live send before enabling Cloud mode.' : 'Connect the Meta credentials and webhook, then verify the official phone number before enabling Cloud mode.'
     },
     {
       id: 'LMSPRO',
