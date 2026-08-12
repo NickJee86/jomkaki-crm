@@ -91,7 +91,7 @@ export default async function handler(req, res) {
     const payload = JSON.parse(raw.toString('utf8') || '{}'), token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
     const leads = objects(await readSheet(token, 'Leads!A1:AP1000'));
-    const applications = objects(await readSheet(token, 'Applications!A1:BN1000'));
+    const applications = objects(await readSheet(token, 'Applications!A1:CC1000'));
     const routes = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));
     const branches = objects(await readSheet(token, 'Branch_Master!A1:S1000'));
     const existingMessageIds = new Set(objects(await readSheet(token, 'Customer_Inbox!A1:AC1200')).map(row => clean(row['Message ID'])).filter(Boolean));

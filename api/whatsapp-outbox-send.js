@@ -62,6 +62,18 @@ async function updateOutbox(token, rowNumber, changes) {
   if (!response.ok) throw new Error('Unable to update Message_Outbox');
 }
 
+async function updateApplication(token, applicationId, changes) {
+  if (!clean(applicationId)) return;
+  const rows = await readSheet(token, 'Applications!A1:CC2000');
+  const headers = rows[0] || [], idIndex = headers.indexOf('Application ID');
+  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(applicationId));
+  if (rowIndex < 1) return;
+  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Applications!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
+  if (!data.length) return;
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  if (!response.ok) throw new Error('Unable to update consent delivery status');
+}
+
 function readSecret(req) {
   const bearer = clean(req.headers.authorization).replace(/^Bearer\s+/i, '');
   return bearer || clean(req.headers['x-jomkaki-dispatch-secret']);
@@ -99,6 +111,9 @@ export default async function handler(req, res) {
     const providerMessageId = clean(result.messages?.[0]?.id);
     const timestamp = new Date().toISOString();
     await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Attempt Count': String(attemptCount), 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'WhatsApp Number ID': binding.phoneNumberId, 'Send Routing Status': `VERCEL_CHANNEL_DISPATCH:${binding.channelId}` });
+    if (clean(outbox['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') {
+      await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_PENDING_SIGNATURE', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
+    }
     return res.status(200).json({ ok: true, outboxId, channelId: binding.channelId, status: 'SENT', providerMessageId });
   } catch (error) {
     const message = clean(error?.message) || 'Unable to dispatch WhatsApp message';
