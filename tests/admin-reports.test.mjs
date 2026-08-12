@@ -90,5 +90,5 @@ test('Report API exposes stable created dates and attribution fields',()=>{
 test('Report deployment uses a fresh cache version',()=>{
   assert.match(html,/v2\.css\?v=20260810-secondhand-report/);
   assert.match(html,/design-refresh\.css\?v=20260808-readiness-1/);
-  assert.match(html,/app-v2\.js\?v=20260811-credit-consent2/);
+  assert.match(html,/app-v2\.js\?v=20260812-meta-safety1/);
 });
