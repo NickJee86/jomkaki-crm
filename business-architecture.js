@@ -174,6 +174,47 @@
     };
   };
 
+  const architectureNewApplicationWithDocuments=newApplication;
+  newApplication=async function(){
+    if(architectureAllows(state.user?.businessAccess,'MOTOR')&&!loadedResources.has('secondHandMotors')){
+      try{
+        const response=await get('secondHandMotors');
+        state.data.usedMotors=response.records||[];
+        state.data.secondHandMotors=response.records||[];
+        loadedResources.add('secondHandMotors');
+      }catch(error){
+        state.data.usedMotors=state.data.usedMotors||[];
+      }
+    }
+    await architectureNewApplicationWithDocuments();
+    const form=document.getElementById('manualApplicationForm');if(!form||!form.elements.catalogId)return;
+    const catalogLabel=form.elements.catalogId.closest('label'),motors=(state.data.usedMotors||[]).filter(motor=>String(motor.approvalStatus||'').toUpperCase()==='APPROVED'&&String(motor.status||'').toUpperCase()==='AVAILABLE'&&motor.customerVisible&&motor.imageApproved);
+    catalogLabel.dataset.newMotorField='true';
+    catalogLabel.insertAdjacentHTML('beforebegin',`<label data-motor-type-field>Motor condition<select name="motorType"><option value="NEW">New motor</option><option value="SECOND_HAND">2nd-hand motor</option></select></label><label class="form-wide" data-second-hand-field hidden>Approved 2nd-hand inventory<select name="secondHandInventoryId"><option value="">Select an available 2nd-hand motor</option>${motors.map(motor=>`<option value="${esc(motor.id)}" data-region="${esc(motor.region||'')}">${esc([motor.brand,motor.model,motor.variant].filter(Boolean).join(' '))} · ${esc(motor.location||motor.branch||motor.region||'Location pending')} · ${money(motor.price)}</option>`).join('')}</select><small>${motors.length?'The application will stay linked to this exact physical motor and its location.':'No approved, available 2nd-hand inventory is currently visible to this account.'}</small></label>`);
+    const motorType=form.elements.motorType,inventory=form.elements.secondHandInventoryId,secondHandLabel=form.querySelector('[data-second-hand-field]');
+    const syncSecondHand=()=>{
+      const motorApplication=form.elements.businessUnit.value==='MOTOR',secondHand=motorApplication&&motorType.value==='SECOND_HAND',region=form.elements.region.value;
+      form.querySelector('[data-motor-type-field]').hidden=!motorApplication;
+      catalogLabel.hidden=!motorApplication||secondHand;
+      secondHandLabel.hidden=!secondHand;
+      form.elements.catalogId.required=motorApplication&&!secondHand;
+      inventory.required=secondHand;
+      [...inventory.options].forEach((option,index)=>{if(!index)return;option.hidden=Boolean(region&&option.dataset.region&&option.dataset.region!==region)});
+      if(secondHand&&inventory.selectedOptions[0]?.hidden)inventory.value='';
+    };
+    form.querySelectorAll('[name="businessUnit"]').forEach(input=>{const base=input.onchange;input.onchange=event=>{base?.call(input,event);syncSecondHand()}});
+    const regionBase=form.elements.region.onchange;form.elements.region.onchange=event=>{regionBase?.call(form.elements.region,event);syncSecondHand()};
+    motorType.onchange=syncSecondHand;syncSecondHand();
+  };
+
+  const architectureEditApplicantProfileWithCatalog=editApplicantProfile;
+  editApplicantProfile=async function(application){
+    await architectureEditApplicantProfileWithCatalog(application);
+    if(String(application?.motorType||'').toUpperCase()!=='SECOND_HAND'||!application?.inventoryId)return;
+    const form=document.getElementById('applicantProfileForm'),catalog=form?.elements?.catalogId;if(!form||!catalog)return;
+    const label=catalog.closest('label');label.innerHTML=`2nd-hand inventory<input value="${esc(application.inventoryId)} · ${esc(application.product||'Linked motor')}" disabled><small>The physical inventory link cannot be changed from the applicant profile.</small>`;
+  };
+
   architectureApplyAccountChrome();
   const architectureNewButton=document.getElementById('newLeadButton');
   if(architectureNewButton)architectureNewButton.onclick=async()=>{try{if(architectureAllows(state.user?.businessAccess,'MOTOR'))await ensureCatalogForForms();newApplication()}catch(error){alert(error.message)}};
