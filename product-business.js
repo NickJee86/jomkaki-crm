@@ -236,13 +236,68 @@
     }
   }
 
+  const originalProductPricingEditor = editProductPricing;
+
+  const phoneMonthlySummary = item => {
+    const terms = [
+      [item.month12, '1 year'],
+      [item.month24, '2 years'],
+      [item.month36, '3 years'],
+      [item.month48, '4 years'],
+      [item.month60, '5 years']
+    ].filter(([value]) => value !== '' && value !== null && value !== undefined);
+    return terms.length ? terms.map(([value, label]) => `${money(value)}/month - ${label}`).join('<br>') : '<span class="pricing-muted">No approved monthly payment</span>';
+  };
+
+  handphonePricingTable = function (rows, query = '') {
+    const admin = canDirectPublish(), normalizedQuery = String(query || '').trim().toLowerCase();
+    const groups = groupHandphonePricing(rows).filter(group => !normalizedQuery || [group.brand, group.model, group.storage, group.zone, ...group.colours, ...group.records.flatMap(item => [item.status])].join(' ').toLowerCase().includes(normalizedQuery));
+    const pending = groups.filter(group => String(group.representative.approvalStatus).toUpperCase() === 'PENDING_APPROVAL').length;
+    return `<div class="handphone-pricing-summary"><div><span class="catalog-family-badge">MONTHLY PAYMENT ONLY</span><h2>One monthly-payment set per model, storage and region</h2><p>Every colour under the same model and storage uses the same approved monthly payment. Selling price and deposit are not stored, displayed or provided to AI.</p></div><div class="handphone-summary-stats"><span><strong>${groups.length}</strong> payment groups</span><span><strong>${pending}</strong> pending approval</span></div></div><div class="table-card"><table class="data-table"><thead><tr><th>Model & storage</th><th>Included colours</th><th>Region</th><th>Available monthly payments</th><th>Approval</th><th>Actions</th></tr></thead><tbody>${groups.map(group => { const item = group.representative, colours = [...group.colours], pendingStatus = String(item.approvalStatus).toUpperCase() === 'PENDING_APPROVAL', ids = handphonePricingWorkflowRecords(group).map(record => record.id).join(','); return `<tr><td><strong>${esc(`${group.brand} ${group.model}`)}</strong><div class="catalog-option-line"><span class="product-option-chip">${esc(group.storage)}</span></div><small>${group.records.length} colour SKU${group.records.length === 1 ? '' : 's'} share these monthly payments</small></td><td><div class="colour-option-list compact-list">${colours.map(colour => `<span class="colour-option compact"><i style="--colour:${colourTone(colour)}"></i>${esc(colour)}</span>`).join('') || '<span class="pricing-muted">All available colours</span>'}</div></td><td>${pretty(group.zone)}</td><td>${phoneMonthlySummary(item)}</td><td>${pill(approvalLabel(item), item.approvalStatus === 'APPROVED')}<small>${esc(item.approvalNotes || 'Monthly-payment approval')}</small></td><td><div class="inline-admin-actions">${item.canEdit ? `<button class="row-action" data-handphone-price-edit="${esc(group.key)}">Edit monthly payments</button>` : ''}${item.canReview && pendingStatus ? `<button class="row-action" data-phone-price-approve="${esc(ids)}">Approve</button><button class="row-action secondary" data-phone-price-reject="${esc(ids)}">Reject</button>` : ''}${admin && item.approvalStatus === 'APPROVED' ? `<button class="row-action secondary" data-handphone-price-toggle="${esc(group.key)}">${item.active ? 'Disable payments' : 'Enable payments'}</button>` : ''}</div></td></tr>`; }).join('') || empty(6)}</tbody></table></div><p class="notice pricing-structure-note"><strong>AI safeguard:</strong> only approved, enabled and date-valid monthly payments can be quoted. Phone selling price and deposit are never returned by the CRM API.</p>`;
+  };
+
+  editProductPricing = function (item = {}, pricingGroup = []) {
+    const selectedUnit = item.id ? unitOf(item) : (state.pricingBusiness || allowedUnits()[0]);
+    if (selectedUnit !== 'HANDPHONE') return originalProductPricingEditor(item, pricingGroup);
+    const editing = Boolean(item.id), [storage] = optionParts(item.variant), groupCount = pricingGroup.length;
+    formModal(`${editing ? 'Edit' : 'Add'} Handphone monthly payments`, `<form id="productPricingForm" class="crm-form"><input type="hidden" name="businessUnit" value="HANDPHONE"><input type="hidden" name="promotionStatus" value="DRAFT"><input type="hidden" name="promotionActive" value="FALSE"><div class="form-wide handphone-shared-price-note"><strong>Monthly payment only - one set for every colour</strong><span>${editing ? `${esc(`${item.brand} ${item.model} - ${storage || 'Standard'}`)} covers ${groupCount || 1} colour SKU${groupCount === 1 ? '' : 's'}. Saving updates them together.` : 'Select a model and storage. The CRM applies the same monthly payments to every available colour.'}</span></div><h3 class="form-wide">Phone model and monthly payments</h3><label class="form-wide">Phone model and storage<select name="catalogId" required><option value="">Select a handphone product</option>${handphonePricingCatalogOptions(item.catalogId)}</select></label><label>Price zone<input name="zone" value="${esc(item.zone || 'EAST_MALAYSIA')}" list="businessPriceZones" required><datalist id="businessPriceZones"><option value="ALL_BRANCHES"><option value="EAST_MALAYSIA"><option value="WEST_MALAYSIA"><option value="SARAWAK"></datalist></label><label>Monthly 1 year (RM)<input name="month12" type="number" min="0" step="0.01" value="${esc(item.month12 || '')}"></label><label>Monthly 2 years (RM)<input name="month24" type="number" min="0" step="0.01" value="${esc(item.month24 || '')}"></label><label>Monthly 3 years (RM)<input name="month36" type="number" min="0" step="0.01" value="${esc(item.month36 || '')}"></label><label>Monthly 4 years (RM)<input name="month48" type="number" min="0" step="0.01" value="${esc(item.month48 || '')}"></label><label>Monthly 5 years (RM)<input name="month60" type="number" min="0" step="0.01" value="${esc(item.month60 || '')}"></label><label>Monthly payments enabled<select name="active"><option value="TRUE">Enabled</option><option value="FALSE">Disabled</option></select></label><label>Quote approval<select name="quoteStatus"><option value="DRAFT">Draft</option><option value="APPROVED">Approved</option><option value="PAUSED">Paused</option></select></label><label>Effective from<input name="effectiveFrom" type="date" value="${esc(item.effective || '')}"></label><label>Effective to<input name="effectiveTo" type="date" value="${esc(item.effectiveTo || '')}"></label><label class="form-wide">Internal notes<textarea name="internalNotes" rows="2">${esc(item.internalNotes || '')}</textarea></label><div class="form-wide form-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button type="submit">${editing ? 'Save shared monthly payments' : 'Add shared monthly payments'}</button></div><p class="form-wide notice" id="formMessage">Fill only the years offered. Blank years are not quoted by AI. Selling price and deposit are neither collected nor stored.</p></form>`);
+    const form = document.getElementById('productPricingForm');
+    form.active.value = item.id ? (item.active ? 'TRUE' : 'FALSE') : 'FALSE';
+    form.quoteStatus.value = item.status || 'DRAFT';
+    form.querySelector('[data-cancel]').onclick = () => document.querySelector('.drawer-backdrop').remove();
+    if (!canDirectPublish()) {
+      form.quoteStatus.closest('label').remove();
+      const publish = form.active, publishLabel = publish.closest('label');
+      publish.name = 'publishRequested';
+      publishLabel.firstChild.textContent = 'Monthly-payment publication request';
+      publish.innerHTML = '<option value="FALSE">Keep internal after approval</option><option value="TRUE">Publish after approval</option>';
+      publish.value = item.publishRequested ? 'TRUE' : 'FALSE';
+      form.zone.value = state.user?.region || item.submittedRegion || item.zone;
+      form.zone.readOnly = true;
+      form.querySelector('[type=submit]').textContent = 'Submit monthly payments for approval';
+    }
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const button = form.querySelector('[type=submit]'), message = document.getElementById('formMessage');
+      button.disabled = true;
+      try {
+        await post('savePricingPromotion', { pricingId: item.id || '', pricingIds: pricingGroup.map(record => record.id), pricingScope: 'MODEL_STORAGE_ZONE', productPrice: '', deposit: '', promotionName: '', promotionDeposit: '', promotionStart: '', promotionEnd: '', promotionNotes: '', ...Object.fromEntries(new FormData(form)) });
+        document.querySelector('.drawer-backdrop').remove();
+        await refreshProductPricing();
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    };
+  };
+
   pricing = function () {
     const selected = isHandphonePricingView() ? 'HANDPHONE' : 'MOTOR';
     state.pricingBusiness = selected;
     const rows = state.data.pricing.filter(item => unitOf(item) === selected && !/TEMPLATE/i.test(String(item.id || ''))), admin = canDirectPublish(), phoneSubmitter = selected === 'HANDPHONE' && canSubmitHandphone();
     const heading = selected === 'HANDPHONE' ? 'Handphone Pricing' : 'Motor Pricing & Promotions';
-    const description = selected === 'HANDPHONE' ? 'Branches submit regional pricing and promotions; Regional Managers approve normal terms and Admin approves price-floor exceptions.' : (admin ? 'Manage Motor prices, financing and promotions without leaving CRM.' : 'Approved Motor customer pricing.');
-    app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? `<div class="pricing-safety-banner"><strong>Handphone pricing approval</strong><span>AI and customer quotations use only approved, enabled and date-valid pricing. Unapproved changes stay internal.</span></div>` : '') + `<div class="smart-toolbar"><input id="pricingSearch" placeholder="Search product, storage, zone or promotion"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin || phoneSubmitter ? `<button class="primary" data-new-product-price>+ Submit ${unitLabel(selected)} price</button>` : ''}</div><section class="panel" id="pricingResults">${selected === 'HANDPHONE' ? handphonePricingTable(rows) : productPricingTable(rows)}</section>`;
+    const description = selected === 'HANDPHONE' ? 'Manage approved monthly payments by model, storage and region. Selling price and deposit are intentionally excluded.' : (admin ? 'Manage Motor prices, financing and promotions without leaving CRM.' : 'Approved Motor customer pricing.');
+    app.innerHTML = head(heading, description) + (selected === 'HANDPHONE' ? `<div class="pricing-safety-banner"><strong>Monthly-payment-only safeguard</strong><span>AI can quote only approved, enabled and date-valid monthly payments. Phone selling price and deposit are never collected or exposed.</span></div>` : '') + `<div class="smart-toolbar"><input id="pricingSearch" placeholder="Search product, storage or zone"><span class="locked-business-pill ${selected === 'HANDPHONE' ? 'handphone' : ''}">${unitLabel(selected)} only</span><div class="toolbar-spacer"></div>${admin || phoneSubmitter ? `<button class="primary" data-new-product-price>+ Submit ${selected === 'HANDPHONE' ? 'monthly payments' : `${unitLabel(selected)} price`}</button>` : ''}</div><section class="panel" id="pricingResults">${selected === 'HANDPHONE' ? handphonePricingTable(rows) : productPricingTable(rows)}</section>`;
     document.getElementById('pricingSearch').oninput = event => { const query = event.target.value.toLowerCase(); document.getElementById('pricingResults').innerHTML = selected === 'HANDPHONE' ? handphonePricingTable(rows, query) : productPricingTable(rows.filter(item => Object.values(item).join(' ').toLowerCase().includes(query))); selected === 'HANDPHONE' ? bindHandphonePricing(rows) : bindProductPricing(); };
     document.querySelector('[data-new-product-price]')?.addEventListener('click', () => editProductPricing({ businessUnit: selected }));
     selected === 'HANDPHONE' ? bindHandphonePricing(rows) : bindProductPricing();

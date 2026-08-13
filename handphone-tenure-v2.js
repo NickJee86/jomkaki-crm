@@ -63,9 +63,21 @@
     });
   };
 
+  const removePhoneSaleFields = form => {
+    if (!form) return;
+    ['productPrice', 'requestedDeposit'].forEach(name => form.elements[name]?.closest('label')?.remove());
+    const handphoneSection = form.querySelector('[data-business-section="HANDPHONE"]');
+    if (handphoneSection) {
+      const heading = handphoneSection.querySelector('h3');
+      if (heading) heading.textContent = 'Handphone & monthly payment';
+    }
+  };
+
   const prepare = root => {
     const pricingForm = root.querySelector?.('#productPricingForm');
     if (pricingForm && String(pricingForm.elements.businessUnit?.value).toUpperCase() === 'HANDPHONE') preparePricingForm(pricingForm);
+    removePhoneSaleFields(root.querySelector?.('#manualApplicationForm'));
+    removePhoneSaleFields(root.querySelector?.('#applicantProfileForm'));
     prepareApplicationTenure(root.querySelector?.('select[name="tenureMonths"]'));
     prepareApplicationTenure(root.querySelector?.('select[name="loanTenureMonths"]'));
   };

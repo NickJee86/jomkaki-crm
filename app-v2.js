@@ -559,7 +559,7 @@ function reportsLegacy(){
   const activeCatalog=reportCatalog.filter(item=>item.active);
   const catalogImageIssues=reportCatalog.filter(item=>item.active&&(!item.imageApproved||!item.imageUrl));
   const activePricing=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED');
-  const pricingGaps=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(!price.deposit||(!price.year3&&!price.month12)||(!price.year4&&!price.month24)||(!price.year5&&!price.month36)));
+  const pricingGaps=reportPricing.filter(price=>price.active&&String(price.status).toUpperCase()==='APPROVED'&&(String(price.businessUnit).toUpperCase()==='HANDPHONE'?![price.month12,price.month24,price.month36,price.month48,price.month60].some(Boolean):(!price.deposit||!price.year3||!price.year4||!price.year5)));
   const activePromotions=reportPricing.filter(price=>price.promotion&&price.promotionActive&&String(price.promotionStatus).toUpperCase()==='APPROVED');
   const handphoneCatalogReview=reportCatalog.filter(item=>String(item.businessUnit).toUpperCase()==='HANDPHONE'&&regionAllowed(item.submittedRegion||item.regionAvailability));
   const handphonePricingReview=reportPricing.filter(price=>String(price.businessUnit).toUpperCase()==='HANDPHONE'&&regionAllowed(price.submittedRegion||price.zone));
