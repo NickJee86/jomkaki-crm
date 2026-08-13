@@ -66,7 +66,7 @@ const businessSheets = unit => canonicalBusinessUnit(unit) === 'HANDPHONE'
 const handphoneCatalogApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Branch Availability', 'Supersedes Catalog ID'];
 const handphonePricingApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Promotion Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Minimum Product Price (RM)', 'Admin Review Required', 'Supersedes Pricing ID'];
 const handphoneCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Operating System', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image Caption (MS)', 'Stock Check Mode', 'Region Availability', 'Warehouse Availability', 'Search Keywords'];
-const handphonePricingPublishFields = ['Catalog ID', 'Brand', 'Model', 'Variant', 'Price Zone', 'Product Price (RM)', 'Deposit (RM)', 'Monthly 12 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 48 Months (RM)', 'Effective From', 'Effective To', 'Internal Notes', 'Promotion Name', 'Promotion Deposit (RM)', 'Promotion Start', 'Promotion End', 'Promotion Notes'];
+const handphonePricingPublishFields = ['Catalog ID', 'Brand', 'Model', 'Variant', 'Price Zone', 'Product Price (RM)', 'Deposit (RM)', 'Monthly 12 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 60 Months (RM)', 'Effective From', 'Effective To', 'Internal Notes', 'Promotion Name', 'Promotion Deposit (RM)', 'Promotion Start', 'Promotion End', 'Promotion Notes'];
 const selectedFields = (row, fields) => Object.fromEntries(fields.map(field => [field, row[field]]));
 export const handphoneApprovalStatus = row => clean(row?.['Approval Status']).toUpperCase() || (clean(row?.['Submitted By']) ? 'PENDING_APPROVAL' : 'APPROVED');
 const handphoneRowRegion = row => canonicalRegion(row?.['Submitted Region'] || row?.['Region Availability'] || row?.['Price Zone']);
@@ -997,12 +997,19 @@ export default async function handler(req, res) {
         const existingFloor = Number(customerAmount(baselinePricingRecord?.['Minimum Product Price (RM)'])) || Number(customerAmount(baselinePricingRecord?.['Product Price (RM)'])) || Number(proposedProductPrice) || 0;
         const adminReviewRequired = delegatedPricing && Number(proposedProductPrice) < existingFloor;
         const supersedesPricingId = delegatedPricing && existingPricingRecord ? (handphoneApprovalStatus(existingPricingRecord) === 'APPROVED' ? clean(existingPricingRecord['Pricing ID']) : clean(existingPricingRecord['Supersedes Pricing ID'])) : '';
+        const handphoneMonthly = businessUnit === 'HANDPHONE' ? {
+          'Monthly 12 Months (RM)': amount(body.month12, '1-year instalment', true),
+          'Monthly 24 Months (RM)': amount(body.month24, '2-year instalment', true),
+          'Monthly 36 Months (RM)': amount(body.month36, '3-year instalment', true),
+          'Monthly 48 Months (RM)': amount(body.month48, '4-year instalment', true),
+          'Monthly 60 Months (RM)': amount(body.month60, '5-year instalment', true)
+        } : {};
+        if (businessUnit === 'HANDPHONE' && !Object.values(handphoneMonthly).some(value => value !== '')) throw new Error('Fill at least one monthly instalment from 1 to 5 years');
         const timestamp = now(), pricingRecord = {
           'Catalog ID': catalogId, Brand: catalogRecord.Brand, Model: catalogRecord.Model, Variant: catalogRecord.Variant || 'Standard', 'Price Zone': zone,
           ...(businessUnit === 'HANDPHONE' ? {
             'Product Price (RM)': proposedProductPrice, 'Deposit (RM)': amount(body.deposit, 'Deposit'),
-            'Monthly 12 Months (RM)': amount(body.month12, '12-month instalment'), 'Monthly 24 Months (RM)': amount(body.month24, '24-month instalment'),
-            'Monthly 36 Months (RM)': amount(body.month36, '36-month instalment'), 'Monthly 48 Months (RM)': amount(body.month48, '48-month instalment', true)
+            ...handphoneMonthly
           } : {
             'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
             'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment')
@@ -1098,6 +1105,8 @@ export default async function handler(req, res) {
         }
         const productRecord = secondHandRecord || catalogRecord || {};
         const brand = clean(productRecord.Brand), model = clean(productRecord.Model), variant = clean(productRecord.Variant) || 'Standard';
+        const requestedHandphoneTenure = businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '';
+        if (requestedHandphoneTenure && !['12', '24', '36', '48', '60'].includes(requestedHandphoneTenure)) throw new Error('Handphone loan tenure must be between 1 and 5 years');
         const normalizedPhone = whatsappPhone(phone), existingCustomer = rowsToObjects(existingLeadRows).find(row => whatsappPhone(row['Phone Number']) === normalizedPhone);
         const customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
@@ -1134,7 +1143,7 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': motorType, 'Second Hand Inventory ID': secondHandInventoryId, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Selling Price (RM)']) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Deposit (RM)']) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '',
+          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': motorType, 'Second Hand Inventory ID': secondHandInventoryId, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.productPrice) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Selling Price (RM)']) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? customerAmount(body.requestedDeposit) : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Deposit (RM)']) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': requestedHandphoneTenure,
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
@@ -1367,7 +1376,7 @@ export default async function handler(req, res) {
         if (clean(body.applicantIcNumber)) changes['Applicant IC Number'] = clean(body.applicantIcNumber);
         if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, product brand and model are required');
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
-        if (changes['Loan Tenure Months'] && !['12', '24', '36', '48'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be 12, 24, 36 or 48 months');
+        if (changes['Loan Tenure Months'] && !['12', '24', '36', '48', '60'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be between 1 and 5 years');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
         await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BX');
@@ -1542,7 +1551,7 @@ export default async function handler(req, res) {
         const pricing = businessUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
         const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && (clean(p['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(p['Price Zone']) === zone)) || {};
         const tenure = clean(businessUnit === 'HANDPHONE' ? row['Loan Tenure Months'] : row['Loan Tenure Years']);
-        const monthly = businessUnit === 'HANDPHONE' ? (tenure === '12' ? quote['Monthly 12 Months (RM)'] : tenure === '24' ? quote['Monthly 24 Months (RM)'] : tenure === '36' ? quote['Monthly 36 Months (RM)'] : tenure === '48' ? quote['Monthly 48 Months (RM)'] : '') : (tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '');
+        const monthly = businessUnit === 'HANDPHONE' ? (tenure === '12' ? quote['Monthly 12 Months (RM)'] : tenure === '24' ? quote['Monthly 24 Months (RM)'] : tenure === '36' ? quote['Monthly 36 Months (RM)'] : tenure === '48' ? quote['Monthly 48 Months (RM)'] : tenure === '60' ? quote['Monthly 60 Months (RM)'] : '') : (tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '');
         const ic = clean(row['Applicant IC Number']);
         return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), motorType: row['Motor Type'] || row['Product Condition'], inventoryId: row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticApplicationRow(row),
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
@@ -1599,7 +1608,7 @@ export default async function handler(req, res) {
       const visible = (row, businessUnit) => businessUnit === 'HANDPHONE' ? handphoneVisibleToSession(session, row, 'pricing') : businessPermitted(session, { 'Business Unit': businessUnit }) && (canonicalRole(session.role) === 'ADMIN' || (truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED' && (clean(row['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(row['Price Zone']) === session.region)));
       const mapPricing = (row, businessUnit) => ({
         id: row['Pricing ID'], catalogId: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, zone: row['Price Zone'], productPrice: customerAmount(row['Product Price (RM)']),
-        deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']), month12: customerAmount(row['Monthly 12 Months (RM)']), month24: customerAmount(row['Monthly 24 Months (RM)']), month36: customerAmount(row['Monthly 36 Months (RM)']), month48: customerAmount(row['Monthly 48 Months (RM)']),
+        deposit: effectiveDeposit(row), baseDeposit: customerAmount(row['Deposit (RM)']), year3: customerAmount(row['Monthly 3 Years (RM)']), year4: customerAmount(row['Monthly 4 Years (RM)']), year5: customerAmount(row['Monthly 5 Years (RM)']), month12: customerAmount(row['Monthly 12 Months (RM)']), month24: customerAmount(row['Monthly 24 Months (RM)']), month36: customerAmount(row['Monthly 36 Months (RM)']), month48: customerAmount(row['Monthly 48 Months (RM)']), month60: customerAmount(row['Monthly 60 Months (RM)']),
         effective: row['Effective From'], effectiveTo: row['Effective To'], active: truth(row.Active), status: row['Quote Approval Status'], internalNotes: session.role === 'ADMIN' ? row['Internal Notes'] : '',
         promotion: promotionApplies(row) || session.role === 'ADMIN' ? row['Promotion Name'] : '', promotionDeposit: customerAmount(row['Promotion Deposit (RM)']), promotionStart: row['Promotion Start'], promotionEnd: row['Promotion End'],
         promotionActive: truth(row['Promotion Active']), promotionStatus: row['Promotion Approval Status'], promotionNotes: canonicalRole(session.role) === 'ADMIN' ? row['Promotion Notes'] : '', updated: row['Last Updated At'], updatedBy: row['Updated By'],
