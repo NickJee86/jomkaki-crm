@@ -17,8 +17,11 @@ test('instant acknowledgement follows the customer language without quoting pric
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
   assert.match(chinese, /已收到/);
   assert.match(malay, /telah menerima/);
-  assert.match(english, /has received/);
-  [chinese, malay, english].forEach(message => assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i));
+  assert.match(english, /received/);
+  [chinese, malay, english].forEach(message => {
+    assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i);
+    assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
+  });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
 });
 
