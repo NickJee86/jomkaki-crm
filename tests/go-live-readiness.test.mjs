@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const app=fs.readFileSync(new URL('../app-v2.js',import.meta.url),'utf8');
 const api=fs.readFileSync(new URL('../api/crm.js',import.meta.url),'utf8');
+const productUi=fs.readFileSync(new URL('../product-business.js',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
@@ -28,6 +29,8 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.ok(app.includes('At least one 3–5-year monthly payment'));
   assert.match(api,/const motorMonthly = businessUnit === 'MOTOR'/);
   assert.match(api,/Fill at least one monthly instalment from 3 to 5 years/);
+  assert.match(productUi,/const motorMonthlySummary = item/);
+  assert.match(productUi,/Leave unavailable tenures blank/);
   assert.match(app,/passwordSetupGaps=state\.data\.users\.filter/);
   assert.match(app,/Password setup required/);
   assert.match(app,/u\.passwordConfigured=true;u\.mustChangePassword=true/);
