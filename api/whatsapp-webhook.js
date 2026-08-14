@@ -65,9 +65,9 @@ const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+
 export function buildImmediateAcknowledgement(text = '', messageType = 'text') {
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return '';
   const message = clean(text);
-  if (/[一-鿿]/u.test(message)) return '您好，JomKaki AI 已收到您的信息，正在马上为您检查。请稍等一下，我很快回复您。';
-  if (/\b(hai|nak|mahu|boleh|harga|ansuran|motor|telefon|dokumen|pinjaman)\b/i.test(message)) return 'Hai, JomKaki AI telah menerima mesej anda dan sedang menyemaknya sekarang. Sila tunggu sebentar, saya akan balas secepat mungkin.';
-  return "Hi, JomKaki AI has received your message and is checking it now. Please give me a moment and I'll reply shortly.";
+  if (/[一-鿿]/u.test(message)) return '您好，我们已收到您的信息，正在马上为您查询。请稍等一下，很快回复您。';
+  if (/\b(hai|nak|mahu|boleh|harga|ansuran|motor|telefon|dokumen|pinjaman)\b/i.test(message)) return 'Hai, kami telah menerima mesej anda dan sedang menyemaknya sekarang. Sila tunggu sebentar, kami akan balas secepat mungkin.';
+  return "Hi, we've received your message and are checking it now. Please give us a moment and we'll reply shortly.";
 }
 
 export function shouldSendImmediateAcknowledgement({ route = {}, routeUsable = false, human = false, messageType = 'text', previousInboundAt = '', receivedAt = '' } = {}) {
