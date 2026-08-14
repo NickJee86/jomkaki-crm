@@ -1,6 +1,6 @@
 # JomKaki Motor CRM 2.0 — Completion Record
 
-Updated: 11 August 2026  
+Updated: 12 August 2026  
 Production: https://jomkaki-crm.vercel.app/
 
 ## Current production flow
@@ -34,14 +34,14 @@ Production: https://jomkaki-crm.vercel.app/
 - Manual application submission starts with Motorcycle Loan or Handphone Loan and stores separately reportable product data.
 - Leads, Applications, Customer 360 and Reports identify and filter Motor and Handphone cases.
 - Admin can maintain separate Motor and Handphone catalogs, financing prices and promotions directly in CRM.
-- Handphone financing supports product price, deposit and 12/24/36/48-month tenures.
+- Handphone financing is monthly-payment only and supports 1–5-year plans. Selling price and deposit are excluded from CRM forms, customer views and AI responses.
 - East and future West Handphone operations are separated by business unit, region, team and official WhatsApp number.
 - The same customer can hold separate Motor and Handphone Leads under one Customer ID, preventing mixed conversations while keeping a complete Customer 360 record.
 - Inbound and outbound messages preserve the exact official number used by the customer; no reply may silently cross to another business or region.
-- Branch Supervisors and permitted Handphone managers can submit phone catalog, image, regional price, deposit, instalment and promotion changes inside CRM.
+- Branch Supervisors and permitted Handphone managers can submit phone catalog, image and regional monthly-payment changes inside CRM.
 - Branch Handphone stock updates take effect immediately for the permitted branch; catalog and commercial changes require approval.
 - Regional Managers can approve Handphone submissions only for their own region and cannot approve their own submissions.
-- Prices below the current approved product-price floor are escalated to Administrator approval only.
+- Handphone monthly-payment changes require approval before publication; Motor price-floor exceptions remain Administrator-only.
 - Existing approved Handphone catalog and pricing remain live while a replacement version is pending, rejected or corrected.
 - AI and customer quotations use only approved, enabled and date-valid Handphone records; the Admin report includes the complete approval queue.
 
@@ -56,7 +56,7 @@ Production: https://jomkaki-crm.vercel.app/
 
 ## Verification completed
 
-- The complete automated suite passed on 11 August 2026: 55 tests, 0 failures.
+- The complete automated suite passed on 14 August 2026: 79 tests, 0 failures.
 - JavaScript syntax checks passed for 29 frontend, API and test files.
 - Authentication/session tests passed.
 - Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
@@ -71,4 +71,4 @@ Production: https://jomkaki-crm.vercel.app/
 ## External activation blockers
 
 - LMSPRO: official API contract, sandbox endpoint and secured test credentials are still required before real case submission can be enabled.
-- WhatsApp Cloud: the official number remains `Unverified` because Meta is rate-limiting verification-code requests. The Meta Webhook Configuration panel is also failing to load, so the callback and `messages` subscription have not yet been saved in Meta. A permanent production access token is still required. `WHATSAPP_SEND_MODE=MANUAL` remains the safe active setting.
+- WhatsApp Cloud: Meta verified the official production number on 13 August 2026. `WHATSAPP_SEND_MODE=MANUAL` and the Make Sender remain safely disabled until one approved synthetic end-to-end test passes.

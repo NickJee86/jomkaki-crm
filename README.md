@@ -92,7 +92,7 @@ Current Meta staging status (11 August 2026):
 
 - One CRM account can be limited to `MOTOR`, `HANDPHONE` or `BOTH` business access.
 - Staff select Motorcycle Loan or Handphone Loan before creating a manual application.
-- Motor cases use the approved Motor Catalog and yearly tenures. Handphone cases use a separate approved Handphone Catalog, product price, requested deposit and 12/24/36/48-month tenures.
+- Motor cases use the approved Motor Catalog, deposit and 3/4/5-year instalments. Handphone cases use a separate approved Handphone Catalog and monthly-payment-only plans for 1–5 years; selling price and deposit are not stored, shown or returned to AI.
 - Handphone is managed as a separate business unit, not as a Motor branch.
 - East and West Handphone teams are separate (`TEAM-HP-EAST` and `TEAM-HP-WEST`); West remains planned until the business is launched there.
 - Every official WhatsApp number is bound to one region, one business unit and one team. Replies are sent only through the exact number used by the customer.
@@ -133,7 +133,7 @@ Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not u
 
 ## External blockers
 
-- WhatsApp Business Cloud remains pending until Meta phone verification rate limiting clears, the Meta Webhook panel can save the callback and `messages` subscription, and a permanent West 01 access token is stored securely.
+- Meta verified the official WhatsApp production number on 13 August 2026. Keep `WHATSAPP_SEND_MODE=MANUAL` and the Make WhatsApp Sender disabled until one approved synthetic inbound-to-outbound test confirms signature validation, exact-number routing, approved templates and delivery-status logging.
 - LMSPRO remains disabled until the official vendor API contract, sandbox endpoint and secured test credentials are provided.
 - The business-aware Make blueprints are prepared and tested locally. Keep new or replaced scenarios OFF until their Google/OpenAI connections are reselected after import and one synthetic run passes.
 
