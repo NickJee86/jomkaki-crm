@@ -7,7 +7,7 @@ const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const clean = value => String(value ?? '').trim();
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
+const requiresManager = text => /(human|agent|manager|supervisor|real person|çœŸäºº|äººå·¥|å®¢æœ|ç»ç†|ä¸»ç®¡|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
   for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
@@ -60,6 +60,58 @@ async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z'
 const truth = value => clean(value).toUpperCase() === 'TRUE';
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(value).toUpperCase()) ? clean(value).toUpperCase() : '';
+const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+
+export function buildImmediateAcknowledgement(text = '', messageType = 'text') {
+  if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return '';
+  const message = clean(text);
+  if (/[ä¸€-é¿¿]/u.test(message)) return 'æ‚¨å¥½ï¼ŒJomKaki AI å·²æ”¶åˆ°æ‚¨çš„ä¿¡æ¯ï¼Œæ­£åœ¨é©¬ä¸Šä¸ºæ‚¨æ£€æŸ¥ã€‚è¯·ç¨ç­‰ä¸€ä¸‹ï¼Œæˆ‘å¾ˆå¿«å›žå¤æ‚¨ã€‚';
+  if (/\b(hai|nak|mahu|boleh|harga|ansuran|motor|telefon|dokumen|pinjaman)\b/i.test(message)) return 'Hai, JomKaki AI telah menerima mesej anda dan sedang menyemaknya sekarang. Sila tunggu sebentar, saya akan balas secepat mungkin.';
+  return "Hi, JomKaki AI has received your message and is checking it now. Please give me a moment and I'll reply shortly.";
+}
+
+export function shouldSendImmediateAcknowledgement({ route = {}, routeUsable = false, human = false, messageType = 'text', previousInboundAt = '', receivedAt = '' } = {}) {
+  if (!routeUsable || human || !truth(route['Outbound Enabled']) || !buildImmediateAcknowledgement('', messageType)) return false;
+  const previous = Date.parse(clean(previousInboundAt));
+  const received = Date.parse(clean(receivedAt));
+  return !Number.isFinite(previous) || !Number.isFinite(received) || received - previous >= 90_000;
+}
+
+export function instantChannelCredentials(route = {}, env = process.env) {
+  const channelId = clean(route['Internal Channel ID']);
+  const phoneNumberId = clean(route['Phone Number ID']);
+  const credentialKey = credentialPrefix(route['Credential Key'] || channelId);
+  const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
+  if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
+  return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
+}
+
+async function sendImmediateAcknowledgement(token, { route, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
+  if (clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'CLOUD_MODE_DISABLED' };
+  const acknowledgement = buildImmediateAcknowledgement(text, messageType);
+  if (!acknowledgement) return { sent: false, skipped: 'UNSUPPORTED_MESSAGE_TYPE' };
+  const binding = instantChannelCredentials(route);
+  const outboxId = makeId('OUT'), timestamp = new Date().toISOString();
+  const response = await fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${binding.accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: acknowledgement } })
+  });
+  const result = await response.json().catch(() => ({}));
+  const providerMessageId = clean(result.messages?.[0]?.id);
+  const errorMessage = response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`;
+  await appendObject(token, 'Message_Outbox', {
+    'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
+    'Phone Number': digits(phone), 'Message Type': 'TEXT', 'Message Text': acknowledgement, 'Send Status': response.ok ? 'SENT' : 'FAILED',
+    'Attempt Count': '1', 'Sent At': response.ok ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage,
+    'WhatsApp Number ID': binding.phoneNumberId, 'WABA ID': route['WABA ID'] || '', 'Internal Channel ID': binding.channelId,
+    'Make Connection Alias': route['Make Connection Alias'] || '', 'Reply To Message ID': messageId || '',
+    'Send Routing Status': `${response.ok ? 'WEBHOOK_IMMEDIATE_ACK' : 'WEBHOOK_IMMEDIATE_ACK_FAILED'}:${binding.channelId}`,
+    'Business Unit': businessUnit, 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
+  });
+  if (response.ok) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', binding.channelId, { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'AC');
+  return { sent: response.ok, outboxId, providerMessageId, error: errorMessage, receivedAt };
+}
 
 async function updateOutboxStatus(token, providerId, status, errorMessage = '') {
   const rows = await readSheet(token, 'Message_Outbox!A1:Z1500');
@@ -108,6 +160,7 @@ export default async function handler(req, res) {
         const receivedAt = new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString();
         const routeUsable = !!channelId && routeBusinessUnit !== 'UNASSIGNED' && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
+        const previousInboundAt = clean(lead?.['Last Inbound At']);
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
@@ -124,6 +177,13 @@ export default async function handler(req, res) {
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': routeBusinessUnit, 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'AC');
+        if (shouldSendImmediateAcknowledgement({ route, routeUsable, human, messageType: message.type, previousInboundAt, receivedAt })) {
+          try {
+            await sendImmediateAcknowledgement(token, { route, phone, text, messageType: message.type, messageId: message.id, lead, application, receivedAt, businessUnit: routeBusinessUnit, teamId });
+          } catch (error) {
+            console.error('Immediate WhatsApp acknowledgement failed:', clean(error?.message));
+          }
+        }
         const media = message.document || message.image;
         if (media?.id) {
           await ensureHeaders(token, 'Document_Log', ['Uploaded By', 'Reviewed By', 'Reviewed At']);
@@ -145,3 +205,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
