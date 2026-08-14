@@ -12,13 +12,13 @@ const route = {
 };
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
+  const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /å·²æ”¶åˆ°/);
+  assert.match(chinese, /已收到/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /has received/);
-  [chinese, malay, english].forEach(message => assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i));
+  [chinese, malay, english].forEach(message => assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i));
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
 });
 
