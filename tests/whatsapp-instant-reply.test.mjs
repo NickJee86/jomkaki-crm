@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.4 seconds
-Output:
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -28,23 +25,23 @@ test('instant acknowledgement follows the customer language without quoting pric
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
 });
 
-test('instant acknowledgement requires a safe route and suppresses burst duplicates', () => {
-  assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, messageType: 'text', receivedAt: '2026-08-14T07:00:00Z' }), true);
+test('webhook acknowledgement stays disabled so one inbound produces one final reply', () => {
+  assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, messageType: 'text', receivedAt: '2026-08-14T07:00:00Z' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, messageType: 'text', previousInboundAt: '2026-08-14T07:00:00Z', receivedAt: '2026-08-14T07:00:30Z' }), false);
-  assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, messageType: 'text', previousInboundAt: '2026-08-14T07:00:00Z', receivedAt: '2026-08-14T07:02:00Z' }), true);
+  assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, messageType: 'text', previousInboundAt: '2026-08-14T07:00:00Z', receivedAt: '2026-08-14T07:02:00Z' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: false, messageType: 'text' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, human: true, messageType: 'text' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route: { ...route, 'Outbound Enabled': 'FALSE' }, routeUsable: true, messageType: 'text' }), false);
 });
 
-test('instant reply uses only the bound channel credential and remains outside the polling sender', () => {
+test('instant channel credentials remain strict even though webhook acknowledgement is disabled', () => {
   const credentials = instantChannelCredentials(route, { WHATSAPP_WEST_01_ACCESS_TOKEN: 'protected-token', WHATSAPP_GRAPH_VERSION: 'v26.0' });
   assert.deepEqual(credentials, { channelId: 'JKM-WA-WEST-01', phoneNumberId: 'W-100', accessToken: 'protected-token', version: 'v26.0' });
   assert.throws(() => instantChannelCredentials(route, { WHATSAPP_ACCESS_TOKEN: 'legacy-token' }), /incomplete/);
   assert.match(source, /WHATSAPP_SEND_MODE/);
   assert.match(source, /WEBHOOK_IMMEDIATE_ACK/);
   assert.match(source, /'Send Status': response\.ok \? 'SENT' : 'FAILED'/);
-  assert.match(source, /Immediate WhatsApp acknowledgement failed/);
+  assert.doesNotMatch(source, /await sendImmediateAcknowledgement\(token/);
 });
 
 test('first inbound message creates the conversation state required by Make', () => {
