@@ -1004,14 +1004,19 @@ export default async function handler(req, res) {
           'Monthly 60 Months (RM)': amount(body.month60, '5-year instalment', true)
         } : {};
         if (businessUnit === 'HANDPHONE' && !Object.values(handphoneMonthly).some(value => value !== '')) throw new Error('Fill at least one monthly instalment from 1 to 5 years');
+        const motorMonthly = businessUnit === 'MOTOR' ? {
+          'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment', true),
+          'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment', true),
+          'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment', true)
+        } : {};
+        if (businessUnit === 'MOTOR' && !Object.values(motorMonthly).some(value => value !== '')) throw new Error('Fill at least one monthly instalment from 3 to 5 years');
         const timestamp = now(), pricingRecord = {
           'Catalog ID': catalogId, Brand: catalogRecord.Brand, Model: catalogRecord.Model, Variant: catalogRecord.Variant || 'Standard', 'Price Zone': zone,
           ...(businessUnit === 'HANDPHONE' ? {
             'Product Price (RM)': '', 'Deposit (RM)': '',
             ...handphoneMonthly
           } : {
-            'Deposit (RM)': amount(body.deposit, 'Deposit'), 'Monthly 3 Years (RM)': amount(body.year3, '3-year instalment'),
-            'Monthly 4 Years (RM)': amount(body.year4, '4-year instalment'), 'Monthly 5 Years (RM)': amount(body.year5, '5-year instalment')
+            'Deposit (RM)': amount(body.deposit, 'Deposit'), ...motorMonthly
           }),
           Active: delegatedPricing ? 'FALSE' : (truth(body.active) ? 'TRUE' : 'FALSE'), 'Effective From': effectiveFrom, 'Effective To': effectiveTo,
           'Quote Approval Status': quoteStatus, 'Last Updated At': timestamp, 'Updated By': session.username, 'Internal Notes': clean(body.internalNotes),
