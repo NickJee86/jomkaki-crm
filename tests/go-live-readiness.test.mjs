@@ -25,8 +25,12 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.match(app,/const pricingAmountReady=/);
   assert.match(app,/approvedPricingMissingFields\(price\)\.length/);
   assert.match(app,/price\.baseDeposit\?\?price\.deposit/);
+  assert.ok(app.includes('At least one 3–5-year monthly payment'));
+  assert.match(api,/const motorMonthly = businessUnit === 'MOTOR'/);
+  assert.match(api,/Fill at least one monthly instalment from 3 to 5 years/);
   assert.match(app,/passwordSetupGaps=state\.data\.users\.filter/);
   assert.match(app,/Password setup required/);
+  assert.match(app,/u\.passwordConfigured=true;u\.mustChangePassword=true/);
   assert.match(api,/passwordConfigured: Boolean\(clean\(row\['Password Hash'\]\)\)/);
   assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa','channels'\]/);
 });
