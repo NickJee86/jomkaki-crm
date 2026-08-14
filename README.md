@@ -92,7 +92,7 @@ Current Meta staging status (11 August 2026):
 
 - One CRM account can be limited to `MOTOR`, `HANDPHONE` or `BOTH` business access.
 - Staff select Motorcycle Loan or Handphone Loan before creating a manual application.
-- Motor cases use the approved Motor Catalog, deposit and 3/4/5-year instalments. Handphone cases use a separate approved Handphone Catalog and monthly-payment-only plans for 1–5 years; selling price and deposit are not stored, shown or returned to AI.
+- Motor cases use the approved Motor Catalog, deposit and whichever approved 3/4/5-year instalments are available; a blank tenure means it is not offered. Handphone cases use a separate approved Handphone Catalog and monthly-payment-only plans for 1–5 years; selling price and deposit are not stored, shown or returned to AI.
 - Handphone is managed as a separate business unit, not as a Motor branch.
 - East and West Handphone teams are separate (`TEAM-HP-EAST` and `TEAM-HP-WEST`); West remains planned until the business is launched there.
 - Every official WhatsApp number is bound to one region, one business unit and one team. Replies are sent only through the exact number used by the customer.
