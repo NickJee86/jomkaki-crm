@@ -66,3 +66,11 @@ test('The same safe samples appear throughout every customer workflow feature',(
   assert.match(css,/\.demo-feature-banner/);
   assert.match(css,/\.data-table tr\.demo-row/);
 });
+
+test('Complete Customer 360 sample includes automated signed consent before LMS readiness',()=>{
+  assert.match(app,/creditConsentStatus:'VERIFIED'/);
+  assert.match(app,/type:'CREDIT_CONSENT'/);
+  assert.match(app,/CONSENT_SENT_AUTOMATICALLY/);
+  assert.match(app,/CONSENT_AI_VERIFIED/);
+  assert.match(app,/Documents and signed consent are complete/);
+});

@@ -10,6 +10,7 @@ const webhook = read('../api/whatsapp-webhook.js');
 const index = read('../index.html');
 const appUi = read('../app-v2.js');
 const productUi = read('../product-business.js');
+const tenureUi = read('../handphone-tenure-v2.js');
 const businessUi = read('../business-architecture.js');
 const businessCss = read('../business-architecture.css');
 const s02 = JSON.parse(read('../../S02 — AI Exception Staff Round Robin.blueprint.json'));
@@ -86,6 +87,11 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(productUi, /Monthly 24 months/);
   assert.match(productUi, /Monthly 36 months/);
   assert.match(productUi, /Monthly 48 months/);
+  assert.match(crm, /Monthly 60 Months \(RM\)/);
+  assert.match(crm, /month60/);
+  assert.match(tenureUi, /Monthly 5 years \(RM\)/);
+  assert.match(tenureUi, /Blank years are not quoted by AI/);
+  assert.match(index, /handphone-tenure-v2\.js/);
   assert.match(index, /data-view="handphoneCatalog"/);
   assert.match(index, /data-view="handphonePricing"/);
   assert.match(appUi, /handphoneCatalog:catalog/);
@@ -112,6 +118,24 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(businessUi, /\['productBrand','productModel','productVariant'\]/);
 });
 
+test('Handphone customer pricing is monthly-payment only', () => {
+  assert.match(productUi, /MONTHLY PAYMENT ONLY/);
+  assert.match(productUi, /Selling price and deposit are not stored, displayed or provided to AI/);
+  assert.match(productUi, /Selling price and deposit are neither collected nor stored/);
+  assert.match(crm, /'Product Price \(RM\)': '', 'Deposit \(RM\)': ''/);
+  assert.match(crm, /productPrice: businessUnit === 'HANDPHONE' \? ''/);
+  assert.match(crm, /deposit: businessUnit === 'HANDPHONE' \? ''/);
+  assert.match(crm, /'Requested Product Price \(RM\)': businessUnit === 'HANDPHONE' \? ''/);
+  assert.match(crm, /'Requested Deposit \(RM\)': businessUnit === 'HANDPHONE' \? ''/);
+  assert.match(tenureUi, /removePhoneSaleFields/);
+  assert.doesNotMatch(businessUi, /name="productPrice"/);
+  assert.doesNotMatch(businessUi, /name="requestedDeposit"/);
+  assert.match(businessUi, /available 1–5 year monthly-payment plan/);
+  assert.match(businessUi, /5 years \(60 months\)/);
+  assert.match(appUi, /At least one 1–5-year monthly payment/);
+  assert.match(appUi, /price\.month60/);
+});
+
 test('Make exception assignment matches business and team before assigning staff', () => {
   const nodes = nodeMap(s02);
   assert.equal(s02.name, 'S02 — Business-Aware AI Exception Staff Round Robin');
@@ -130,7 +154,14 @@ test('Motor and Handphone Make scenarios are isolated with no Motor response lea
   assert.equal(handphoneNodes.get(6).mapper.sheetId, 'Handphone_Model_Catalog');
   assert.equal(handphoneNodes.get(18).mapper.sheetId, 'Handphone_Loan_Pricing');
   assert.equal(handphoneNodes.get(26).mapper.sheetId, 'Handphone_Loan_Pricing');
-  assert.match(s03HandphoneRaw, /48 bulan/);
+  for (const year of [1, 2, 3, 4, 5]) assert.match(s03HandphoneRaw, new RegExp(`${year} tahun RM`));
+  for (const replyId of [19, 27]) {
+    const reply = handphoneNodes.get(replyId).mapper.values['6'];
+    assert.doesNotMatch(reply, /harga produk|deposit|cash price|selling price/i);
+    assert.match(reply, /Pilihan ansuran bulanan/);
+  }
+  assert.match(s03HandphoneRaw, /Monthly 60 Months|`28`/);
+  assert.match(s03HandphoneRaw, /Never disclose product selling price/);
   for (const forbidden of ['MOTOR_CATALOG_LOOKUP', 'MOTOR_MODEL_ON_REQUEST', 'MOTOR_EV_UNSUPPORTED', 'JKM_MOTOR_', 'Motor_Model_Catalog', 'Motor_Loan_Pricing', 'motosikal petrol']) {
     assert.equal(s03HandphoneRaw.includes(forbidden), false, `Handphone blueprint still contains ${forbidden}`);
   }
