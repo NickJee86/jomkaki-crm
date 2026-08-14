@@ -1,7 +1,10 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, instantChannelCredentials, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, instantChannelCredentials, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -42,5 +45,28 @@ test('instant reply uses only the bound channel credential and remains outside t
   assert.match(source, /WEBHOOK_IMMEDIATE_ACK/);
   assert.match(source, /'Send Status': response\.ok \? 'SENT' : 'FAILED'/);
   assert.match(source, /Immediate WhatsApp acknowledgement failed/);
+});
+
+test('first inbound message creates the conversation state required by Make', () => {
+  const state = buildInitialConversationState({
+    lead: { 'Lead ID': 'LEAD-1', 'Customer ID': 'CUS-1', 'Customer Name': 'Test Customer', 'Selected Branch ID': 'BR-1' },
+    application: {},
+    route: { 'WABA ID': 'WABA-1', 'Display Number': '+60 14-795 2387' },
+    phone: '016-896 8888',
+    text: 'I am looking for Yamaha Y16ZR.',
+    messageId: 'wamid-1',
+    receivedAt: '2026-08-14T08:05:36.000Z',
+    numberId: 'PHONE-1',
+    channelId: 'JKM-WA-WEST-01',
+    businessUnit: 'MOTOR',
+    teamId: 'TEAM-WEST'
+  });
+  assert.match(state['State ID'], /^STATE-/);
+  assert.equal(state['Lead ID'], 'LEAD-1');
+  assert.equal(state['Phone Number'], '60168968888');
+  assert.equal(state['Current Step'], 'NEW_MESSAGE');
+  assert.equal(state['Last Customer Message'], 'I am looking for Yamaha Y16ZR.');
+  assert.equal(state['Channel Binding Status'], 'BOUND');
+  assert.equal(state['Escalation Required'], 'FALSE');
 });
 
