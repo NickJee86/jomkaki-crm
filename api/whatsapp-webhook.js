@@ -7,7 +7,7 @@ const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const clean = value => String(value ?? '').trim();
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-const requiresManager = text => /(human|agent|manager|supervisor|real person|çœŸäºº|äººå·¥|å®¢æœ|ç»ç†|ä¸»ç®¡|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
+const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
   for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
@@ -65,7 +65,7 @@ const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+
 export function buildImmediateAcknowledgement(text = '', messageType = 'text') {
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return '';
   const message = clean(text);
-  if (/[ä¸€-é¿¿]/u.test(message)) return 'æ‚¨å¥½ï¼ŒJomKaki AI å·²æ”¶åˆ°æ‚¨çš„ä¿¡æ¯ï¼Œæ­£åœ¨é©¬ä¸Šä¸ºæ‚¨æ£€æŸ¥ã€‚è¯·ç¨ç­‰ä¸€ä¸‹ï¼Œæˆ‘å¾ˆå¿«å›žå¤æ‚¨ã€‚';
+  if (/[一-鿿]/u.test(message)) return '您好，JomKaki AI 已收到您的信息，正在马上为您检查。请稍等一下，我很快回复您。';
   if (/\b(hai|nak|mahu|boleh|harga|ansuran|motor|telefon|dokumen|pinjaman)\b/i.test(message)) return 'Hai, JomKaki AI telah menerima mesej anda dan sedang menyemaknya sekarang. Sila tunggu sebentar, saya akan balas secepat mungkin.';
   return "Hi, JomKaki AI has received your message and is checking it now. Please give me a moment and I'll reply shortly.";
 }
