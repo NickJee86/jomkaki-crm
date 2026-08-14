@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.4 seconds
+Output:
 import crypto from 'node:crypto';
 import { getAccessToken } from './_auth.js';
 
@@ -77,6 +80,34 @@ export function shouldSendImmediateAcknowledgement({ route = {}, routeUsable = f
   return !Number.isFinite(previous) || !Number.isFinite(received) || received - previous >= 90_000;
 }
 
+export function buildInitialConversationState({ lead = {}, application = {}, route = {}, phone = '', text = '', messageId = '', receivedAt = '', numberId = '', displayNumber = '', entryId = '', channelId = '', businessUnit = '', teamId = '' } = {}) {
+  return {
+    'State ID': makeId('STATE'),
+    'Lead ID': clean(lead['Lead ID']),
+    'Application ID': clean(application['Application ID']),
+    'Phone Number': digits(phone),
+    'Current Step': 'NEW_MESSAGE',
+    'Qualification Status': 'IN_PROGRESS',
+    'Customer Name': clean(lead['Customer Name']),
+    'Product Category': clean(businessUnit),
+    'Selected Branch ID': clean(lead['Selected Branch ID']),
+    'Last Customer Message': clean(text),
+    'Last Message ID': clean(messageId),
+    'Last Customer Reply At': clean(receivedAt),
+    'Follow Up Attempts': '0',
+    'Escalation Required': 'FALSE',
+    'Updated At': clean(receivedAt) || new Date().toISOString(),
+    'Internal Channel ID': clean(channelId),
+    'WhatsApp Number ID': clean(numberId),
+    'WABA ID': clean(route['WABA ID'] || entryId),
+    'WhatsApp Display Number': clean(displayNumber || route['Display Number']),
+    'Channel Binding Status': clean(channelId) ? 'BOUND' : 'UNBOUND',
+    'Business Unit': clean(businessUnit),
+    'Customer ID': clean(lead['Customer ID']),
+    'Team ID': clean(teamId)
+  };
+}
+
 export function instantChannelCredentials(route = {}, env = process.env) {
   const channelId = clean(route['Internal Channel ID']);
   const phoneNumberId = clean(route['Phone Number ID']);
@@ -146,6 +177,7 @@ export default async function handler(req, res) {
     const applications = objects(await readSheet(token, 'Applications!A1:CC1000'));
     const routes = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));
     const branches = objects(await readSheet(token, 'Branch_Master!A1:S1000'));
+    const conversationStates = objects(await readSheet(token, 'Conversation_State!A1:AK2000'));
     const existingMessageIds = new Set(objects(await readSheet(token, 'Customer_Inbox!A1:AC1200')).map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
@@ -173,6 +205,12 @@ export default async function handler(req, res) {
           await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], { 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId }, 'AP');
         }
         const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
+        let conversationState = conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID']));
+        if (!conversationState) {
+          conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
+          await appendObject(token, 'Conversation_State', conversationState);
+          conversationStates.push(conversationState);
+        }
         const human = requiresManager(text);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': routeBusinessUnit, 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
