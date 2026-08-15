@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, instantChannelCredentials, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, extractCustomerName, instantChannelCredentials, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -61,9 +61,28 @@ test('first inbound message creates the conversation state required by Make', ()
   assert.match(state['State ID'], /^STATE-/);
   assert.equal(state['Lead ID'], 'LEAD-1');
   assert.equal(state['Phone Number'], '60168968888');
-  assert.equal(state['Current Step'], 'NEW_MESSAGE');
+  assert.equal(state['Current Step'], 'STEP_01_WELCOME');
   assert.equal(state['Last Customer Message'], 'I am looking for Yamaha Y16ZR.');
   assert.equal(state['Channel Binding Status'], 'BOUND');
   assert.equal(state['Escalation Required'], 'FALSE');
 });
 
+test('sales onboarding safely captures the customer name', () => {
+  assert.equal(extractCustomerName('Nama saya Ahmad Hakim'), 'Ahmad Hakim');
+  assert.equal(extractCustomerName('Call me Mei Ling'), 'Mei Ling');
+  assert.equal(extractCustomerName('Yamaha Y16ZR'), '');
+  assert.equal(extractCustomerName('hi'), '');
+});
+
+test('customer area resolves to the correct active business branch', () => {
+  const branches = [
+    { 'Branch ID': 'BR-WM-PJ', 'Branch Name': 'Petaling Jaya', Region: 'WEST_MALAYSIA', City: 'Petaling Jaya', 'Direct Coverage Areas': 'Petaling Jaya|Kuala Lumpur|Selangor|Klang Valley|Seremban|Nilai|Penang', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-WEST-PJ' },
+    { 'Branch ID': 'BR-SWK-BKW', 'Branch Name': 'Batu Kawa', Region: 'SARAWAK', City: 'Kuching', 'Direct Coverage Areas': 'Batu Kawa', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-BKW' },
+    { 'Branch ID': 'BR-SWK-STK', 'Branch Name': 'Satok', Region: 'SARAWAK', City: 'Kuching', 'Direct Coverage Areas': 'Satok', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-STK' }
+  ];
+  assert.deepEqual(resolveCustomerLocation('Saya dari Batu Kawa, Sarawak', 'MOTOR', branches), {
+    region: 'EAST_MALAYSIA', state: 'Sarawak', city: 'Batu Kawa', branchId: 'BR-SWK-BKW', teamId: 'TEAM-MOTOR-EAST-BKW', resolved: true
+  });
+  assert.equal(resolveCustomerLocation('KL', 'MOTOR', branches).branchId, 'BR-WM-PJ');
+  assert.equal(resolveCustomerLocation('hello', 'MOTOR', branches), null);
+});
