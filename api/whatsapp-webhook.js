@@ -85,7 +85,7 @@ const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g
 export function hasRecentDocumentAcknowledgement(state = {}, now = Date.now(), windowMs = DOCUMENT_ACK_WINDOW_MS) {
   const lastMessage = clean(state['Last AI Message']);
   const lastAt = Date.parse(clean(state['Last AI Message At']));
-  const documentReply = /^(?:Received\. I will check this document|Dokumen sudah diterima|文件已经收到)/i.test(lastMessage);
+  const documentReply = /^(?:Received|Dokumen (?:anda )?sudah diterima|文件已经收到)/i.test(lastMessage);
   return documentReply && Number.isFinite(lastAt) && Math.max(0, Number(now) - lastAt) < windowMs;
 }
 
