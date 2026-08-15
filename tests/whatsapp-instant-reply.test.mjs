@@ -119,7 +119,9 @@ test('instant sales flow asks name, then location, then product', () => {
   const welcome = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   assert.equal(welcome.nextStep, 'STEP_01_NAME');
   assert.match(welcome.text, /nama/i);
+  assert.match(welcome.text, /terima kasih|ansuran bulanan/i);
   assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
+  assert.doesNotMatch(welcome.text, /[👍😊🙂🤖]/u);
 
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
   assert.equal(name.customerName, 'Nick');
