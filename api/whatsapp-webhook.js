@@ -7,7 +7,7 @@ const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const clean = value => String(value ?? '').trim();
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
-const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
+const requiresManager = text => /(human|agent|manager|supervisor|real person|çœŸäºº|äººå·¥|å®¢æœ|ç»ç†|ä¸»ç®¡|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
   for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
@@ -64,15 +64,33 @@ const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+
 const normalizedWords = value => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
 
+const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
+  const left = clean(leftValue), right = clean(rightValue);
+  if (Math.abs(left.length - right.length) > limit) return false;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row += 1) {
+    const current = [row];
+    let rowBest = current[0];
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      current[column] = Math.min(current[column - 1] + 1, previous[column] + 1, previous[column - 1] + cost);
+      rowBest = Math.min(rowBest, current[column]);
+    }
+    if (rowBest > limit) return false;
+    previous = current;
+  }
+  return previous[right.length] <= limit;
+};
+
 export function extractCustomerName(value = '') {
   let candidate = clean(value)
-    .replace(/^(?:nama\s+saya|saya\s+bernama|my\s+name\s+is|i\s+am|i'm|call\s+me|saya|我叫|我是)\s*/i, '')
+    .replace(/^(?:nama\s+saya|saya\s+bernama|my\s+name\s+is|i\s+am|i'm|call\s+me|saya|æˆ‘å«|æˆ‘æ˜¯)\s*/i, '')
     .replace(/[?.!,;:]+$/g, '').trim();
   const normalized = normalizedWords(candidate);
   if (!candidate || candidate.length < 2 || candidate.length > 60) return '';
   if (/\d/.test(candidate) || candidate.split(/\s+/).length > 5) return '';
   if (/^(hi|hello|hey|hai|morning|afternoon|evening|yes|no|ok|okay|motor|moto|phone|iphone|handphone|yamaha|honda)$/i.test(normalized)) return '';
-  if (!/^[\p{L}][\p{L}'’ -]*$/u.test(candidate)) return '';
+  if (!/^[\p{L}][\p{L}'â€™ -]*$/u.test(candidate)) return '';
   return candidate.replace(/\s+/g, ' ');
 }
 
@@ -99,14 +117,24 @@ const includesTerm = (text, term) => (` ${text} `).includes(` ${normalizedWords(
 export function resolveCustomerLocation(value = '', businessUnit = '', branches = []) {
   const text = normalizedWords(value), unit = canonicalBusinessUnit(businessUnit);
   if (!text || text.length > 100) return null;
-  const stateMatch = stateAliases.find(([, , aliases]) => aliases.some(alias => includesTerm(text, alias)));
-  if (!stateMatch) return null;
-  const [region, state, aliases] = stateMatch;
-  const area = aliases.filter(alias => includesTerm(text, alias)).sort((a, b) => b.length - a.length)[0] || clean(value);
+  const words = text.split(' ').filter(Boolean), candidates = new Set([text.replace(/\s+/g, '')]);
+  for (let start = 0; start < words.length; start += 1) {
+    for (let end = start + 1; end <= Math.min(words.length, start + 3); end += 1) candidates.add(words.slice(start, end).join(''));
+  }
+  const locationMatches = stateAliases.flatMap(([region, state, aliases]) => aliases.map(alias => {
+    const normalizedAlias = normalizedWords(alias), compactAlias = normalizedAlias.replace(/\s+/g, '');
+    const exact = includesTerm(text, alias);
+    const typo = !exact && compactAlias.length >= 5 && [...candidates].some(candidate => candidate.length >= 4 && editDistanceWithin(candidate, compactAlias, compactAlias.length >= 9 ? 2 : 1));
+    return { region, state, alias, exact, typo, score: exact ? 1000 + compactAlias.length : typo ? 500 + compactAlias.length : 0 };
+  })).filter(match => match.score > 0).sort((a, b) => b.score - a.score);
+  const locationMatch = locationMatches[0];
+  if (!locationMatch) return null;
+  const { region, state, alias: area } = locationMatch;
+  const resolvedAreaText = normalizedWords(area);
   const active = branches.filter(branch => truth(branch.Active) && canonicalBusinessUnit(branch['Business Unit']) === unit);
   const directMatches = active.map(branch => {
     const terms = [branch['Branch Name'], branch.City, ...clean(branch['Direct Coverage Areas']).split('|')].filter(Boolean);
-    const score = Math.max(0, ...terms.filter(term => includesTerm(text, term)).map(term => normalizedWords(term).length));
+    const score = Math.max(0, ...terms.filter(term => includesTerm(text, term) || includesTerm(resolvedAreaText, term) || includesTerm(normalizedWords(term), area)).map(term => normalizedWords(term).length));
     return { branch, score };
   }).filter(match => match.score > 0).sort((a, b) => b.score - a.score);
   let selected = directMatches[0]?.branch || null;
@@ -127,7 +155,7 @@ export function resolveCustomerLocation(value = '', businessUnit = '', branches 
 export function buildImmediateAcknowledgement(text = '', messageType = 'text') {
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return '';
   const message = clean(text);
-  if (/[一-鿿]/u.test(message)) return '您好，我们已收到您的信息，正在马上为您查询。请稍等一下，很快回复您。';
+  if (/[ä¸€-é¿¿]/u.test(message)) return 'æ‚¨å¥½ï¼Œæˆ‘ä»¬å·²æ”¶åˆ°æ‚¨çš„ä¿¡æ¯ï¼Œæ­£åœ¨é©¬ä¸Šä¸ºæ‚¨æŸ¥è¯¢ã€‚è¯·ç¨ç­‰ä¸€ä¸‹ï¼Œå¾ˆå¿«å›žå¤æ‚¨ã€‚';
   if (/\b(hai|nak|mahu|boleh|harga|ansuran|motor|telefon|dokumen|pinjaman)\b/i.test(message)) return 'Hai, kami telah menerima mesej anda dan sedang menyemaknya sekarang. Sila tunggu sebentar, kami akan balas secepat mungkin.';
   return "Hi, we've received your message and are checking it now. Please give us a moment and we'll reply shortly.";
 }
@@ -193,6 +221,7 @@ const instantCopy = (language, key, values = {}) => {
       PRODUCT: `Thank you${location ? `, noted ${location}` : ''}. Are you looking for a motorcycle or phone? You can tell me the model directly.`,
       MODEL: 'Which motorcycle or phone model are you interested in? You can send me the model name directly.',
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
+      MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. The approved monthly instalment is not available in the system yet, but I can check it with the branch for you.`,
       DOCUMENT: 'Received. I will check this document. You may continue sending the remaining documents here one by one.',
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
@@ -204,19 +233,20 @@ const instantCopy = (language, key, values = {}) => {
       PRODUCT: `Terima kasih${location ? `, lokasi ${location} sudah dicatat` : ''}. Anda sedang cari motor atau telefon? Boleh terus beritahu model yang anda mahu.`,
       MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
+      MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Kadar ansuran yang diluluskan belum ada dalam sistem sekarang, tetapi saya boleh semak dengan cawangan untuk anda.`,
       DOCUMENT: 'Dokumen sudah diterima. Saya akan semak dahulu. Anda boleh terus hantar dokumen lain satu per satu di sini.',
       QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
     },
     ZH: {
-      NAME: '你好，欢迎联系 JomKaki Motor。请问我应该怎么称呼你？',
-      NAME_RETRY: '请问可以告诉我你的名字吗？',
-      LOCATION: `很高兴认识你${name ? `，${name}` : ''}。请问你目前住在哪个城市或州属？`,
-      LOCATION_RETRY: '请问你目前住在哪个城市或州属？',
-      PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
-      MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
-      MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
-      DOCUMENT: '文件已经收到，我会先检查。其余文件可以继续在这里逐份发送。',
-      QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。申请店内贷款需要 MyKad 正反面，以及最新薪水单或 EPF 记录。如果这个方案适合你，可以在这里逐份发送文件。`
+      NAME: 'ä½ å¥½ï¼Œæ¬¢è¿Žè”ç³» JomKaki Motorã€‚è¯·é—®æˆ‘åº”è¯¥æ€Žä¹ˆç§°å‘¼ä½ ï¼Ÿ',
+      NAME_RETRY: 'è¯·é—®å¯ä»¥å‘Šè¯‰æˆ‘ä½ çš„åå­—å—ï¼Ÿ',
+      LOCATION: `å¾ˆé«˜å…´è®¤è¯†ä½ ${name ? `ï¼Œ${name}` : ''}ã€‚è¯·é—®ä½ ç›®å‰ä½åœ¨å“ªä¸ªåŸŽå¸‚æˆ–å·žå±žï¼Ÿ`,
+      LOCATION_RETRY: 'è¯·é—®ä½ ç›®å‰ä½åœ¨å“ªä¸ªåŸŽå¸‚æˆ–å·žå±žï¼Ÿ',
+      PRODUCT: `è°¢è°¢${location ? `ï¼Œå·²è®°å½•ä½ åœ¨ ${location}` : ''}ã€‚ä½ æƒ³æ‰¾æ‘©æ‰˜è¿˜æ˜¯æ‰‹æœºï¼Ÿå¯ä»¥ç›´æŽ¥å‘Šè¯‰æˆ‘åž‹å·ã€‚`,
+      MODEL: 'ä½ å¯¹å“ªä¸€æ¬¾æ‘©æ‰˜æˆ–æ‰‹æœºæœ‰å…´è¶£ï¼Ÿå¯ä»¥ç›´æŽ¥æŠŠåž‹å·å‘ç»™æˆ‘ã€‚',
+      MODEL_CLARIFY: `è¯·é—®ä½ æ˜¯æŒ‡ ${options}ï¼Ÿè¯·é€‰æ‹©ä¸€ä¸ªï¼Œæˆ‘æ‰èƒ½å‘é€æ­£ç¡®çš„ç…§ç‰‡å’Œæœˆä¾›ã€‚`,
+      DOCUMENT: 'æ–‡ä»¶å·²ç»æ”¶åˆ°ï¼Œæˆ‘ä¼šå…ˆæ£€æŸ¥ã€‚å…¶ä½™æ–‡ä»¶å¯ä»¥ç»§ç»­åœ¨è¿™é‡Œé€ä»½å‘é€ã€‚',
+      QUOTE: `${brand} ${model} çš„ ${tenure} æœˆä¾›æ˜¯æ¯æœˆ RM${amount}ï¼Œæœ€ç»ˆä»¥åˆ†è¡Œç¡®è®¤ä¸ºå‡†ã€‚ç”³è¯·åº—å†…è´·æ¬¾éœ€è¦ MyKad æ­£åé¢ï¼Œä»¥åŠæœ€æ–°è–ªæ°´å•æˆ– EPF è®°å½•ã€‚å¦‚æžœè¿™ä¸ªæ–¹æ¡ˆé€‚åˆä½ ï¼Œå¯ä»¥åœ¨è¿™é‡Œé€ä»½å‘é€æ–‡ä»¶ã€‚`
     }
   };
   return copies[language]?.[key] || copies.EN[key] || '';
@@ -264,187 +294,7 @@ const modelQueryCandidates = value => {
 };
 
 const productAliases = row => {
-  const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' ').filter(Boolean);
-  const aliases = new Set();
-  addModelAlias(aliases, model);
-  addModelAlias(aliases, `${brand} ${model}`);
-  for (let start = 0; start < words.length; start += 1) {
-    for (let end = start + 1; end <= words.length; end += 1) {
-      const phrase = words.slice(start, end).join(' ');
-      if (compactModelText(phrase).length >= 3) addModelAlias(aliases, phrase);
-    }
-    const shorthand = words.slice(start).map(word => /^\d/.test(word) ? word : word[0]).join('');
-    if (shorthand.length >= 3) addModelAlias(aliases, shorthand);
-  }
-  for (const word of normalizedWords(row['Search Keywords']).split(' ')) {
-    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !modelAliasStopWords.has(word)) addModelAlias(aliases, word);
-  }
-  for (const word of words) {
-    const match = word.match(/^([a-z]+)(\d+)([a-z]+)?$/i);
-    if (match) {
-      if (match[1].length >= 2) addModelAlias(aliases, match[1]);
-      if (match[2].length >= 2) addModelAlias(aliases, match[2]);
-      addModelAlias(aliases, `${match[1]}${match[2]}`);
-      if (match[3]) addModelAlias(aliases, `${match[2]}${match[3]}`);
-    }
-  }
-  if (words[0] === 'iphone') {
-    const phoneWords = words.slice(1), phoneCompact = compactModelText(phoneWords.join(' '));
-    const phoneShort = phoneWords.map(word => /^\d/.test(word) ? word : word[0]).join('');
-    addModelAlias(aliases, `ip${phoneCompact}`);
-    addModelAlias(aliases, `ip${phoneShort}`);
-    addModelAlias(aliases, `iphone${phoneCompact}`);
-    addModelAlias(aliases, phoneWords.join(' ').replace(/pro max/g, 'promax'));
-  }
-  return [...aliases].filter(alias => compactModelText(alias).length >= 2);
-};
-
-export function matchInstantProduct(text, catalogs = []) {
-  const query = normalizedWords(text), compactQuery = compactModelText(text), queryCandidates = modelQueryCandidates(text);
-  if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
-  const activeCatalog = catalogs.filter(row => truth(row.Active));
-  const aliasModels = new Map();
-  for (const row of activeCatalog) {
-    const modelKey = `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}`;
-    for (const alias of productAliases(row)) {
-      const aliasKey = compactModelText(alias);
-      if (!aliasModels.has(aliasKey)) aliasModels.set(aliasKey, new Set());
-      aliasModels.get(aliasKey).add(modelKey);
-    }
-  }
-  const matches = activeCatalog.map(row => {
-    const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
-    let score = 0;
-    if (query === model) score = 2400;
-    else if (compactQuery === compactModel) score = 2300;
-    else if (model && includesTerm(query, model)) score = 2200;
-    else if (compactModel.length >= 4 && queryCandidates.some(candidate => candidate.compact === compactModel)) score = 2100;
-    for (const alias of productAliases(row)) {
-      const compactAlias = compactModelText(alias);
-      const numericOnlyAlias = /^\d+$/.test(compactAlias);
-      const sharedAlias = (aliasModels.get(compactAlias)?.size || 0) > 1;
-      const genericAlias = numericOnlyAlias || sharedAlias;
-      if (query === alias || compactQuery === compactAlias) score = Math.max(score, 1900 + compactAlias.length);
-      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, (genericAlias ? 1100 : 1800) + compactAlias.length);
-      else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (genericAlias ? 1100 : 1700) + compactAlias.length);
-      else if (compactAlias.length >= 4 && queryCandidates.some(candidate => candidate.compact.length >= 4 && oneModelTypoAway(candidate.compact, compactAlias))) score = Math.max(score, 1500 + compactAlias.length);
-    }
-    return { row, score, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
-  }).filter(match => match.score >= 1000);
-  const bestByModel = new Map();
-  for (const match of matches) if (!bestByModel.has(match.modelKey) || bestByModel.get(match.modelKey).score < match.score) bestByModel.set(match.modelKey, match);
-  const ranked = [...bestByModel.values()].sort((a, b) => b.score - a.score || clean(a.row.Model).localeCompare(clean(b.row.Model)));
-  if (!ranked.length) return { product: null, options: [], ambiguous: false };
-  const close = ranked.filter(match => match.score >= ranked[0].score - 80);
-  if (close.length > 1) {
-    const options = close.slice(0, 4).map(match => `${clean(match.row.Brand)} ${clean(match.row.Model)}`.trim());
-    return { product: null, options, ambiguous: true };
-  }
-  return { product: ranked[0].row, options: [], ambiguous: false };
-}
-
-const instantRate = (product, pricingRows = [], unit = '', region = '') => {
-  if (!product) return null;
-  const normalizedRegion = canonicalRegion(region);
-  const candidates = pricingRows.filter(row => clean(row['Catalog ID']) === clean(product['Catalog ID']) && truth(row.Active) && ['APPROVED', ''].includes(clean(row['Quote Approval Status']).toUpperCase()));
-  const ranked = candidates.sort((a, b) => {
-    const zone = row => clean(row['Price Zone']).toUpperCase();
-    const score = row => canonicalRegion(zone(row)) === normalizedRegion ? 3 : zone(row) === 'ALL_BRANCHES' || zone(row) === 'ALL' ? 2 : 1;
-    return score(b) - score(a);
-  });
-  const row = ranked[0];
-  if (!row) return null;
-  const rates = canonicalBusinessUnit(unit) === 'HANDPHONE'
-    ? [['60 months', row['Monthly 60 Months (RM)']], ['48 months', row['Monthly 48 Months (RM)']], ['36 months', row['Monthly 36 Months (RM)']], ['24 months', row['Monthly 24 Months (RM)']], ['12 months', row['Monthly 12 Months (RM)']]]
-    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', row['Monthly 4 Years (RM)']], ['3 years', row['Monthly 3 Years (RM)']]];
-  const selected = rates.find(([, amount]) => customerAmount(amount));
-  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
-};
-
-export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [] } = {}) {
-  const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
-  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
-  if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
-  if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
-  const explicitUnit = productUnitFromText(text, ''), fallbackUnit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit);
-  const allCatalogs = [
-    ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
-    ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
-  ];
-  const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
-  const productMatch = matchInstantProduct(text, catalogPool);
-  const product = productMatch.product;
-  const unit = clean(product?.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'MOTOR';
-  const pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-  const knownName = clean(state['Customer Name'] || lead['Customer Name']);
-  const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion);
-  if (productMatch.ambiguous && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
-    const formattedOptions = productMatch.options.join(language === 'ZH' ? '、' : ' atau ');
-    return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL_CLARIFY', { options: formattedOptions }) };
-  }
-  if (product && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
-    const rate = instantRate(product, pricing, unit, lead.Region || routeRegion);
-    if (!rate) return { handled: false };
-    const approvedImage = truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
-    return {
-      handled: true,
-      nextStep: 'STEP_04_DOCUMENTS',
-      productUnit: unit,
-      product,
-      imageUrl: approvedImage,
-      text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
-    };
-  }
-  if (step === 'STEP_01_NAME') {
-    const name = extractCustomerName(text);
-    return name
-      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
-      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
-  }
-  if (step === 'STEP_02_LOCATION') {
-    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
-    return location
-      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
-      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
-  }
-  if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
-  return { handled: false };
-}
-
-export function instantChannelCredentials(route = {}, env = process.env) {
-  const channelId = clean(route['Internal Channel ID']);
-  const phoneNumberId = clean(route['Phone Number ID']);
-  const credentialKey = credentialPrefix(route['Credential Key'] || channelId);
-  const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
-  if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
-  return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
-}
-
-async function sendInstantSalesMessage({ route, phone, decision }) {
-  if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
-  const binding = instantChannelCredentials(route);
-  const imageUrl = clean(decision.imageUrl);
-  const payload = imageUrl
-    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
-    : { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: clean(decision.text) } };
-  const response = await fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${binding.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const result = await response.json().catch(() => ({}));
-  return {
-    sent: response.ok,
-    binding,
-    providerMessageId: clean(result.messages?.[0]?.id),
-    error: response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
-    messageType: imageUrl
-      ? (decision.productUnit === 'HANDPHONE' ? 'HANDPHONE_IMAGE' : 'MOTOR_IMAGE')
-      : 'TEXT'
-  };
-}
-
-async function sendImmediateAcknowledgement(token, { route, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
+  const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' '…3261 tokens truncated…ute, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
   if (clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'CLOUD_MODE_DISABLED' };
   const acknowledgement = buildImmediateAcknowledgement(text, messageType);
   if (!acknowledgement) return { sent: false, skipped: 'UNSUPPORTED_MESSAGE_TYPE' };
@@ -500,25 +350,29 @@ export default async function handler(req, res) {
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}'), token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const [leadRows, applicationRows, routeRows, branchRows, stateRows, inboxRows, motorCatalogRows, motorPricingRows, handphoneCatalogRows, handphonePricingRows] = await Promise.all([
+    const [leadRows, routeRows, branchRows, stateRows, inboxRows] = await Promise.all([
       readSheet(token, 'Leads!A1:AP1000'),
-      readSheet(token, 'Applications!A1:CC1000'),
       readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
       readSheet(token, 'Branch_Master!A1:S1000'),
       readSheet(token, 'Conversation_State!A1:AK2000'),
-      readSheet(token, 'Customer_Inbox!A1:AC1200'),
+      readSheet(token, 'Customer_Inbox!F1:F1200')
+    ]);
+    const leads = objects(leadRows);
+    const routes = objects(routeRows);
+    const branches = objects(branchRows);
+    const conversationStates = objects(stateRows);
+    let applicationsPromise;
+    let catalogDataPromise;
+    const loadApplications = () => applicationsPromise ||= readSheet(token, 'Applications!A1:CC1000').then(objects);
+    const loadCatalogData = () => catalogDataPromise ||= Promise.all([
       readSheet(token, 'Motor_Model_Catalog!A1:Q1000'),
       readSheet(token, 'Motor_Loan_Pricing!A1:Z1000'),
       readSheet(token, 'Handphone_Model_Catalog!A1:AB1000'),
       readSheet(token, 'Handphone_Loan_Pricing!A1:AO1000')
-    ]);
-    const leads = objects(leadRows);
-    const applications = objects(applicationRows);
-    const routes = objects(routeRows);
-    const branches = objects(branchRows);
-    const conversationStates = objects(stateRows);
-    const motorCatalog = objects(motorCatalogRows), motorPricing = objects(motorPricingRows);
-    const handphoneCatalog = objects(handphoneCatalogRows), handphonePricing = objects(handphonePricingRows);
+    ]).then(([motorCatalogRows, motorPricingRows, handphoneCatalogRows, handphonePricingRows]) => ({
+      motorCatalog: objects(motorCatalogRows), motorPricing: objects(motorPricingRows),
+      handphoneCatalog: objects(handphoneCatalogRows), handphonePricing: objects(handphonePricingRows)
+    }));
     const existingMessageIds = new Set(objects(inboxRows).map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
@@ -537,14 +391,18 @@ export default async function handler(req, res) {
         const routeUsable = !!channelId && routeBusinessUnit !== 'UNASSIGNED' && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
         const previousInboundAt = clean(lead?.['Last Inbound At']);
-        let conversationState = lead ? conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : null;
+        let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1) : null;
         const human = requiresManager(text);
+        const currentStep = clean(conversationState?.['Current Step']).toUpperCase();
+        const locationConfirmed = !!clean(lead?.['City or Area'] || lead?.State || conversationState?.['Selected Branch ID']);
+        const needsCatalog = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(currentStep) || locationConfirmed;
+        const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const instantDecision = buildInstantSalesDecision({
           state: conversationState || {}, lead: lead || {}, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
-          motorCatalog, motorPricing, handphoneCatalog, handphonePricing
+          ...catalogData
         });
+        const willReply = routeUsable && !human && instantDecision.handled;
         let instantResult = { sent: false };
-        if (routeUsable && !human && instantDecision.handled) instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
@@ -556,14 +414,14 @@ export default async function handler(req, res) {
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
           await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], { 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId }, 'AP');
         }
+        const shouldLoadApplication = ['image', 'document'].includes(clean(message.type).toLowerCase()) || !!clean(conversationState?.['Application ID']);
+        const applications = shouldLoadApplication ? await loadApplications() : [];
         const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
-        conversationState = conversationState || conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID']));
+        conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
         if (!conversationState) {
           conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
-          if (instantResult.sent) {
+          if (willReply) {
             conversationState['Current Step'] = instantDecision.nextStep || conversationState['Current Step'];
-            conversationState['Last AI Reply'] = clean(instantDecision.text);
-            conversationState['Last AI Reply At'] = new Date().toISOString();
             conversationState['Product Category'] = clean(instantDecision.productUnit || routeBusinessUnit);
           }
           await appendObject(token, 'Conversation_State', conversationState);
@@ -615,16 +473,27 @@ export default async function handler(req, res) {
             'Business Unit': clean(routeBusinessUnit),
             'Customer ID': clean(lead['Customer ID']),
             'Team ID': clean(teamId),
-            ...(instantResult.sent ? {
+            ...(willReply ? {
               'Current Step': clean(instantDecision.nextStep || conversationState['Current Step']),
-              'Last AI Reply': clean(instantDecision.text),
-              'Last AI Reply At': new Date().toISOString(),
               'Product Category': clean(instantDecision.productUnit || conversationState['Product Category'] || routeBusinessUnit)
             } : {}),
             ...identityState
           };
           await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'AK');
           Object.assign(conversationState, latestInbound);
+        }
+        if (willReply) {
+          instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
+          if (instantResult.sent) {
+            const deliveredState = {
+              'Last AI Message': clean(instantDecision.text),
+              'Last AI Message At': new Date().toISOString(),
+              'Selected Product Brand': clean(instantDecision.product?.Brand),
+              'Selected Product Model': clean(instantDecision.product?.Model)
+            };
+            await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], deliveredState, 'AK');
+            Object.assign(conversationState, deliveredState);
+          }
         }
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
@@ -664,3 +533,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
