@@ -239,8 +239,8 @@ const instantCopy = (language, key, values = {}) => {
   const amount = customerAmount(values.amount), tenure = clean(values.tenure), options = clean(values.options);
   const copies = {
     EN: {
-      NAME: 'Hi, welcome to JomKaki Motor. May I know your name?',
-      NAME_RETRY: 'May I know the name I should use for you?',
+      NAME: 'Hi, thank you for contacting JomKaki Motor. I can help you check suitable motorcycle or phone options and their monthly instalments. May I know your name?',
+      NAME_RETRY: 'Sorry, may I know your name so I can continue checking the right options for you?',
       LOCATION: `Nice to meet you${name ? `, ${name}` : ''}. Which city or state are you from?`,
       LOCATION_RETRY: 'Which city or state are you currently staying in?',
       PRODUCT: `Thank you${location ? `, noted ${location}` : ''}. Are you looking for a motorcycle or phone? You can tell me the model directly.`,
@@ -251,8 +251,8 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
     MS: {
-      NAME: 'Hai, selamat datang ke JomKaki Motor. Boleh saya tahu nama anda?',
-      NAME_RETRY: 'Boleh saya tahu nama yang patut saya gunakan untuk anda?',
+      NAME: 'Hi, terima kasih kerana menghubungi JomKaki Motor. Saya boleh bantu semak pilihan motor atau telefon serta ansuran bulanan yang sesuai. Boleh saya tahu nama anda?',
+      NAME_RETRY: 'Maaf, boleh saya tahu nama anda supaya saya boleh teruskan semakan?',
       LOCATION: `Salam kenal${name ? `, ${name}` : ''}. Anda tinggal di bandar atau negeri mana?`,
       LOCATION_RETRY: 'Boleh beritahu anda sekarang tinggal di bandar atau negeri mana?',
       PRODUCT: `Terima kasih${location ? `, lokasi ${location} sudah dicatat` : ''}. Anda sedang cari motor atau telefon? Boleh terus beritahu model yang anda mahu.`,
@@ -263,8 +263,8 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
     },
     ZH: {
-      NAME: '你好，欢迎联系 JomKaki Motor。请问我应该怎么称呼你？',
-      NAME_RETRY: '请问可以告诉我你的名字吗？',
+      NAME: '您好，感谢您联系 JomKaki Motor。我可以协助您查询合适的摩托车或手机型号及月供。请问该怎么称呼您？',
+      NAME_RETRY: '不好意思，请问该怎么称呼您？我好继续为您查询。',
       LOCATION: `很高兴认识你${name ? `，${name}` : ''}。请问你目前住在哪个城市或州属？`,
       LOCATION_RETRY: '请问你目前住在哪个城市或州属？',
       PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
