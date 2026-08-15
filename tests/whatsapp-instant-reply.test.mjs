@@ -12,14 +12,14 @@ const route = {
 };
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
+  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /已收到/);
+  assert.match(chinese, /å·²æ”¶åˆ°/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /received/);
   [chinese, malay, english].forEach(message => {
-    assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i);
+    assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i);
     assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
   });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
@@ -32,6 +32,15 @@ test('webhook acknowledgement stays disabled so one inbound produces one final r
   assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: false, messageType: 'text' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route, routeUsable: true, human: true, messageType: 'text' }), false);
   assert.equal(shouldSendImmediateAcknowledgement({ route: { ...route, 'Outbound Enabled': 'FALSE' }, routeUsable: true, messageType: 'text' }), false);
+});
+
+test('webhook persists the next conversation step before sending the reply', () => {
+  const persistIndex = source.indexOf("await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'AK')");
+  const sendIndex = source.indexOf('instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision })');
+  assert.ok(persistIndex > 0);
+  assert.ok(sendIndex > persistIndex);
+  assert.match(source, /'Last AI Message': clean\(instantDecision\.text\)/);
+  assert.doesNotMatch(source, /'Last AI Reply'/);
 });
 
 test('instant channel credentials remain strict even though webhook acknowledgement is disabled', () => {
@@ -78,12 +87,15 @@ test('customer area resolves to the correct active business branch', () => {
   const branches = [
     { 'Branch ID': 'BR-WM-PJ', 'Branch Name': 'Petaling Jaya', Region: 'WEST_MALAYSIA', City: 'Petaling Jaya', 'Direct Coverage Areas': 'Petaling Jaya|Kuala Lumpur|Selangor|Klang Valley|Seremban|Nilai|Penang', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-WEST-PJ' },
     { 'Branch ID': 'BR-SWK-BKW', 'Branch Name': 'Batu Kawa', Region: 'SARAWAK', City: 'Kuching', 'Direct Coverage Areas': 'Batu Kawa', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-BKW' },
-    { 'Branch ID': 'BR-SWK-STK', 'Branch Name': 'Satok', Region: 'SARAWAK', City: 'Kuching', 'Direct Coverage Areas': 'Satok', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-STK' }
+    { 'Branch ID': 'BR-SWK-STK', 'Branch Name': 'Satok', Region: 'SARAWAK', City: 'Kuching', 'Direct Coverage Areas': 'Satok', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-STK' },
+    { 'Branch ID': 'BR-SWK-BTU', 'Branch Name': 'Bintulu', Region: 'SARAWAK', City: 'Bintulu', 'Direct Coverage Areas': 'Bintulu', Active: 'TRUE', 'Business Unit': 'MOTOR', 'Team ID': 'TEAM-MOTOR-EAST-BTU' }
   ];
   assert.deepEqual(resolveCustomerLocation('Saya dari Batu Kawa, Sarawak', 'MOTOR', branches), {
     region: 'EAST_MALAYSIA', state: 'Sarawak', city: 'Batu Kawa', branchId: 'BR-SWK-BKW', teamId: 'TEAM-MOTOR-EAST-BKW', resolved: true
   });
   assert.equal(resolveCustomerLocation('KL', 'MOTOR', branches).branchId, 'BR-WM-PJ');
+  assert.equal(resolveCustomerLocation('bintu;u', 'MOTOR', branches).branchId, 'BR-SWK-BTU');
+  assert.equal(resolveCustomerLocation('bintlu', 'MOTOR', branches).city, 'Bintulu');
   assert.equal(resolveCustomerLocation('hello', 'MOTOR', branches), null);
 });
 
@@ -132,7 +144,7 @@ test('instant product reply sends approved image and only one monthly instalment
 test('known customer model reply survives a stale Make conversation step', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_01_NAME', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
-    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA' }, text: 'Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '420', 'Monthly 4 Years (RM)': '350', 'Monthly 5 Years (RM)': '299' }]
   });
@@ -168,6 +180,39 @@ test('the whole catalogue accepts natural customer shorthand instead of only sel
   assert.equal(matchInstantProduct('rs150 berapa sebulan', catalog).product.Model, 'RS150R');
   assert.equal(matchInstantProduct('husky ada stock ka', catalog).product.Model, 'Husky 200');
   assert.equal(matchInstantProduct('saya minat moca', catalog).product.Model, 'Moca');
+});
+
+test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA' },
+    text: 'motor nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax n max' },
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', Brand: 'Yamaha', Model: 'NMAX V3', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax-v3.jpg', 'Search Keywords': 'yamaha nmax v3' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '526', 'Monthly 4 Years (RM)': '425', 'Monthly 5 Years (RM)': '365' }
+    ]
+  });
+  assert.equal(decision.product.Model, 'NMAX V3');
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax-v3.jpg');
+  assert.match(decision.text, /NMAX V3/);
+  assert.match(decision.text, /RM365/);
+});
+
+test('a recognised model without approved regional pricing gets a useful reply instead of silence', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax' }],
+    motorPricing: []
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.match(decision.text, /NMAX/);
+  assert.match(decision.text, /semak dengan cawangan/i);
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
@@ -210,3 +255,4 @@ test('phone shorthand can override a stale motor category without asking the cus
   assert.equal(decision.productUnit, 'HANDPHONE');
   assert.match(decision.text, /RM199/);
 });
+
