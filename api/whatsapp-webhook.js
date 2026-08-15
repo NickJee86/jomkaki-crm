@@ -239,48 +239,97 @@ const oneEditAway = (left, right) => {
   return edits + Number(i < left.length || j < right.length) <= 1;
 };
 
+const oneModelTypoAway = (left, right) => {
+  if (oneEditAway(left, right)) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length - 1; index += 1) {
+    if (left[index] !== right[index + 1] || left[index + 1] !== right[index]) continue;
+    if (`${left.slice(0, index)}${left[index + 1]}${left[index]}${left.slice(index + 2)}` === right) return true;
+  }
+  return false;
+};
+
+const addModelAlias = (aliases, value) => {
+  const alias = normalizedWords(value);
+  if (compactModelText(alias).length >= 2) aliases.add(alias);
+};
+
+const modelQueryCandidates = value => {
+  const words = normalizedWords(value).split(' ').filter(Boolean), candidates = new Set();
+  addModelAlias(candidates, words.join(' '));
+  for (let start = 0; start < words.length; start += 1) {
+    for (let end = start + 1; end <= Math.min(words.length, start + 6); end += 1) addModelAlias(candidates, words.slice(start, end).join(' '));
+  }
+  return [...candidates].map(candidate => ({ words: candidate, compact: compactModelText(candidate) }));
+};
+
 const productAliases = row => {
   const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' ').filter(Boolean);
-  const aliases = new Set([model, `${brand} ${model}`.trim()]);
+  const aliases = new Set();
+  addModelAlias(aliases, model);
+  addModelAlias(aliases, `${brand} ${model}`);
   for (let start = 0; start < words.length; start += 1) {
     for (let end = start + 1; end <= words.length; end += 1) {
       const phrase = words.slice(start, end).join(' ');
-      if (compactModelText(phrase).length >= 3) aliases.add(phrase);
+      if (compactModelText(phrase).length >= 3) addModelAlias(aliases, phrase);
     }
     const shorthand = words.slice(start).map(word => /^\d/.test(word) ? word : word[0]).join('');
-    if (shorthand.length >= 3) aliases.add(shorthand);
+    if (shorthand.length >= 3) addModelAlias(aliases, shorthand);
   }
   for (const word of normalizedWords(row['Search Keywords']).split(' ')) {
-    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !modelAliasStopWords.has(word)) aliases.add(word);
+    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !modelAliasStopWords.has(word)) addModelAlias(aliases, word);
   }
   for (const word of words) {
-    const match = word.match(/^([a-z]{2,})(\d{2,})([a-z]*)$/i);
+    const match = word.match(/^([a-z]+)(\d+)([a-z]+)?$/i);
     if (match) {
-      aliases.add(match[1]);
-      aliases.add(match[2]);
+      if (match[1].length >= 2) addModelAlias(aliases, match[1]);
+      if (match[2].length >= 2) addModelAlias(aliases, match[2]);
+      addModelAlias(aliases, `${match[1]}${match[2]}`);
+      if (match[3]) addModelAlias(aliases, `${match[2]}${match[3]}`);
     }
+  }
+  if (words[0] === 'iphone') {
+    const phoneWords = words.slice(1), phoneCompact = compactModelText(phoneWords.join(' '));
+    const phoneShort = phoneWords.map(word => /^\d/.test(word) ? word : word[0]).join('');
+    addModelAlias(aliases, `ip${phoneCompact}`);
+    addModelAlias(aliases, `ip${phoneShort}`);
+    addModelAlias(aliases, `iphone${phoneCompact}`);
+    addModelAlias(aliases, phoneWords.join(' ').replace(/pro max/g, 'promax'));
   }
   return [...aliases].filter(alias => compactModelText(alias).length >= 2);
 };
 
 export function matchInstantProduct(text, catalogs = []) {
-  const query = normalizedWords(text), compactQuery = compactModelText(text);
+  const query = normalizedWords(text), compactQuery = compactModelText(text), queryCandidates = modelQueryCandidates(text);
   if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
-  const matches = catalogs.filter(row => truth(row.Active)).map(row => {
+  const activeCatalog = catalogs.filter(row => truth(row.Active));
+  const aliasModels = new Map();
+  for (const row of activeCatalog) {
+    const modelKey = `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}`;
+    for (const alias of productAliases(row)) {
+      const aliasKey = compactModelText(alias);
+      if (!aliasModels.has(aliasKey)) aliasModels.set(aliasKey, new Set());
+      aliasModels.get(aliasKey).add(modelKey);
+    }
+  }
+  const matches = activeCatalog.map(row => {
     const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
     let score = 0;
     if (query === model) score = 2400;
     else if (compactQuery === compactModel) score = 2300;
     else if (model && includesTerm(query, model)) score = 2200;
-    else if (compactModel.length >= 4 && compactQuery.includes(compactModel)) score = 2100;
+    else if (compactModel.length >= 4 && queryCandidates.some(candidate => candidate.compact === compactModel)) score = 2100;
     for (const alias of productAliases(row)) {
       const compactAlias = compactModelText(alias);
-      if (query === alias || compactQuery === compactAlias) score = Math.max(score, 1600 + compactAlias.length);
-      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, 1400 + compactAlias.length);
-      else if (compactAlias.length >= 3 && compactQuery.includes(compactAlias)) score = Math.max(score, 1200 + compactAlias.length);
-      else if (compactQuery.length >= 4 && compactAlias.length >= 4 && oneEditAway(compactQuery, compactAlias)) score = Math.max(score, 1000 + compactAlias.length);
+      const numericOnlyAlias = /^\d+$/.test(compactAlias);
+      const sharedAlias = (aliasModels.get(compactAlias)?.size || 0) > 1;
+      const genericAlias = numericOnlyAlias || sharedAlias;
+      if (query === alias || compactQuery === compactAlias) score = Math.max(score, 1900 + compactAlias.length);
+      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, (genericAlias ? 1100 : 1800) + compactAlias.length);
+      else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (genericAlias ? 1100 : 1700) + compactAlias.length);
+      else if (compactAlias.length >= 4 && queryCandidates.some(candidate => candidate.compact.length >= 4 && oneModelTypoAway(candidate.compact, compactAlias))) score = Math.max(score, 1500 + compactAlias.length);
     }
-    return { row, score, modelKey: normalizedWords(row.Model) };
+    return { row, score, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
   }).filter(match => match.score >= 1000);
   const bestByModel = new Map();
   for (const match of matches) if (!bestByModel.has(match.modelKey) || bestByModel.get(match.modelKey).score < match.score) bestByModel.set(match.modelKey, match);
@@ -307,7 +356,73 @@ const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   if (!row) return null;
   const rates = canonicalBusinessUnit(unit) === 'HANDPHONE'
     ? [['60 months', row['Monthly 60 Months (RM)']], ['48 months', row['Monthly 48 Months (RM)']], ['36 months', row['Monthly 36 Months (RM)']], ['24 months', row['Monthly 24 Months (RM)']], ['12 months', row['Monthly 12 Months (RM)']]]
-    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', r…1123 tokens truncated…antChannelCredentials(route);
+    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', row['Monthly 4 Years (RM)']], ['3 years', row['Monthly 3 Years (RM)']]];
+  const selected = rates.find(([, amount]) => customerAmount(amount));
+  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
+};
+
+export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [] } = {}) {
+  const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
+  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
+  if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
+  if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
+  const explicitUnit = productUnitFromText(text, ''), fallbackUnit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit);
+  const allCatalogs = [
+    ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
+    ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
+  ];
+  const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
+  const productMatch = matchInstantProduct(text, catalogPool);
+  const product = productMatch.product;
+  const unit = clean(product?.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'MOTOR';
+  const pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
+  const knownName = clean(state['Customer Name'] || lead['Customer Name']);
+  const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion);
+  if (productMatch.ambiguous && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
+    const formattedOptions = productMatch.options.join(language === 'ZH' ? '、' : ' atau ');
+    return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL_CLARIFY', { options: formattedOptions }) };
+  }
+  if (product && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
+    const rate = instantRate(product, pricing, unit, lead.Region || routeRegion);
+    if (!rate) return { handled: false };
+    const approvedImage = truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
+    return {
+      handled: true,
+      nextStep: 'STEP_04_DOCUMENTS',
+      productUnit: unit,
+      product,
+      imageUrl: approvedImage,
+      text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
+    };
+  }
+  if (step === 'STEP_01_NAME') {
+    const name = extractCustomerName(text);
+    return name
+      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
+      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
+  }
+  if (step === 'STEP_02_LOCATION') {
+    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
+    return location
+      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
+      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
+  }
+  if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
+  return { handled: false };
+}
+
+export function instantChannelCredentials(route = {}, env = process.env) {
+  const channelId = clean(route['Internal Channel ID']);
+  const phoneNumberId = clean(route['Phone Number ID']);
+  const credentialKey = credentialPrefix(route['Credential Key'] || channelId);
+  const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
+  if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
+  return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
+}
+
+async function sendInstantSalesMessage({ route, phone, decision }) {
+  if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
+  const binding = instantChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
   const payload = imageUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
@@ -549,4 +664,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-
