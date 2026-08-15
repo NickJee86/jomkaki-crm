@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, instantChannelCredentials, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, instantChannelCredentials, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -139,5 +139,46 @@ test('known customer model reply survives a stale Make conversation step', () =>
   assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
   assert.match(decision.text, /RM299/);
   assert.match(decision.text, /ansuran|dokumen|IC/i);
+});
+
+test('customer model shorthand, spacing and small typo are recognised', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr y16 zr' },
+    { 'Catalog ID': 'MTR-HON-RSXW', Brand: 'Honda', Model: 'RS-X Winner', Active: 'TRUE', 'Search Keywords': 'honda rsx rs-x rs x winner' }
+  ];
+  assert.equal(matchInstantProduct('y16zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y 16 zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('rsx', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak rs x', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak ansuran murah', catalog).product, null);
+});
+
+test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr y16 zr' },
+    { 'Catalog ID': 'MTR-YAM-Y16ABS', Brand: 'Yamaha', Model: 'Y16 ABS', Active: 'TRUE', 'Search Keywords': 'yamaha y16 abs' }
+  ];
+  const match = matchInstantProduct('y16', catalog);
+  assert.equal(match.ambiguous, true);
+  assert.deepEqual(match.options, ['Yamaha Y16 ABS', 'Yamaha Y16ZR']);
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA' }, text: 'y16', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.match(decision.text, /Maksud anda Yamaha Y16 ABS atau Yamaha Y16ZR/);
+  assert.doesNotMatch(decision.text, /RM\d/);
+});
+
+test('phone shorthand groups colour rows and identifies the requested model family', () => {
+  const catalog = [
+    { 'Catalog ID': 'HP-17PM-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 256gb black official' },
+    { 'Catalog ID': 'HP-17PM-512-BLU', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '512GB Blue', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 512gb blue official' },
+    { 'Catalog ID': 'HP-17P-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro 256gb black official' }
+  ];
+  const match = matchInstantProduct('17pm', catalog);
+  assert.equal(match.ambiguous, false);
+  assert.equal(match.product.Model, 'iPhone 17 Pro Max');
 });
 
