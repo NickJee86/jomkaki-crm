@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, extractCustomerName, instantChannelCredentials, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, instantChannelCredentials, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -86,3 +86,38 @@ test('customer area resolves to the correct active business branch', () => {
   assert.equal(resolveCustomerLocation('KL', 'MOTOR', branches).branchId, 'BR-WM-PJ');
   assert.equal(resolveCustomerLocation('hello', 'MOTOR', branches), null);
 });
+
+test('instant sales flow asks name, then location, then product', () => {
+  const welcome = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
+  assert.equal(welcome.nextStep, 'STEP_01_NAME');
+  assert.match(welcome.text, /name/i);
+  assert.doesNotMatch(welcome.text, /age|AI/i);
+
+  const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
+  assert.equal(name.customerName, 'Nick');
+  assert.equal(name.nextStep, 'STEP_02_LOCATION');
+  assert.match(name.text, /city|state/i);
+
+  const location = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION' }, text: 'Kuala Lumpur', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'WEST_MALAYSIA', 'Branch ID': 'BR-WM-PJ', 'Team ID': 'TEAM-WEST', 'Branch Name': 'Petaling Jaya', City: 'Petaling Jaya', 'Direct Coverage Areas': 'Kuala Lumpur|KL|Selangor' }]
+  });
+  assert.equal(location.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(location.location.branchId, 'BR-WM-PJ');
+  assert.match(location.text, /motorcycle or phone/i);
+});
+
+test('instant product reply sends approved image and only one monthly instalment', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { Region: 'WEST_MALAYSIA' }, text: 'I am looking for Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '394', 'Monthly 4 Years (RM)': '318', 'Monthly 5 Years (RM)': '273', 'Selling Price (RM)': '12000', 'Deposit (RM)': '1000' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y16zr.jpg');
+  assert.match(decision.text, /RM273/);
+  assert.doesNotMatch(decision.text, /394|318|deposit|selling price/i);
+  assert.match(decision.text, /MyKad|payslip|EPF/i);
+});
+
