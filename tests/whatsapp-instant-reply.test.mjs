@@ -90,13 +90,13 @@ test('customer area resolves to the correct active business branch', () => {
 test('instant sales flow asks name, then location, then product', () => {
   const welcome = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   assert.equal(welcome.nextStep, 'STEP_01_NAME');
-  assert.match(welcome.text, /name/i);
-  assert.doesNotMatch(welcome.text, /age|AI/i);
+  assert.match(welcome.text, /nama/i);
+  assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
 
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
   assert.equal(name.customerName, 'Nick');
   assert.equal(name.nextStep, 'STEP_02_LOCATION');
-  assert.match(name.text, /city|state/i);
+  assert.match(name.text, /bandar|negeri/i);
 
   const location = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_02_LOCATION' }, text: 'Kuala Lumpur', messageType: 'text', routeBusinessUnit: 'MOTOR',
@@ -104,7 +104,15 @@ test('instant sales flow asks name, then location, then product', () => {
   });
   assert.equal(location.nextStep, 'STEP_03_PRODUCT');
   assert.equal(location.location.branchId, 'BR-WM-PJ');
-  assert.match(location.text, /motorcycle or phone/i);
+  assert.match(location.text, /motor atau telefon/i);
+});
+
+test('short or ambiguous customer messages default to Bahasa Melayu', () => {
+  const greeting = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
+  const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Jim', messageType: 'text' });
+  assert.match(greeting.text, /selamat datang|nama anda/i);
+  assert.match(name.text, /bandar|negeri/i);
+  assert.doesNotMatch(greeting.text, /May I know/i);
 });
 
 test('instant product reply sends approved image and only one monthly instalment', () => {
@@ -119,5 +127,17 @@ test('instant product reply sends approved image and only one monthly instalment
   assert.match(decision.text, /RM273/);
   assert.doesNotMatch(decision.text, /394|318|deposit|selling price/i);
   assert.match(decision.text, /MyKad|payslip|EPF/i);
+});
+
+test('known customer model reply survives a stale Make conversation step', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA' }, text: 'Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '420', 'Monthly 4 Years (RM)': '350', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /RM299/);
+  assert.match(decision.text, /ansuran|dokumen|IC/i);
 });
 
