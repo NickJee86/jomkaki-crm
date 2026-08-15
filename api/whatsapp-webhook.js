@@ -61,6 +61,67 @@ const truth = value => clean(value).toUpperCase() === 'TRUE';
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(value).toUpperCase()) ? clean(value).toUpperCase() : '';
 const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+const normalizedWords = value => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+export function extractCustomerName(value = '') {
+  let candidate = clean(value)
+    .replace(/^(?:nama\s+saya|saya\s+bernama|my\s+name\s+is|i\s+am|i'm|call\s+me|saya|我叫|我是)\s*/i, '')
+    .replace(/[?.!,;:]+$/g, '').trim();
+  const normalized = normalizedWords(candidate);
+  if (!candidate || candidate.length < 2 || candidate.length > 60) return '';
+  if (/\d/.test(candidate) || candidate.split(/\s+/).length > 5) return '';
+  if (/^(hi|hello|hey|hai|morning|afternoon|evening|yes|no|ok|okay|motor|moto|phone|iphone|handphone|yamaha|honda)$/i.test(normalized)) return '';
+  if (!/^[\p{L}][\p{L}'’ -]*$/u.test(candidate)) return '';
+  return candidate.replace(/\s+/g, ' ');
+}
+
+const stateAliases = [
+  ['EAST_MALAYSIA', 'Sarawak', ['sarawak', 'kuching', 'batu kawa', 'satok', 'samarahan', 'kota samarahan', 'bintulu', 'miri', 'sibu', 'serian', 'sri aman']],
+  ['EAST_MALAYSIA', 'Sabah', ['sabah', 'kota kinabalu', 'kk', 'sandakan', 'tawau', 'lahad datu']],
+  ['EAST_MALAYSIA', 'Labuan', ['labuan']],
+  ['WEST_MALAYSIA', 'Selangor', ['selangor', 'petaling jaya', 'pj', 'shah alam', 'klang', 'klang valley']],
+  ['WEST_MALAYSIA', 'Kuala Lumpur', ['kuala lumpur', 'kl']],
+  ['WEST_MALAYSIA', 'Negeri Sembilan', ['negeri sembilan', 'seremban', 'nilai']],
+  ['WEST_MALAYSIA', 'Penang', ['penang', 'pulau pinang']],
+  ['WEST_MALAYSIA', 'Johor', ['johor', 'johor bahru', 'jb']],
+  ['WEST_MALAYSIA', 'Perak', ['perak', 'ipoh']],
+  ['WEST_MALAYSIA', 'Melaka', ['melaka', 'malacca']],
+  ['WEST_MALAYSIA', 'Kedah', ['kedah', 'alor setar']],
+  ['WEST_MALAYSIA', 'Pahang', ['pahang', 'kuantan']],
+  ['WEST_MALAYSIA', 'Kelantan', ['kelantan', 'kota bharu']],
+  ['WEST_MALAYSIA', 'Terengganu', ['terengganu', 'kuala terengganu']],
+  ['WEST_MALAYSIA', 'Perlis', ['perlis']],
+  ['WEST_MALAYSIA', 'Putrajaya', ['putrajaya']]
+];
+const includesTerm = (text, term) => (` ${text} `).includes(` ${normalizedWords(term)} `);
+
+export function resolveCustomerLocation(value = '', businessUnit = '', branches = []) {
+  const text = normalizedWords(value), unit = canonicalBusinessUnit(businessUnit);
+  if (!text || text.length > 100) return null;
+  const stateMatch = stateAliases.find(([, , aliases]) => aliases.some(alias => includesTerm(text, alias)));
+  if (!stateMatch) return null;
+  const [region, state, aliases] = stateMatch;
+  const area = aliases.filter(alias => includesTerm(text, alias)).sort((a, b) => b.length - a.length)[0] || clean(value);
+  const active = branches.filter(branch => truth(branch.Active) && canonicalBusinessUnit(branch['Business Unit']) === unit);
+  const directMatches = active.map(branch => {
+    const terms = [branch['Branch Name'], branch.City, ...clean(branch['Direct Coverage Areas']).split('|')].filter(Boolean);
+    const score = Math.max(0, ...terms.filter(term => includesTerm(text, term)).map(term => normalizedWords(term).length));
+    return { branch, score };
+  }).filter(match => match.score > 0).sort((a, b) => b.score - a.score);
+  let selected = directMatches[0]?.branch || null;
+  if (!selected) {
+    const sameRegion = active.filter(branch => canonicalRegion(branch.Region) === region);
+    if (sameRegion.length === 1) selected = sameRegion[0];
+  }
+  return {
+    region,
+    state,
+    city: area.replace(/\b\w/g, letter => letter.toUpperCase()),
+    branchId: clean(selected?.['Branch ID']),
+    teamId: clean(selected?.['Team ID']),
+    resolved: Boolean(selected)
+  };
+}
 
 export function buildImmediateAcknowledgement(text = '', messageType = 'text') {
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return '';
@@ -89,7 +150,7 @@ export function buildInitialConversationState({ lead = {}, application = {}, rou
     'Lead ID': clean(lead['Lead ID']),
     'Application ID': clean(application['Application ID']),
     'Phone Number': digits(phone),
-    'Current Step': 'NEW_MESSAGE',
+    'Current Step': 'STEP_01_WELCOME',
     'Qualification Status': 'IN_PROGRESS',
     'Customer Name': clean(lead['Customer Name']),
     'Product Category': clean(businessUnit),
@@ -187,11 +248,14 @@ export default async function handler(req, res) {
       for (const message of value.messages || []) {
         if (message.id && existingMessageIds.has(clean(message.id))) continue;
         const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
+        const contact = (value.contacts || []).find(item => digits(item.wa_id) === phone) || (value.contacts || [])[0] || {};
+        const profileName = extractCustomerName(contact.profile?.name);
         const route = routes.find(row => clean(row['Phone Number ID']) === clean(numberId)) || {};
         const channelId = clean(route['Internal Channel ID']), branchId = clean(route['Branch ID']);
         const branch = branches.find(row => clean(row['Branch ID']) === branchId) || {};
         const routeRegion = canonicalRegion(route.Region || branch.Region) || 'UNASSIGNED';
-        const routeBusinessUnit = canonicalBusinessUnit(route['Business Unit']) || 'UNASSIGNED', teamId = clean(route['Team ID'] || branch['Team ID']);
+        const routeBusinessUnit = canonicalBusinessUnit(route['Business Unit']) || 'UNASSIGNED';
+        let teamId = clean(route['Team ID'] || branch['Team ID']);
         const receivedAt = new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString();
         const routeUsable = !!channelId && routeBusinessUnit !== 'UNASSIGNED' && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
@@ -199,7 +263,7 @@ export default async function handler(req, res) {
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
-          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': existingCustomer?.['Customer Name'] || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: routeRegion, 'Business Unit': routeBusinessUnit, 'Team ID': teamId, 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
+          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': existingCustomer?.['Customer Name'] || profileName || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: routeRegion, 'Business Unit': routeBusinessUnit, 'Team ID': teamId, 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
           await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', 'Source Channel': 'WHATSAPP_CLOUD', 'Primary WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK', 'Updated By': 'META_WEBHOOK' });
           leads.push(lead);
@@ -214,6 +278,39 @@ export default async function handler(req, res) {
           await appendObject(token, 'Conversation_State', conversationState);
           conversationStates.push(conversationState);
         } else {
+          const identityState = {};
+          const leadIdentity = {};
+          const step = clean(conversationState['Current Step']).toUpperCase();
+          if (step === 'STEP_01_NAME') {
+            const customerName = extractCustomerName(text);
+            if (customerName) {
+              identityState['Customer Name'] = customerName;
+              leadIdentity['Customer Name'] = customerName;
+            }
+          }
+          if (step === 'STEP_02_LOCATION') {
+            const location = resolveCustomerLocation(text, routeBusinessUnit, branches);
+            if (location) {
+              leadIdentity.Region = location.region;
+              leadIdentity.State = location.state;
+              leadIdentity['City or Area'] = location.city;
+              if (location.branchId) {
+                leadIdentity['Selected Branch ID'] = location.branchId;
+                identityState['Selected Branch ID'] = location.branchId;
+              }
+              if (location.teamId) {
+                teamId = location.teamId;
+                leadIdentity['Team ID'] = location.teamId;
+                identityState['Team ID'] = location.teamId;
+              }
+            }
+          }
+          if (Object.keys(leadIdentity).length) {
+            leadIdentity['Updated At'] = receivedAt;
+            leadIdentity['Updated By'] = 'META_WEBHOOK_SALES_FLOW';
+            await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], leadIdentity, 'AP');
+            Object.assign(lead, leadIdentity);
+          }
           const latestInbound = {
             'Last Customer Message': clean(text),
             'Last Message ID': clean(message.id),
@@ -226,7 +323,8 @@ export default async function handler(req, res) {
             'Channel Binding Status': clean(channelId) ? 'BOUND' : 'UNBOUND',
             'Business Unit': clean(routeBusinessUnit),
             'Customer ID': clean(lead['Customer ID']),
-            'Team ID': clean(teamId)
+            'Team ID': clean(teamId),
+            ...identityState
           };
           await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'AK');
           Object.assign(conversationState, latestInbound);
@@ -256,4 +354,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-
