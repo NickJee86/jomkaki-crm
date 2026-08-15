@@ -89,6 +89,12 @@ export function hasRecentDocumentAcknowledgement(state = {}, now = Date.now(), w
   return documentReply && Number.isFinite(lastAt) && Math.max(0, Number(now) - lastAt) < windowMs;
 }
 
+export function isStaleInboundMessage(receivedAt = '', latestInboundAt = '') {
+  const receivedTime = Date.parse(clean(receivedAt));
+  const latestTime = Date.parse(clean(latestInboundAt));
+  return Number.isFinite(receivedTime) && Number.isFinite(latestTime) && receivedTime < latestTime;
+}
+
 const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
   const left = clean(leftValue), right = clean(rightValue);
   if (Math.abs(left.length - right.length) > limit) return false;
@@ -619,6 +625,40 @@ export default async function handler(req, res) {
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
         const previousInboundAt = clean(lead?.['Last Inbound At']);
         let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1) : null;
+        const latestKnownInboundAt = [previousInboundAt, clean(conversationState?.['Last Customer Reply At'])]
+          .filter(value => Number.isFinite(Date.parse(value)))
+          .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || '';
+        const staleInbound = isStaleInboundMessage(receivedAt, latestKnownInboundAt);
+        if (staleInbound) {
+          await appendObject(token, 'Customer_Inbox', {
+            'Received At': receivedAt,
+            'Phone Number': phone,
+            'Customer Message': text,
+            'Attachment Type': ['image', 'document'].includes(clean(message.type).toLowerCase()) ? message.type : '',
+            'Message ID': message.id || makeId('MSG'),
+            Channel: 'WHATSAPP',
+            Source: 'META_CLOUD',
+            'Lead ID': clean(lead?.['Lead ID']),
+            'Message Type': message.type || 'text',
+            'Process Status': 'IGNORED_STALE_OR_REDELIVERED',
+            'AI Processed': 'TRUE',
+            'AI Processed At': new Date().toISOString(),
+            'Webhook ID': makeId('WEBHOOK'),
+            'Error Message': `No reply sent: an inbound message from ${receivedAt} arrived after the newer message from ${latestKnownInboundAt}.`,
+            'WhatsApp Number ID': numberId,
+            'WhatsApp Display Number': displayNumber || route['Display Number'],
+            'WABA ID': route['WABA ID'] || entry.id || '',
+            'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`,
+            'Webhook Source': 'META_CLOUD',
+            'Number Routing Status': 'IGNORED_STALE_OR_REDELIVERED',
+            'Internal Channel ID': channelId,
+            'Business Unit': routeBusinessUnit,
+            'Customer ID': clean(lead?.['Customer ID']),
+            'Team ID': teamId
+          });
+          if (message.id) existingMessageIds.add(clean(message.id));
+          continue;
+        }
         const human = requiresManager(text);
         const currentStep = clean(conversationState?.['Current Step']).toUpperCase();
         const mediaInbound = ['image', 'document'].includes(clean(message.type).toLowerCase());
@@ -653,6 +693,8 @@ export default async function handler(req, res) {
         } else {
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
           await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], { 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId }, 'AP');
+          lead['Last Inbound At'] = receivedAt;
+          lead['Last Customer Reply At'] = receivedAt;
         }
         const shouldLoadApplication = ['image', 'document'].includes(clean(message.type).toLowerCase()) || !!clean(conversationState?.['Application ID']);
         const applications = shouldLoadApplication ? await loadApplications() : [];
