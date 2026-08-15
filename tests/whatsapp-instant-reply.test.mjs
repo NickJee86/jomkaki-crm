@@ -149,9 +149,25 @@ test('customer model shorthand, spacing and small typo are recognised', () => {
   assert.equal(matchInstantProduct('y16zr', catalog).product.Model, 'Y16ZR');
   assert.equal(matchInstantProduct('y 16 zr', catalog).product.Model, 'Y16ZR');
   assert.equal(matchInstantProduct('y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('saya cari y16z', catalog).product.Model, 'Y16ZR');
   assert.equal(matchInstantProduct('rsx', catalog).product.Model, 'RS-X Winner');
   assert.equal(matchInstantProduct('nak rs x', catalog).product.Model, 'RS-X Winner');
   assert.equal(matchInstantProduct('nak ansuran murah', catalog).product, null);
+});
+
+test('the whole catalogue accepts natural customer shorthand instead of only selected examples', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-NVX', Brand: 'Yamaha', Model: 'NVX', Active: 'TRUE', 'Search Keywords': 'yamaha nvx scooter' },
+    { 'Catalog ID': 'MTR-HON-WAVE', Brand: 'Honda', Model: 'Wave Alpha', Active: 'TRUE', 'Search Keywords': 'honda wave alpha' },
+    { 'Catalog ID': 'MTR-HON-RS150R', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Search Keywords': 'honda rs150 rs150r' },
+    { 'Catalog ID': 'MTR-SYM-HUSKY', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky husky200' },
+    { 'Catalog ID': 'MTR-MODA-MOCA', Brand: 'MODA', Model: 'Moca', Active: 'TRUE', 'Search Keywords': 'moda moca' }
+  ];
+  assert.equal(matchInstantProduct('nak tengok nvx', catalog).product.Model, 'NVX');
+  assert.equal(matchInstantProduct('wave ada?', catalog).product.Model, 'Wave Alpha');
+  assert.equal(matchInstantProduct('rs150 berapa sebulan', catalog).product.Model, 'RS150R');
+  assert.equal(matchInstantProduct('husky ada stock ka', catalog).product.Model, 'Husky 200');
+  assert.equal(matchInstantProduct('saya minat moca', catalog).product.Model, 'Moca');
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
@@ -180,5 +196,17 @@ test('phone shorthand groups colour rows and identifies the requested model fami
   const match = matchInstantProduct('17pm', catalog);
   assert.equal(match.ambiguous, false);
   assert.equal(match.product.Model, 'iPhone 17 Pro Max');
+  assert.equal(matchInstantProduct('nak ip17pm', catalog).product.Model, 'iPhone 17 Pro Max');
+  assert.equal(matchInstantProduct('iphone 17 promx ada?', catalog).product.Model, 'iPhone 17 Pro Max');
 });
 
+test('phone shorthand can override a stale motor category without asking the customer to restart', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA' }, text: 'nak 17pm', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    handphoneCatalog: [{ 'Catalog ID': 'HP-17PM', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Active: 'TRUE', 'Search Keywords': 'iphone 17 pro max' }],
+    handphonePricing: [{ 'Catalog ID': 'HP-17PM', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 60 Months (RM)': '199' }]
+  });
+  assert.equal(decision.productUnit, 'HANDPHONE');
+  assert.match(decision.text, /RM199/);
+});
