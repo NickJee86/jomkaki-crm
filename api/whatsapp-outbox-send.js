@@ -26,6 +26,16 @@ export function buildMetaPayload(row = {}) {
     if (!name) throw new Error('Approved Meta template name is missing');
     return { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: clean(row.Language || 'en_US') } } };
   }
+  const imageUrl = clean(row['Image URL']);
+  const imageMessage = Boolean(imageUrl) || ['IMAGE', 'MOTOR_IMAGE', 'HANDPHONE_IMAGE', 'PRODUCT_IMAGE', 'SESSION_IMAGE'].includes(messageType);
+  if (imageMessage) {
+    if (!/^https:\/\//i.test(imageUrl)) throw new Error('Outbox image URL must use HTTPS');
+    const caption = clean(row['Image Caption'] || row['Image Caption (MS)'] || row['Message Text']).slice(0, 1024);
+    return {
+      messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'image',
+      image: { link: imageUrl, ...(caption ? { caption } : {}) }
+    };
+  }
   const body = clean(row['Message Text']);
   if (!body) throw new Error('Outbox message text is missing');
   return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } };
