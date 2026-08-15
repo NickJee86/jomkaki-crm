@@ -11,6 +11,39 @@ const retryableGoogleStatus = new Set([408, 425, 429, 500, 502, 503, 504]);
 const retryDelay = attempt => new Promise(resolve => setTimeout(resolve, [0, 80, 200, 450][attempt] ?? 450));
 const DOCUMENT_ACK_WINDOW_MS = 120000;
 const documentBatchAcknowledgements = new Map();
+const INBOUND_RESERVATION_TTL_MS = 5 * 60 * 1000;
+const inboundMessageReservations = globalThis.__JOMKAKI_INBOUND_RESERVATIONS__ ||= new Map();
+const sheetReadCache = globalThis.__JOMKAKI_SHEET_READ_CACHE__ ||= new Map();
+
+function reserveInboundMessage(messageId, now = Date.now()) {
+  const id = clean(messageId);
+  if (!id) return true;
+  for (const [key, reservedAt] of inboundMessageReservations) {
+    if (now - reservedAt > INBOUND_RESERVATION_TTL_MS) inboundMessageReservations.delete(key);
+  }
+  if (inboundMessageReservations.has(id)) return false;
+  inboundMessageReservations.set(id, now);
+  return true;
+}
+
+function releaseInboundMessage(messageId) {
+  const id = clean(messageId);
+  if (id) inboundMessageReservations.delete(id);
+}
+
+function sheetCacheTtl(range) {
+  if (/!1:1$/.test(range)) return 5 * 60 * 1000;
+  if (/^(?:WhatsApp_Number_Master|Branch_Master|Motor_Model_Catalog|Motor_Loan_Pricing|Handphone_Model_Catalog|Handphone_Loan_Pricing)!/.test(range)) return 30 * 1000;
+  if (/^Conversation_State!A1:AK2000$/.test(range)) return 1500;
+  return 0;
+}
+
+function invalidateSheetDataCache(sheet) {
+  const prefix = `${sheet}!`;
+  for (const key of sheetReadCache.keys()) {
+    if (key.startsWith(prefix) && !key.endsWith('!1:1')) sheetReadCache.delete(key);
+  }
+}
 const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
@@ -43,8 +76,13 @@ async function googleRequest(url, options = {}, label = 'Google Sheets request',
 }
 
 async function readSheet(token, range) {
+  const ttl = sheetCacheTtl(range);
+  const cached = ttl ? sheetReadCache.get(range) : null;
+  if (cached && Date.now() - cached.at < ttl) return cached.rows.map(row => [...row]);
   const response = await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`, { headers: { authorization: `Bearer ${token}` } }, `Unable to read ${range}`);
-  return (await response.json()).values || [];
+  const rows = (await response.json()).values || [];
+  if (ttl) sheetReadCache.set(range, { at: Date.now(), rows });
+  return rows.map(row => [...row]);
 }
 
 const objects = rows => {
@@ -56,6 +94,7 @@ async function appendObject(token, sheet, object) {
   const [headers = []] = await readSheet(token, `${sheet}!1:1`);
   const values = headers.map(header => object[header] ?? '');
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) }, `Unable to write ${sheet}`, 1);
+  invalidateSheetDataCache(sheet);
 }
 
 async function ensureHeaders(token, sheet, requiredHeaders) {
@@ -643,8 +682,19 @@ export default async function handler(req, res) {
   const expected = `sha256=${crypto.createHmac('sha256', secret).update(raw).digest('hex')}`;
   const supplied = Buffer.from(signature), calculated = Buffer.from(expected);
   if (supplied.length !== calculated.length || !crypto.timingSafeEqual(supplied, calculated)) return res.status(401).json({ ok: false });
+  let outboundSent = false;
+  const reservedMessageIds = [];
   try {
-    const payload = JSON.parse(raw.toString('utf8') || '{}'), token = await getAccessToken(req);
+    const payload = JSON.parse(raw.toString('utf8') || '{}');
+    const inboundMessages = (payload.entry || []).flatMap(entry => (entry.changes || []).flatMap(change => change.value?.messages || []));
+    if (!inboundMessages.length) return res.status(200).json({ ok: true, statusOnly: true });
+    for (const message of inboundMessages) {
+      if (!message.id) continue;
+      if (reserveInboundMessage(message.id)) reservedMessageIds.push(clean(message.id));
+      else message.__skipDuplicate = true;
+    }
+    if (!inboundMessages.some(message => !message.__skipDuplicate)) return res.status(200).json({ ok: true, duplicate: true });
+    const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
     const [leadRows, routeRows, branchRows, stateRows, inboxRows, documentRows] = await Promise.all([
       readSheet(token, 'Leads!A1:AP1000'),
@@ -675,7 +725,7 @@ export default async function handler(req, res) {
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
-        if (message.id && existingMessageIds.has(clean(message.id))) continue;
+        if (message.__skipDuplicate || (message.id && existingMessageIds.has(clean(message.id)))) continue;
         const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
         const contact = (value.contacts || []).find(item => digits(item.wa_id) === phone) || (value.contacts || [])[0] || {};
         const profileName = extractCustomerName(contact.profile?.name);
@@ -832,6 +882,7 @@ export default async function handler(req, res) {
         if (willReply) {
           instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
           if (instantResult.sent) {
+            outboundSent = true;
             const deliveredState = {
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
@@ -878,6 +929,8 @@ export default async function handler(req, res) {
     return res.status(200).json({ ok: true });
   } catch (error) {
     console.error(error);
+    if (outboundSent) return res.status(200).json({ ok: true, warning: 'POST_SEND_LOGGING_FAILED' });
+    for (const messageId of reservedMessageIds) releaseInboundMessage(messageId);
     return res.status(500).json({ ok: false });
   }
 }
