@@ -62,6 +62,7 @@ const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA',
 const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(value).toUpperCase()) ? clean(value).toUpperCase() : '';
 const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 const normalizedWords = value => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
 
 export function extractCustomerName(value = '') {
   let candidate = clean(value)
@@ -172,6 +173,122 @@ export function buildInitialConversationState({ lead = {}, application = {}, rou
   };
 }
 
+const instantLanguage = text => {
+  const value = clean(text);
+  if (/[\u3400-\u9fff]/u.test(value)) return 'ZH';
+  if (/\b(hai|saya|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari)\b/i.test(value)) return 'MS';
+  return 'EN';
+};
+
+const instantCopy = (language, key, values = {}) => {
+  const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
+  const amount = customerAmount(values.amount), tenure = clean(values.tenure);
+  const copies = {
+    EN: {
+      NAME: 'Hi, welcome to JomKaki Motor. May I know your name?',
+      NAME_RETRY: 'May I know the name I should use for you?',
+      LOCATION: `Nice to meet you${name ? `, ${name}` : ''}. Which city or state are you from?`,
+      LOCATION_RETRY: 'Which city or state are you currently staying in?',
+      PRODUCT: `Thank you${location ? `, noted ${location}` : ''}. Are you looking for a motorcycle or phone? You can tell me the model directly.`,
+      MODEL: 'Which motorcycle or phone model are you interested in? You can send me the model name directly.',
+      DOCUMENT: 'Received. I will check this document. You may continue sending the remaining documents here one by one.',
+      QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
+    },
+    MS: {
+      NAME: 'Hai, selamat datang ke JomKaki Motor. Boleh saya tahu nama anda?',
+      NAME_RETRY: 'Boleh saya tahu nama yang patut saya gunakan untuk anda?',
+      LOCATION: `Salam kenal${name ? `, ${name}` : ''}. Anda tinggal di bandar atau negeri mana?`,
+      LOCATION_RETRY: 'Boleh beritahu anda sekarang tinggal di bandar atau negeri mana?',
+      PRODUCT: `Terima kasih${location ? `, lokasi ${location} sudah dicatat` : ''}. Anda sedang cari motor atau telefon? Boleh terus beritahu model yang anda mahu.`,
+      MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
+      DOCUMENT: 'Dokumen sudah diterima. Saya akan semak dahulu. Anda boleh terus hantar dokumen lain satu per satu di sini.',
+      QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
+    },
+    ZH: {
+      NAME: '你好，欢迎联系 JomKaki Motor。请问我应该怎么称呼你？',
+      NAME_RETRY: '请问可以告诉我你的名字吗？',
+      LOCATION: `很高兴认识你${name ? `，${name}` : ''}。请问你目前住在哪个城市或州属？`,
+      LOCATION_RETRY: '请问你目前住在哪个城市或州属？',
+      PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
+      MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
+      DOCUMENT: '文件已经收到，我会先检查。其余文件可以继续在这里逐份发送。',
+      QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。申请店内贷款需要 MyKad 正反面，以及最新薪水单或 EPF 记录。如果这个方案适合你，可以在这里逐份发送文件。`
+    }
+  };
+  return copies[language]?.[key] || copies.EN[key] || '';
+};
+
+const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
+
+const findInstantProduct = (text, catalogs = []) => {
+  const query = normalizedWords(text);
+  if (!query) return null;
+  return catalogs.filter(row => truth(row.Active)).map(row => {
+    const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand);
+    const keywords = normalizedWords(row['Search Keywords']);
+    let score = model && query.includes(model) ? 1000 + model.length : 0;
+    if (brand && query.includes(brand)) score += 100;
+    for (const keyword of keywords.split(' ').filter(word => word.length > 2)) if (query.includes(keyword)) score += 3;
+    return { row, score };
+  }).filter(match => match.score >= 1000).sort((a, b) => b.score - a.score)[0]?.row || null;
+};
+
+const instantRate = (product, pricingRows = [], unit = '', region = '') => {
+  if (!product) return null;
+  const normalizedRegion = canonicalRegion(region);
+  const candidates = pricingRows.filter(row => clean(row['Catalog ID']) === clean(product['Catalog ID']) && truth(row.Active) && ['APPROVED', ''].includes(clean(row['Quote Approval Status']).toUpperCase()));
+  const ranked = candidates.sort((a, b) => {
+    const zone = row => clean(row['Price Zone']).toUpperCase();
+    const score = row => canonicalRegion(zone(row)) === normalizedRegion ? 3 : zone(row) === 'ALL_BRANCHES' || zone(row) === 'ALL' ? 2 : 1;
+    return score(b) - score(a);
+  });
+  const row = ranked[0];
+  if (!row) return null;
+  const rates = canonicalBusinessUnit(unit) === 'HANDPHONE'
+    ? [['60 months', row['Monthly 60 Months (RM)']], ['48 months', row['Monthly 48 Months (RM)']], ['36 months', row['Monthly 36 Months (RM)']], ['24 months', row['Monthly 24 Months (RM)']], ['12 months', row['Monthly 12 Months (RM)']]]
+    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', row['Monthly 4 Years (RM)']], ['3 years', row['Monthly 3 Years (RM)']]];
+  const selected = rates.find(([, amount]) => customerAmount(amount));
+  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
+};
+
+export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [] } = {}) {
+  const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
+  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
+  if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
+  if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
+  if (step === 'STEP_01_NAME') {
+    const name = extractCustomerName(text);
+    return name
+      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
+      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
+  }
+  if (step === 'STEP_02_LOCATION') {
+    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
+    return location
+      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
+      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
+  }
+  const unit = productUnitFromText(text, state['Product Category'] || routeBusinessUnit) || 'MOTOR';
+  const catalogs = unit === 'HANDPHONE' ? handphoneCatalog : motorCatalog;
+  const pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
+  const product = findInstantProduct(text, catalogs);
+  if (product) {
+    const rate = instantRate(product, pricing, unit, lead.Region || routeRegion);
+    if (!rate) return { handled: false };
+    const approvedImage = truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
+    return {
+      handled: true,
+      nextStep: 'STEP_04_DOCUMENTS',
+      productUnit: unit,
+      product,
+      imageUrl: approvedImage,
+      text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
+    };
+  }
+  if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
+  return { handled: false };
+}
+
 export function instantChannelCredentials(route = {}, env = process.env) {
   const channelId = clean(route['Internal Channel ID']);
   const phoneNumberId = clean(route['Phone Number ID']);
@@ -179,6 +296,30 @@ export function instantChannelCredentials(route = {}, env = process.env) {
   const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
   if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
   return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
+}
+
+async function sendInstantSalesMessage({ route, phone, decision }) {
+  if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
+  const binding = instantChannelCredentials(route);
+  const imageUrl = clean(decision.imageUrl);
+  const payload = imageUrl
+    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
+    : { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: clean(decision.text) } };
+  const response = await fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${binding.accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({}));
+  return {
+    sent: response.ok,
+    binding,
+    providerMessageId: clean(result.messages?.[0]?.id),
+    error: response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
+    messageType: imageUrl
+      ? (decision.productUnit === 'HANDPHONE' ? 'HANDPHONE_IMAGE' : 'MOTOR_IMAGE')
+      : 'TEXT'
+  };
 }
 
 async function sendImmediateAcknowledgement(token, { route, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
@@ -237,12 +378,26 @@ export default async function handler(req, res) {
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}'), token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const leads = objects(await readSheet(token, 'Leads!A1:AP1000'));
-    const applications = objects(await readSheet(token, 'Applications!A1:CC1000'));
-    const routes = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));
-    const branches = objects(await readSheet(token, 'Branch_Master!A1:S1000'));
-    const conversationStates = objects(await readSheet(token, 'Conversation_State!A1:AK2000'));
-    const existingMessageIds = new Set(objects(await readSheet(token, 'Customer_Inbox!A1:AC1200')).map(row => clean(row['Message ID'])).filter(Boolean));
+    const [leadRows, applicationRows, routeRows, branchRows, stateRows, inboxRows, motorCatalogRows, motorPricingRows, handphoneCatalogRows, handphonePricingRows] = await Promise.all([
+      readSheet(token, 'Leads!A1:AP1000'),
+      readSheet(token, 'Applications!A1:CC1000'),
+      readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
+      readSheet(token, 'Branch_Master!A1:S1000'),
+      readSheet(token, 'Conversation_State!A1:AK2000'),
+      readSheet(token, 'Customer_Inbox!A1:AC1200'),
+      readSheet(token, 'Motor_Model_Catalog!A1:Q1000'),
+      readSheet(token, 'Motor_Loan_Pricing!A1:Z1000'),
+      readSheet(token, 'Handphone_Model_Catalog!A1:AB1000'),
+      readSheet(token, 'Handphone_Loan_Pricing!A1:AO1000')
+    ]);
+    const leads = objects(leadRows);
+    const applications = objects(applicationRows);
+    const routes = objects(routeRows);
+    const branches = objects(branchRows);
+    const conversationStates = objects(stateRows);
+    const motorCatalog = objects(motorCatalogRows), motorPricing = objects(motorPricingRows);
+    const handphoneCatalog = objects(handphoneCatalogRows), handphonePricing = objects(handphonePricingRows);
+    const existingMessageIds = new Set(objects(inboxRows).map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
@@ -260,6 +415,14 @@ export default async function handler(req, res) {
         const routeUsable = !!channelId && routeBusinessUnit !== 'UNASSIGNED' && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
         const previousInboundAt = clean(lead?.['Last Inbound At']);
+        let conversationState = lead ? conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : null;
+        const human = requiresManager(text);
+        const instantDecision = buildInstantSalesDecision({
+          state: conversationState || {}, lead: lead || {}, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
+          motorCatalog, motorPricing, handphoneCatalog, handphonePricing
+        });
+        let instantResult = { sent: false };
+        if (routeUsable && !human && instantDecision.handled) instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
@@ -272,9 +435,15 @@ export default async function handler(req, res) {
           await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], { 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId }, 'AP');
         }
         const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
-        let conversationState = conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID']));
+        conversationState = conversationState || conversationStates.find(row => clean(row['Lead ID']) === clean(lead['Lead ID']));
         if (!conversationState) {
           conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
+          if (instantResult.sent) {
+            conversationState['Current Step'] = instantDecision.nextStep || conversationState['Current Step'];
+            conversationState['Last AI Reply'] = clean(instantDecision.text);
+            conversationState['Last AI Reply At'] = new Date().toISOString();
+            conversationState['Product Category'] = clean(instantDecision.productUnit || routeBusinessUnit);
+          }
           await appendObject(token, 'Conversation_State', conversationState);
           conversationStates.push(conversationState);
         } else {
@@ -324,14 +493,33 @@ export default async function handler(req, res) {
             'Business Unit': clean(routeBusinessUnit),
             'Customer ID': clean(lead['Customer ID']),
             'Team ID': clean(teamId),
+            ...(instantResult.sent ? {
+              'Current Step': clean(instantDecision.nextStep || conversationState['Current Step']),
+              'Last AI Reply': clean(instantDecision.text),
+              'Last AI Reply At': new Date().toISOString(),
+              'Product Category': clean(instantDecision.productUnit || conversationState['Product Category'] || routeBusinessUnit)
+            } : {}),
             ...identityState
           };
           await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'AK');
           Object.assign(conversationState, latestInbound);
         }
-        const human = requiresManager(text);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
-        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : 'NEW', 'AI Processed': 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': routeBusinessUnit, 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        if (instantResult.sent || instantResult.error) {
+          const timestamp = new Date().toISOString();
+          const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
+          const outboxId = instantDecision.imageUrl && message.id ? `${imageOutboxPrefix}-${message.id}` : makeId('OUT');
+          await appendObject(token, 'Message_Outbox', {
+            'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
+            'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantDecision.text), 'Image URL': clean(instantDecision.imageUrl),
+            'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
+            'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
+            'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
+            'Reply To Message ID': message.id || '', 'Send Routing Status': `${instantResult.sent ? 'WEBHOOK_INSTANT_SALES' : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
+            'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
+          });
+        }
         if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'AC');
         const media = message.document || message.image;
         if (media?.id) {
@@ -354,3 +542,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
