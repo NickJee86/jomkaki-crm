@@ -381,7 +381,7 @@ const documentReviewHeaders = ['Uploaded By', 'Reviewed By', 'Reviewed At'];
 const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
-  return digits;
+  return /^601\d{8,9}$/.test(digits) ? digits : '';
 };
 
 const channelRange = 'WhatsApp_Number_Master!A1:AC1000';
@@ -1399,7 +1399,8 @@ export default async function handler(req, res) {
           const unassignedHandover = inboxRecords.some(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()) && clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF' && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId)));
           if (session.role === 'STAFF' && unassignedHandover) return res.status(403).json({ live: false, error: 'This human handover is controlled by a Manager and has not been assigned to Staff.' });
           const phone = whatsappPhone(body.phone), message = clean(body.message);
-          if (!phone || message.length < 1 || message.length > 4000) throw new Error('A valid phone number and message are required');
+          if (!phone) throw new Error('This customer record has no valid Malaysian WhatsApp number. Enter the real customer mobile number, for example 0147952387 or +60147952387.');
+          if (message.length < 1 || message.length > 4000) throw new Error('Enter a message between 1 and 4000 characters.');
           const messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT', templateName = clean(body.templateName), language = clean(body.language) || 'en_US';
           if (messageType === 'TEMPLATE' && !templateName) throw new Error('An approved Meta template name is required');
           const outboxId = makeId('OUT'), timestamp = now();
