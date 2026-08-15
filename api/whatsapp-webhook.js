@@ -183,7 +183,7 @@ const instantLanguage = text => {
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), tenure = clean(values.tenure);
+  const amount = customerAmount(values.amount), tenure = clean(values.tenure), options = clean(values.options);
   const copies = {
     EN: {
       NAME: 'Hi, welcome to JomKaki Motor. May I know your name?',
@@ -192,6 +192,7 @@ const instantCopy = (language, key, values = {}) => {
       LOCATION_RETRY: 'Which city or state are you currently staying in?',
       PRODUCT: `Thank you${location ? `, noted ${location}` : ''}. Are you looking for a motorcycle or phone? You can tell me the model directly.`,
       MODEL: 'Which motorcycle or phone model are you interested in? You can send me the model name directly.',
+      MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       DOCUMENT: 'Received. I will check this document. You may continue sending the remaining documents here one by one.',
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
@@ -202,6 +203,7 @@ const instantCopy = (language, key, values = {}) => {
       LOCATION_RETRY: 'Boleh beritahu anda sekarang tinggal di bandar atau negeri mana?',
       PRODUCT: `Terima kasih${location ? `, lokasi ${location} sudah dicatat` : ''}. Anda sedang cari motor atau telefon? Boleh terus beritahu model yang anda mahu.`,
       MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
+      MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       DOCUMENT: 'Dokumen sudah diterima. Saya akan semak dahulu. Anda boleh terus hantar dokumen lain satu per satu di sini.',
       QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
     },
@@ -212,6 +214,7 @@ const instantCopy = (language, key, values = {}) => {
       LOCATION_RETRY: '请问你目前住在哪个城市或州属？',
       PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
+      MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       DOCUMENT: '文件已经收到，我会先检查。其余文件可以继续在这里逐份发送。',
       QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。申请店内贷款需要 MyKad 正反面，以及最新薪水单或 EPF 记录。如果这个方案适合你，可以在这里逐份发送文件。`
     }
@@ -221,18 +224,75 @@ const instantCopy = (language, key, values = {}) => {
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 
-const findInstantProduct = (text, catalogs = []) => {
-  const query = normalizedWords(text);
-  if (!query) return null;
-  return catalogs.filter(row => truth(row.Active)).map(row => {
-    const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand);
-    const keywords = normalizedWords(row['Search Keywords']);
-    let score = model && query.includes(model) ? 1000 + model.length : 0;
-    if (brand && query.includes(brand)) score += 100;
-    for (const keyword of keywords.split(' ').filter(word => word.length > 2)) if (query.includes(keyword)) score += 3;
-    return { row, score };
-  }).filter(match => match.score >= 1000).sort((a, b) => b.score - a.score)[0]?.row || null;
+const modelAliasStopWords = new Set(['apple', 'iphone', 'phone', 'handphone', 'telefon', 'motor', 'model', 'official', 'standard', 'baru', 'new', 'pro', 'max', 'silver', 'black', 'white', 'blue', 'orange', 'gold', 'green', 'red', 'grey', 'gray']);
+const compactModelText = value => normalizedWords(value).replace(/\s+/g, '');
+const oneEditAway = (left, right) => {
+  if (Math.abs(left.length - right.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < left.length && j < right.length) {
+    if (left[i] === right[j]) { i += 1; j += 1; continue; }
+    if (++edits > 1) return false;
+    if (left.length > right.length) i += 1;
+    else if (right.length > left.length) j += 1;
+    else { i += 1; j += 1; }
+  }
+  return edits + Number(i < left.length || j < right.length) <= 1;
 };
+
+const productAliases = row => {
+  const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' ').filter(Boolean);
+  const aliases = new Set([model, `${brand} ${model}`.trim()]);
+  for (let start = 0; start < words.length; start += 1) {
+    for (let end = start + 1; end <= words.length; end += 1) {
+      const phrase = words.slice(start, end).join(' ');
+      if (compactModelText(phrase).length >= 3) aliases.add(phrase);
+    }
+    const shorthand = words.slice(start).map(word => /^\d/.test(word) ? word : word[0]).join('');
+    if (shorthand.length >= 3) aliases.add(shorthand);
+  }
+  for (const word of normalizedWords(row['Search Keywords']).split(' ')) {
+    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !modelAliasStopWords.has(word)) aliases.add(word);
+  }
+  for (const word of words) {
+    const match = word.match(/^([a-z]{2,})(\d{2,})([a-z]*)$/i);
+    if (match) {
+      aliases.add(match[1]);
+      aliases.add(match[2]);
+    }
+  }
+  return [...aliases].filter(alias => compactModelText(alias).length >= 2);
+};
+
+export function matchInstantProduct(text, catalogs = []) {
+  const query = normalizedWords(text), compactQuery = compactModelText(text);
+  if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
+  const matches = catalogs.filter(row => truth(row.Active)).map(row => {
+    const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
+    let score = 0;
+    if (query === model) score = 2400;
+    else if (compactQuery === compactModel) score = 2300;
+    else if (model && includesTerm(query, model)) score = 2200;
+    else if (compactModel.length >= 4 && compactQuery.includes(compactModel)) score = 2100;
+    for (const alias of productAliases(row)) {
+      const compactAlias = compactModelText(alias);
+      if (query === alias || compactQuery === compactAlias) score = Math.max(score, 1600 + compactAlias.length);
+      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, 1400 + compactAlias.length);
+      else if (compactAlias.length >= 3 && compactQuery.includes(compactAlias)) score = Math.max(score, 1200 + compactAlias.length);
+      else if (compactQuery.length >= 4 && compactAlias.length >= 4 && oneEditAway(compactQuery, compactAlias)) score = Math.max(score, 1000 + compactAlias.length);
+    }
+    return { row, score, modelKey: normalizedWords(row.Model) };
+  }).filter(match => match.score >= 1000);
+  const bestByModel = new Map();
+  for (const match of matches) if (!bestByModel.has(match.modelKey) || bestByModel.get(match.modelKey).score < match.score) bestByModel.set(match.modelKey, match);
+  const ranked = [...bestByModel.values()].sort((a, b) => b.score - a.score || clean(a.row.Model).localeCompare(clean(b.row.Model)));
+  if (!ranked.length) return { product: null, options: [], ambiguous: false };
+  const close = ranked.filter(match => match.score >= ranked[0].score - 80);
+  if (close.length > 1) {
+    const options = close.slice(0, 4).map(match => `${clean(match.row.Brand)} ${clean(match.row.Model)}`.trim());
+    return { product: null, options, ambiguous: true };
+  }
+  return { product: ranked[0].row, options: [], ambiguous: false };
+}
 
 const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   if (!product) return null;
@@ -247,58 +307,7 @@ const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   if (!row) return null;
   const rates = canonicalBusinessUnit(unit) === 'HANDPHONE'
     ? [['60 months', row['Monthly 60 Months (RM)']], ['48 months', row['Monthly 48 Months (RM)']], ['36 months', row['Monthly 36 Months (RM)']], ['24 months', row['Monthly 24 Months (RM)']], ['12 months', row['Monthly 12 Months (RM)']]]
-    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', row['Monthly 4 Years (RM)']], ['3 years', row['Monthly 3 Years (RM)']]];
-  const selected = rates.find(([, amount]) => customerAmount(amount));
-  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
-};
-
-export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [] } = {}) {
-  const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
-  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
-  if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
-  if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
-  const unit = productUnitFromText(text, state['Product Category'] || routeBusinessUnit) || 'MOTOR';
-  const catalogs = unit === 'HANDPHONE' ? handphoneCatalog : motorCatalog;
-  const pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-  const product = findInstantProduct(text, catalogs);
-  const knownName = clean(state['Customer Name'] || lead['Customer Name']);
-  const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion);
-  if (product && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
-    const rate = instantRate(product, pricing, unit, lead.Region || routeRegion);
-    if (!rate) return { handled: false };
-    const approvedImage = truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
-    return {
-      handled: true,
-      nextStep: 'STEP_04_DOCUMENTS',
-      productUnit: unit,
-      product,
-      imageUrl: approvedImage,
-      text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
-    };
-  }
-  if (step === 'STEP_01_NAME') {
-    const name = extractCustomerName(text);
-    return name
-      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
-      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
-  }
-  if (step === 'STEP_02_LOCATION') {
-    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
-    return location
-      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
-      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
-  }
-  if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
-  return { handled: false };
-}
-
-export function instantChannelCredentials(route = {}, env = process.env) {
-  const channelId = clean(route['Internal Channel ID']);
-  const phoneNumberId = clean(route['Phone Number ID']);
-  const credentialKey = credentialPrefix(route['Credential Key'] || channelId);
-  const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
-  if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
-  return { chann…91 tokens truncated…antChannelCredentials(route);
+    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', r…1123 tokens truncated…antChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
   const payload = imageUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
