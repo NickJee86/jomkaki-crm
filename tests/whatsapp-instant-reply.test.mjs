@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, hasRecentDocumentAcknowledgement, instantChannelCredentials, isStaleInboundMessage, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -55,7 +56,9 @@ test('a rapid document batch receives one acknowledgement while every file stays
   const first = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_04_DOCUMENTS' }, text: '[document]', messageType: 'document' });
   assert.equal(first.handled, true);
   assert.equal(first.documentQueued, true);
-  assert.match(first.text, /Dokumen sudah diterima/i);
+  assert.match(first.text, /Dokumen (?:anda )?sudah diterima/i);
+  assert.match(first.text, /tak perlu hantar semula/i);
+  assert.doesNotMatch(first.text, /satu per satu/i);
 
   const recentState = { 'Last AI Message': first.text, 'Last AI Message At': '2026-08-15T02:00:00.000Z' };
   assert.equal(hasRecentDocumentAcknowledgement(recentState, Date.parse('2026-08-15T02:01:00.000Z')), true);
@@ -65,6 +68,65 @@ test('a rapid document batch receives one acknowledgement while every file stays
   assert.equal(next.text, '');
   assert.equal(hasRecentDocumentAcknowledgement(recentState, Date.parse('2026-08-15T02:03:00.000Z')), false);
   assert.match(source, /AI_DOCUMENT_QUEUED/);
+});
+
+test('document follow-up questions receive a useful reply instead of silence', () => {
+  const documents = [
+    { 'Message ID': 'm1', 'File Name': 'PROOF_OF_IDENTITY_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm2', 'File Name': 'PAYSLIPS_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm3', 'File Name': 'EPF_STATEMENT_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm4', 'File Name': 'BANK_STATEMENT_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm5', 'File Name': 'PROOF_OF_ADDRESS_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm6', 'File Name': 'PROOF_OF_IDENTITY_123.pdf', 'Document Type': 'UNCLASSIFIED', 'Verification Status': 'PENDING_AI' }
+  ];
+  assert.equal(isDocumentStatusQuestion('dah hantar semua, apa lagi perlu?'), true);
+  const decision = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_04_DOCUMENTS' }, text: 'dah hantar semua, apa lagi perlu?', messageType: 'text', documents });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /sudah terima 5 fail/i);
+  assert.match(decision.text, /semakan masih berjalan/i);
+  assert.match(decision.text, /tak perlu hantar semula/i);
+});
+
+test('document progress lists only the missing requirement after verification', () => {
+  const reply = buildDocumentProgressReply('MS', [
+    { 'Message ID': 'm1', 'Document Type': 'IC_FRONT', 'Verification Status': 'AI_VERIFIED', 'Quality Status': 'GOOD' },
+    { 'Message ID': 'm2', 'Document Type': 'IC_BACK', 'Verification Status': 'AI_VERIFIED', 'Quality Status': 'GOOD' }
+  ]);
+  assert.match(reply, /slip gaji atau penyata EPF/i);
+  assert.doesNotMatch(reply, /IC depan dan IC belakang/i);
+});
+
+test('known customer document filenames get a safe preliminary classification', () => {
+  assert.equal(inferDocumentTypeFromFileName('PROOF_OF_IDENTITY_1780477282198.pdf'), 'IDENTITY_DOCUMENT');
+  assert.equal(inferDocumentTypeFromFileName('PAYSLIPS_1780477332925.pdf'), 'PAYSLIP');
+  assert.equal(inferDocumentTypeFromFileName('EPF_STATEMENT_1780471763828.pdf'), 'EPF_STATEMENT');
+  assert.equal(inferDocumentTypeFromFileName('holiday-photo.jpg'), 'UNCLASSIFIED');
+});
+
+test('automatic WhatsApp application binds the lead, product and channel', () => {
+  const application = buildAutomaticApplication({
+    applicationId: 'APP-AUTO-1',
+    receivedAt: '2026-08-15T03:00:00.000Z',
+    lead: { 'Lead ID': 'LEAD-1', 'Customer ID': 'CUS-1', 'Customer Name': 'Amin', 'Phone Number': '60123456789', Region: 'EAST_MALAYSIA', 'Selected Branch ID': 'BR-BTU', 'Team ID': 'TEAM-BTU' },
+    state: { 'Customer Name': 'Amin' },
+    decision: { productUnit: 'MOTOR', product: { Brand: 'Yamaha', Model: 'NMAX V3', Variant: 'Standard' } },
+    channelId: 'JKM-WA-EAST-01'
+  });
+  assert.equal(application['Application ID'], 'APP-AUTO-1');
+  assert.equal(application['Lead ID'], 'LEAD-1');
+  assert.equal(application['Origin WhatsApp Channel ID'], 'JKM-WA-EAST-01');
+  assert.equal(application['Product Model'], 'NMAX V3');
+  assert.equal(application['Current Stage'], 'DOCUMENT_COLLECTION');
+});
+
+test('signed WhatsApp media proxy URLs expire and cannot be forged', () => {
+  const url = buildMediaProxyUrl({ mediaId: 'MEDIA-1', channelId: 'JKM-WA-EAST-01', credentialKey: 'WHATSAPP_EAST_01', expires: 2000, secret: 'test-secret', baseUrl: 'https://crm.example.test' });
+  const parsed = new URL(url);
+  const query = Object.fromEntries(parsed.searchParams.entries());
+  assert.equal(verifyMediaProxyQuery(query, 'test-secret', 1000).valid, true);
+  assert.equal(verifyMediaProxyQuery({ ...query, id: 'MEDIA-2' }, 'test-secret', 1000).valid, false);
+  assert.equal(verifyMediaProxyQuery(query, 'test-secret', 3000).valid, false);
 });
 
 test('instant channel credentials remain strict even though webhook acknowledgement is disabled', () => {
