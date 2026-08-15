@@ -9,6 +9,8 @@ const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
 const retryableGoogleStatus = new Set([408, 425, 429, 500, 502, 503, 504]);
 const retryDelay = attempt => new Promise(resolve => setTimeout(resolve, [0, 80, 200, 450][attempt] ?? 450));
+const DOCUMENT_ACK_WINDOW_MS = 120000;
+const documentBatchAcknowledgements = new Map();
 const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
@@ -79,6 +81,13 @@ const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(val
 const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 const normalizedWords = value => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
+
+export function hasRecentDocumentAcknowledgement(state = {}, now = Date.now(), windowMs = DOCUMENT_ACK_WINDOW_MS) {
+  const lastMessage = clean(state['Last AI Message']);
+  const lastAt = Date.parse(clean(state['Last AI Message At']));
+  const documentReply = /^(?:Received\. I will check this document|Dokumen sudah diterima|文件已经收到)/i.test(lastMessage);
+  return documentReply && Number.isFinite(lastAt) && Math.max(0, Number(now) - lastAt) < windowMs;
+}
 
 const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
   const left = clean(leftValue), right = clean(rightValue);
@@ -411,9 +420,11 @@ const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
 };
 
-export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [] } = {}) {
+export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], suppressDocumentAcknowledgement = false } = {}) {
   const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
-  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
+  if (['image', 'document'].includes(clean(messageType).toLowerCase())) return suppressDocumentAcknowledgement
+    ? { handled: false, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: '' }
+    : { handled: true, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
   if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
   const explicitUnit = productUnitFromText(text, ''), fallbackUnit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit);
@@ -610,14 +621,27 @@ export default async function handler(req, res) {
         let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1) : null;
         const human = requiresManager(text);
         const currentStep = clean(conversationState?.['Current Step']).toUpperCase();
+        const mediaInbound = ['image', 'document'].includes(clean(message.type).toLowerCase());
+        const documentAckKey = `${channelId || numberId || 'UNROUTED'}:${phone}`;
+        const nowMs = Date.now();
+        if (documentBatchAcknowledgements.size > 500) {
+          for (const [key, timestamp] of documentBatchAcknowledgements) if (nowMs - timestamp >= DOCUMENT_ACK_WINDOW_MS) documentBatchAcknowledgements.delete(key);
+        }
+        const memoryDocumentAckAt = documentBatchAcknowledgements.get(documentAckKey) || 0;
+        const suppressDocumentAcknowledgement = mediaInbound && (
+          nowMs - memoryDocumentAckAt < DOCUMENT_ACK_WINDOW_MS || hasRecentDocumentAcknowledgement(conversationState || {}, nowMs)
+        );
+        const documentAckReserved = mediaInbound && !suppressDocumentAcknowledgement;
+        if (documentAckReserved) documentBatchAcknowledgements.set(documentAckKey, nowMs);
         const locationConfirmed = !!clean(lead?.['City or Area'] || lead?.State || conversationState?.['Selected Branch ID']);
         const needsCatalog = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(currentStep) || locationConfirmed;
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const instantDecision = buildInstantSalesDecision({
           state: conversationState || {}, lead: lead || {}, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
-          ...catalogData
+          ...catalogData, suppressDocumentAcknowledgement
         });
         const willReply = routeUsable && !human && instantDecision.handled;
+        if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
         let instantResult = { sent: false };
         if (!lead) {
           const timestamp = new Date().toISOString();
@@ -711,8 +735,9 @@ export default async function handler(req, res) {
             Object.assign(conversationState, deliveredState);
           }
         }
+        if (documentAckReserved && !instantResult.sent) documentBatchAcknowledgements.delete(documentAckKey);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
-        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': ['image', 'document'].includes(message.type) ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
           const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
