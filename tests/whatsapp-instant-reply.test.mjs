@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, hasRecentDocumentAcknowledgement, instantChannelCredentials, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, hasRecentDocumentAcknowledgement, instantChannelCredentials, isStaleInboundMessage, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -41,6 +41,14 @@ test('webhook persists the next conversation step before sending the reply', () 
   assert.ok(sendIndex > persistIndex);
   assert.match(source, /'Last AI Message': clean\(instantDecision\.text\)/);
   assert.doesNotMatch(source, /'Last AI Reply'/);
+});
+
+test('an older Meta delivery can be recorded but must never receive a reply', () => {
+  assert.equal(isStaleInboundMessage('2026-08-15T00:58:51.000Z', '2026-08-15T02:14:16.000Z'), true);
+  assert.equal(isStaleInboundMessage('2026-08-15T02:14:16.000Z', '2026-08-15T02:14:16.000Z'), false);
+  assert.equal(isStaleInboundMessage('2026-08-15T02:15:00.000Z', '2026-08-15T02:14:16.000Z'), false);
+  assert.match(source, /IGNORED_STALE_OR_REDELIVERED/);
+  assert.match(source, /if \(staleInbound\)[\s\S]*?continue;/);
 });
 
 test('a rapid document batch receives one acknowledgement while every file stays queued', () => {
