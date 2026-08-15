@@ -7,6 +7,8 @@ const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const clean = value => String(value ?? '').trim();
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+const retryableGoogleStatus = new Set([408, 425, 429, 500, 502, 503, 504]);
+const retryDelay = attempt => new Promise(resolve => setTimeout(resolve, [0, 80, 200, 450][attempt] ?? 450));
 const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
 const columnName = index => {
   let name = '';
@@ -20,9 +22,26 @@ async function rawBody(req) {
   return Buffer.concat(chunks);
 }
 
+async function googleRequest(url, options = {}, label = 'Google Sheets request', maxAttempts = 4) {
+  let lastError;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt) await retryDelay(attempt);
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      const detail = clean(await response.text()).slice(0, 240);
+      lastError = new Error(`${label} failed (${response.status})${detail ? `: ${detail}` : ''}`);
+      if (!retryableGoogleStatus.has(response.status)) throw lastError;
+    } catch (error) {
+      lastError = error;
+      if (attempt === maxAttempts - 1 || /failed \((?:400|401|403|404)\)/.test(clean(error?.message))) throw error;
+    }
+  }
+  throw lastError || new Error(`${label} failed`);
+}
+
 async function readSheet(token, range) {
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`, { headers: { authorization: `Bearer ${token}` } });
-  if (!response.ok) throw new Error(`Unable to read ${range}`);
+  const response = await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(range)}`, { headers: { authorization: `Bearer ${token}` } }, `Unable to read ${range}`);
   return (await response.json()).values || [];
 }
 
@@ -34,8 +53,7 @@ const objects = rows => {
 async function appendObject(token, sheet, object) {
   const [headers = []] = await readSheet(token, `${sheet}!1:1`);
   const values = headers.map(header => object[header] ?? '');
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
-  if (!response.ok) throw new Error(`Unable to write ${sheet}`);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) }, `Unable to write ${sheet}`, 1);
 }
 
 async function ensureHeaders(token, sheet, requiredHeaders) {
@@ -43,8 +61,7 @@ async function ensureHeaders(token, sheet, requiredHeaders) {
   const missing = requiredHeaders.filter(header => !headers.includes(header));
   if (!missing.length) return;
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) });
-  if (!response.ok) throw new Error(`Unable to extend ${sheet} headers`);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
 }
 
 async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
@@ -53,8 +70,7 @@ async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z'
   if (rowIndex < 1) return;
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
   if (!data.length) return;
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
-  if (!response.ok) throw new Error(`Unable to update ${sheet}`);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, `Unable to update ${sheet}`);
 }
 
 const truth = value => clean(value).toUpperCase() === 'TRUE';
