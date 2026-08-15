@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, instantChannelCredentials, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, extractCustomerName, hasRecentDocumentAcknowledgement, instantChannelCredentials, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -12,14 +12,14 @@ const route = {
 };
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
+  const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /å·²æ”¶åˆ°/);
+  assert.match(chinese, /已收到/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /received/);
   [chinese, malay, english].forEach(message => {
-    assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i);
+    assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i);
     assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
   });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
@@ -41,6 +41,22 @@ test('webhook persists the next conversation step before sending the reply', () 
   assert.ok(sendIndex > persistIndex);
   assert.match(source, /'Last AI Message': clean\(instantDecision\.text\)/);
   assert.doesNotMatch(source, /'Last AI Reply'/);
+});
+
+test('a rapid document batch receives one acknowledgement while every file stays queued', () => {
+  const first = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_04_DOCUMENTS' }, text: '[document]', messageType: 'document' });
+  assert.equal(first.handled, true);
+  assert.equal(first.documentQueued, true);
+  assert.match(first.text, /Dokumen sudah diterima/i);
+
+  const recentState = { 'Last AI Message': first.text, 'Last AI Message At': '2026-08-15T02:00:00.000Z' };
+  assert.equal(hasRecentDocumentAcknowledgement(recentState, Date.parse('2026-08-15T02:01:00.000Z')), true);
+  const next = buildInstantSalesDecision({ state: recentState, text: '[document]', messageType: 'document', suppressDocumentAcknowledgement: true });
+  assert.equal(next.handled, false);
+  assert.equal(next.documentQueued, true);
+  assert.equal(next.text, '');
+  assert.equal(hasRecentDocumentAcknowledgement(recentState, Date.parse('2026-08-15T02:03:00.000Z')), false);
+  assert.match(source, /AI_DOCUMENT_QUEUED/);
 });
 
 test('instant channel credentials remain strict even though webhook acknowledgement is disabled', () => {
@@ -255,4 +271,3 @@ test('phone shorthand can override a stale motor category without asking the cus
   assert.equal(decision.productUnit, 'HANDPHONE');
   assert.match(decision.text, /RM199/);
 });
-
