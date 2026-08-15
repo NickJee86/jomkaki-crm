@@ -177,7 +177,8 @@ const instantLanguage = text => {
   const value = clean(text);
   if (/[\u3400-\u9fff]/u.test(value)) return 'ZH';
   if (/\b(hai|saya|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari)\b/i.test(value)) return 'MS';
-  return 'EN';
+  if (/\b(i|i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply)\b/i.test(value)) return 'EN';
+  return 'MS';
 };
 
 const instantCopy = (language, key, values = {}) => {
@@ -256,23 +257,13 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', me
   if (['image', 'document'].includes(clean(messageType).toLowerCase())) return { handled: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
   if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
-  if (step === 'STEP_01_NAME') {
-    const name = extractCustomerName(text);
-    return name
-      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
-      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
-  }
-  if (step === 'STEP_02_LOCATION') {
-    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
-    return location
-      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
-      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
-  }
   const unit = productUnitFromText(text, state['Product Category'] || routeBusinessUnit) || 'MOTOR';
   const catalogs = unit === 'HANDPHONE' ? handphoneCatalog : motorCatalog;
   const pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
   const product = findInstantProduct(text, catalogs);
-  if (product) {
+  const knownName = clean(state['Customer Name'] || lead['Customer Name']);
+  const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion);
+  if (product && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
     const rate = instantRate(product, pricing, unit, lead.Region || routeRegion);
     if (!rate) return { handled: false };
     const approvedImage = truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
@@ -285,6 +276,18 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', me
       text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
     };
   }
+  if (step === 'STEP_01_NAME') {
+    const name = extractCustomerName(text);
+    return name
+      ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
+      : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
+  }
+  if (step === 'STEP_02_LOCATION') {
+    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
+    return location
+      ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
+      : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
+  }
   if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
   return { handled: false };
 }
@@ -295,12 +298,7 @@ export function instantChannelCredentials(route = {}, env = process.env) {
   const credentialKey = credentialPrefix(route['Credential Key'] || channelId);
   const accessToken = clean(env[`${credentialKey}_ACCESS_TOKEN`]);
   if (!channelId || !phoneNumberId || !credentialKey || !accessToken) throw new Error('Instant WhatsApp route credentials are incomplete');
-  return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
-}
-
-async function sendInstantSalesMessage({ route, phone, decision }) {
-  if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
-  const binding = instantChannelCredentials(route);
+  return { chann…91 tokens truncated…antChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
   const payload = imageUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
