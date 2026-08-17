@@ -66,6 +66,13 @@ test('Product UI exposes Regional Manager submit and Admin approval workflows', 
   assert.match(ui, /Nothing becomes customer-visible or available to AI until Admin approval/);
 });
 
+test('Product approvals use the CRM review dialog instead of unsupported browser prompts', () => {
+  assert.match(ui, /function productApprovalModal\(/);
+  assert.match(ui, /id="productApprovalReviewForm"/);
+  assert.doesNotMatch(ui, /prompt\('Reason for rejection/);
+  assert.doesNotMatch(ui, /prompt\('Approval notes/);
+});
+
 test('Admin reports expose the Handphone approval workload', () => {
   assert.match(app, /Handphone approval queue/);
   assert.match(app, /Phone catalog approval/);

@@ -74,12 +74,34 @@
     document.querySelectorAll('[data-phone-stock]').forEach(button => button.onclick = () => editHandphoneBranchStock(find(button.dataset.phoneStock)));
   }
 
-  async function reviewHandphoneCatalog(item, decision) {
+  function productApprovalModal({ title, itemLabel, decision, onConfirm }) {
+    const approving = decision === 'APPROVED';
+    formModal(title, `<form id="productApprovalReviewForm" class="crm-form"><div class="form-wide pricing-safety-banner"><strong>${approving ? 'Approve and publish' : 'Reject this submission'}</strong><span>${esc(itemLabel)}</span></div><label class="form-wide">${approving ? 'Approval notes (optional)' : 'Reason for rejection'}<textarea name="notes" rows="4" ${approving ? '' : 'required'} placeholder="${approving ? 'Optional internal note' : 'Explain what must be corrected before resubmission'}"></textarea></label><div class="form-wide form-actions"><button type="button" class="secondary" data-cancel>Cancel</button><button type="submit">${approving ? 'Confirm approval' : 'Confirm rejection'}</button></div><p class="form-wide notice" id="formMessage">${approving ? 'The approved record will become available to the CRM and AI after this confirmation.' : 'The submitter will see this reason and can correct the record before resubmitting.'}</p></form>`);
+    const form = document.getElementById('productApprovalReviewForm');
+    form.querySelector('[data-cancel]').onclick = () => document.querySelector('.drawer-backdrop')?.remove();
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const button = form.querySelector('[type=submit]'), message = document.getElementById('formMessage'), notes = String(new FormData(form).get('notes') || '').trim();
+      if (!approving && !notes) { message.textContent = 'A rejection reason is required.'; return; }
+      button.disabled = true;
+      try {
+        await onConfirm(notes);
+        document.querySelector('.drawer-backdrop')?.remove();
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    };
+  }
+
+  function reviewHandphoneCatalog(item, decision) {
     if (!item) return;
-    const notes = decision === 'REJECTED' ? prompt('Reason for rejection (required):') : prompt('Approval notes (optional):', '') || '';
-    if (decision === 'REJECTED' && !String(notes || '').trim()) return;
-    if (!confirm(`${decision === 'APPROVED' ? 'Approve and publish' : 'Reject'} ${item.brand} ${item.model} ${item.variant}?`)) return;
-    try { await post('reviewHandphoneCatalog', { businessUnit: 'HANDPHONE', catalogId: item.id, decision, notes }); document.querySelector('.drawer-backdrop')?.remove(); await refreshProductCatalog(); } catch (error) { alert(error.message); }
+    productApprovalModal({
+      title: `${decision === 'APPROVED' ? 'Approve' : 'Reject'} Handphone catalog`,
+      itemLabel: `${item.brand} ${item.model} ${item.variant}`,
+      decision,
+      onConfirm: async notes => { await post('reviewHandphoneCatalog', { businessUnit: 'HANDPHONE', catalogId: item.id, decision, notes }); await refreshProductCatalog(); }
+    });
   }
 
   function editHandphoneBranchStock(item) {
@@ -118,12 +140,14 @@
     });
   }
 
-  async function reviewProductCatalog(item, decision) {
+  function reviewProductCatalog(item, decision) {
     if (!item) return;
-    const notes = decision === 'REJECTED' ? prompt('Reason for rejection (required):') : prompt('Approval notes (optional):', '') || '';
-    if (decision === 'REJECTED' && !String(notes || '').trim()) return;
-    if (!confirm(`${decision === 'APPROVED' ? 'Approve and publish' : 'Reject'} ${item.brand} ${item.model} ${item.variant}?`)) return;
-    try { await post('reviewProductCatalog', { businessUnit: unitOf(item), catalogId: item.id, decision, notes }); await refreshProductCatalog(); } catch (error) { alert(error.message); }
+    productApprovalModal({
+      title: `${decision === 'APPROVED' ? 'Approve' : 'Reject'} ${unitLabel(unitOf(item))} catalog`,
+      itemLabel: `${item.brand} ${item.model} ${item.variant}`,
+      decision,
+      onConfirm: async notes => { await post('reviewProductCatalog', { businessUnit: unitOf(item), catalogId: item.id, decision, notes }); await refreshProductCatalog(); }
+    });
   }
 
   async function refreshProductCatalog() {
@@ -209,12 +233,14 @@
     document.querySelectorAll('[data-product-promotion-toggle]').forEach(button => button.onclick = () => toggleProductPricing(button.dataset.productPromotionToggle, 'promotion'));
   }
 
-  async function reviewProductPricing(pricingIds, decision) {
+  function reviewProductPricing(pricingIds, decision) {
     const first = state.data.pricing.find(item => item.id === pricingIds[0]); if (!first) return;
-    const notes = decision === 'REJECTED' ? prompt('Reason for rejection (required):') : prompt('Approval notes (optional):', '') || '';
-    if (decision === 'REJECTED' && !String(notes || '').trim()) return;
-    if (!confirm(`${decision === 'APPROVED' ? 'Approve and publish' : 'Reject'} ${first.brand} ${first.model} pricing for ${pretty(first.zone)}?`)) return;
-    try { await post('reviewProductPricing', { businessUnit: unitOf(first), pricingId: pricingIds[0], pricingIds, decision, notes }); await refreshProductPricing(); } catch (error) { alert(error.message); }
+    productApprovalModal({
+      title: `${decision === 'APPROVED' ? 'Approve' : 'Reject'} ${unitLabel(unitOf(first))} pricing`,
+      itemLabel: `${first.brand} ${first.model} pricing for ${pretty(first.zone)}`,
+      decision,
+      onConfirm: async notes => { await post('reviewProductPricing', { businessUnit: unitOf(first), pricingId: pricingIds[0], pricingIds, decision, notes }); await refreshProductPricing(); }
+    });
   }
 
   function bindHandphonePricing(rows) {
@@ -226,12 +252,14 @@
     document.querySelectorAll('[data-phone-price-reject]').forEach(button => button.onclick = () => reviewHandphonePricing(button.dataset.phonePriceReject.split(',').filter(Boolean), 'REJECTED'));
   }
 
-  async function reviewHandphonePricing(pricingIds, decision) {
+  function reviewHandphonePricing(pricingIds, decision) {
     const first = state.data.pricing.find(item => item.id === pricingIds[0]); if (!first) return;
-    const notes = decision === 'REJECTED' ? prompt('Reason for rejection (required):') : prompt('Approval notes (optional):', '') || '';
-    if (decision === 'REJECTED' && !String(notes || '').trim()) return;
-    if (!confirm(`${decision === 'APPROVED' ? 'Approve and publish' : 'Reject'} ${first.brand} ${first.model} pricing for ${pretty(first.zone)}?`)) return;
-    try { await post('reviewProductPricing', { businessUnit: 'HANDPHONE', pricingId: pricingIds[0], pricingIds, decision, notes }); await refreshProductPricing(); } catch (error) { alert(error.message); }
+    productApprovalModal({
+      title: `${decision === 'APPROVED' ? 'Approve' : 'Reject'} Handphone pricing`,
+      itemLabel: `${first.brand} ${first.model} pricing for ${pretty(first.zone)}`,
+      decision,
+      onConfirm: async notes => { await post('reviewProductPricing', { businessUnit: 'HANDPHONE', pricingId: pricingIds[0], pricingIds, decision, notes }); await refreshProductPricing(); }
+    });
   }
 
   async function toggleProductPricing(id, type, group = []) {
