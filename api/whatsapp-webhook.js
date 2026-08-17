@@ -469,6 +469,8 @@ const instantCopy = (language, key, values = {}) => {
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
       HELP: 'Certainly. I can help with models, monthly instalments, required documents, or application status. What would you like me to check?',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
+      TENURE_QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation.`,
+      TENURE_UNAVAILABLE: `The ${tenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
     MS: {
@@ -486,6 +488,8 @@ const instantCopy = (language, key, values = {}) => {
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
       HELP: 'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
       DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.',
+      TENURE_QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
+      TENURE_UNAVAILABLE: `Ansuran ${tenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
       QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
     },
     ZH: {
@@ -734,7 +738,16 @@ export function matchInstantProduct(text, catalogs = []) {
   return { product: ranked[0].row, options: [], ambiguous: false };
 }
 
-const instantRate = (product, pricingRows = [], unit = '', region = '') => {
+const requestedMonthlyTenure = (value = '', unit = '') => {
+  const text = normalizedWords(value);
+  const monthMatch = text.match(/\b(12|24|36|48|60)\s*(?:bulan|month|months)\b/);
+  if (monthMatch) return `${monthMatch[1]} months`;
+  const yearMatch = text.match(/\b([1-5])\s*(?:tahun|year|years|yr|yrs|thn)\b/);
+  if (!yearMatch) return '';
+  return canonicalBusinessUnit(unit) === 'HANDPHONE' ? `${Number(yearMatch[1]) * 12} months` : `${yearMatch[1]} years`;
+};
+
+const instantRate = (product, pricingRows = [], unit = '', region = '', requestedTenure = '') => {
   if (!product) return null;
   const normalizedRegion = canonicalRegion(region);
   const candidates = pricingRows.filter(row => {
@@ -749,7 +762,9 @@ const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   });
   const row = ranked[0];
   if (!row) return null;
-  const rates = approvedMonthlyRateFields(unit).map(([tenure, field]) => [tenure, row[field]]);
+  const rates = approvedMonthlyRateFields(unit)
+    .filter(([tenure]) => !requestedTenure || normalizedWords(tenure) === normalizedWords(requestedTenure))
+    .map(([tenure, field]) => [tenure, row[field]]);
   const selected = rates.find(([, amount]) => customerAmount(amount));
   return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
 };
@@ -767,12 +782,32 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
+  const requestedTenure = requestedMonthlyTenure(text, fallbackUnit || routeBusinessUnit);
+  const selectedModel = normalizedWords(state['Selected Product Model']);
+  const selectedBrand = normalizedWords(state['Selected Product Brand']);
+  if (requestedTenure && selectedModel && ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)) {
+    const selectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
+    if (selectedProduct) {
+      const selectedUnit = clean(selectedProduct.__businessUnit).toUpperCase() || fallbackUnit || routeBusinessUnit || 'MOTOR';
+      const selectedPricing = selectedUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
+      const requestedRate = instantRate(selectedProduct, selectedPricing, selectedUnit, lead.Region || routeRegion, requestedTenure);
+      return {
+        handled: true,
+        nextStep: step,
+        productUnit: selectedUnit,
+        product: selectedProduct,
+        text: instantCopy(language, requestedRate ? 'TENURE_QUOTE' : 'TENURE_UNAVAILABLE', {
+          brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure, amount: requestedRate?.amount
+        })
+      };
+    }
+  }
   let productMatch = matchInstantProduct(text, catalogPool);
   const previousCustomerText = clean(state['Last Customer Message']);
   const mayContinueClarification = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
     && previousCustomerText && previousCustomerText !== clean(text)
     && previousCustomerText.length <= 80 && clean(text).length <= 40
-    && (!productMatch.product || productMatch.ambiguous);
+    && !requestedTenure && (!productMatch.product || productMatch.ambiguous);
   if (mayContinueClarification) {
     const contextualMatch = matchInstantProduct(`${previousCustomerText} ${text}`, catalogPool);
     if (contextualMatch.product && !contextualMatch.ambiguous) productMatch = contextualMatch;
