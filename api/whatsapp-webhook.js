@@ -713,10 +713,11 @@ export function matchInstantProduct(text, catalogs = []) {
       const compactAlias = compactModelText(alias);
       const numericOnlyAlias = /^\d+$/.test(compactAlias);
       const sharedAlias = (aliasModels.get(compactAlias)?.size || 0) > 1;
-      const genericAlias = numericOnlyAlias || sharedAlias;
-      if (query === alias || compactQuery === compactAlias) score = Math.max(score, 1900 + compactAlias.length);
-      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, (genericAlias ? 1100 : 1800) + compactAlias.length);
-      else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (genericAlias ? 1100 : 1700) + compactAlias.length);
+      const brandOnlyAlias = compactAlias === compactModelText(row.Brand);
+      const lowConfidenceAlias = numericOnlyAlias || brandOnlyAlias;
+      if (query === alias || compactQuery === compactAlias) score = Math.max(score, (lowConfidenceAlias ? 900 : sharedAlias ? 1200 : 1900) + compactAlias.length);
+      else if (alias.length >= 3 && includesTerm(query, alias)) score = Math.max(score, (lowConfidenceAlias ? 900 : sharedAlias ? 1100 : 1800) + compactAlias.length);
+      else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (lowConfidenceAlias ? 900 : sharedAlias ? 1100 : 1700) + compactAlias.length);
       else if (compactAlias.length >= 4 && queryCandidates.some(candidate => candidate.compact.length >= 4 && oneModelTypoAway(candidate.compact, compactAlias))) score = Math.max(score, 1500 + compactAlias.length);
     }
     return { row, score, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
@@ -766,7 +767,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
-  const productMatch = matchInstantProduct(text, catalogPool);
+  let productMatch = matchInstantProduct(text, catalogPool);
+  const previousCustomerText = clean(state['Last Customer Message']);
+  const mayContinueClarification = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
+    && previousCustomerText && previousCustomerText !== clean(text)
+    && previousCustomerText.length <= 80 && clean(text).length <= 40
+    && (!productMatch.product || productMatch.ambiguous);
+  if (mayContinueClarification) {
+    const contextualMatch = matchInstantProduct(`${previousCustomerText} ${text}`, catalogPool);
+    if (contextualMatch.product && !contextualMatch.ambiguous) productMatch = contextualMatch;
+    else if (contextualMatch.ambiguous && (!productMatch.ambiguous || contextualMatch.options.length < productMatch.options.length)) productMatch = contextualMatch;
+  }
   let product = productMatch.product;
   let unit = clean(product?.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'MOTOR';
   let pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
