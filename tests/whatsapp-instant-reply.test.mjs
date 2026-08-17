@@ -365,3 +365,39 @@ test('phone shorthand can override a stale motor category without asking the cus
   assert.equal(decision.productUnit, 'HANDPHONE');
   assert.match(decision.text, /RM199/);
 });
+
+test('post-quote sales questions receive an immediate natural Malay answer instead of silence', () => {
+  const base = {
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA'
+  };
+  const documents = buildInstantSalesDecision({ ...base, text: 'dokumen apa perlu untuk apply?' });
+  const budget = buildInstantSalesDecision({ ...base, text: 'mahal lah, ada murah sikit?' });
+  const unknown = buildInstantSalesDecision({ ...base, text: 'boleh explain lagi?' });
+  assert.match(documents.text, /IC depan dan belakang/);
+  assert.match(budget.text, /Bajet bulanan/);
+  assert.match(unknown.text, /model, ansuran bulanan, dokumen/);
+  [documents, budget, unknown].forEach(result => assert.equal(result.handled, true));
+});
+
+test('other-model request suggests a small approved regional list and asks one question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'ada motor apa model lain?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+    ]
+  });
+  assert.equal(decision.handled, true);
+  assert.match(decision.text, /Yamaha NMAX/);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});

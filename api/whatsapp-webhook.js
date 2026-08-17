@@ -428,7 +428,7 @@ const instantLanguage = text => {
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), tenure = clean(values.tenure), options = clean(values.options);
+  const amount = customerAmount(values.amount), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models);
   const copies = {
     EN: {
       NAME: 'Hi, thank you for contacting JomKaki Motor. I can help you check suitable motorcycle or phone options and their monthly instalments. May I know your name?',
@@ -439,6 +439,11 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: 'Which motorcycle or phone model are you interested in? You can send me the model name directly.',
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. The approved monthly instalment is not available in the system yet, but I can check it with the branch for you.`,
+      OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
+      BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
+      APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send them one by one.',
+      THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
+      HELP: 'Certainly. I can help with models, monthly instalments, required documents, or application status. What would you like me to check?',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
@@ -451,6 +456,11 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Kadar ansuran yang diluluskan belum ada dalam sistem sekarang, tetapi saya boleh semak dengan cawangan untuk anda.`,
+      OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
+      BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
+      APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar satu per satu.',
+      THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
+      HELP: 'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
       DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.',
       QUOTE: `Untuk ${brand} ${model}, ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
     },
@@ -462,6 +472,11 @@ const instantCopy = (language, key, values = {}) => {
       PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
+      OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
+      BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
+      APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
+      THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
+      HELP: '可以。我能协助查询型号、月供、所需文件或申请进度。你想先查询哪一项？',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
       QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。申请店内贷款需要 MyKad 正反面，以及最新薪水单或 EPF 记录。如果这个方案适合你，可以在这里逐份发送文件。`
     }
@@ -470,6 +485,11 @@ const instantCopy = (language, key, values = {}) => {
 };
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
+const asksForDocuments = text => /(dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|需要什么文件|要什么文件)/i.test(clean(text));
+const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
+const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
+const asksForOtherModels = text => /(model lain|motor lain|phone lain|telefon lain|apa model.*(?:ada|lain)|other models?|what else.*(?:available|have)|其他型号|别的型号)/i.test(clean(text));
+const saysThanks = text => /^(?:terima kasih|thanks?(?: you)?|tq|thank you|谢谢|多谢)[.! ]*$/i.test(clean(text));
 
 const modelAliasStopWords = new Set(['apple', 'iphone', 'phone', 'handphone', 'telefon', 'motor', 'model', 'official', 'standard', 'baru', 'new', 'pro', 'max', 'silver', 'black', 'white', 'blue', 'orange', 'gold', 'green', 'red', 'grey', 'gray']);
 const compactModelText = value => normalizedWords(value).replace(/\s+/g, '');
@@ -665,6 +685,19 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (step === 'STEP_04_DOCUMENTS' && isDocumentStatusQuestion(text)) {
     return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: unit, text: buildDocumentProgressReply(language, documents) };
   }
+  if (asksForDocuments(text) || wantsToApply(text)) return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: unit, text: instantCopy(language, 'APPLY') };
+  if (raisesBudgetConcern(text)) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'BUDGET') };
+  if (asksForOtherModels(text) && identityReady) {
+    const pricingRegion = lead.Region || routeRegion;
+    const suggestions = catalogPool.filter(row => {
+      const rowUnit = clean(row.__businessUnit).toUpperCase() || unit;
+      const rowPricing = rowUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
+      return rowUnit === unit && instantRate(row, rowPricing, rowUnit, pricingRegion);
+    }).filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
+      .slice(0, 3).map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim());
+    if (suggestions.length) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'OTHER_MODELS', { models: suggestions.join(language === 'ZH' ? '、' : ', ') }) };
+  }
+  if (saysThanks(text)) return { handled: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'THANKS') };
   if (step === 'STEP_01_NAME') {
     const name = extractCustomerName(text);
     return name
@@ -678,7 +711,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
   }
   if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
-  return { handled: false };
+  return { handled: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
 }
 
 export function instantChannelCredentials(route = {}, env = process.env) {
