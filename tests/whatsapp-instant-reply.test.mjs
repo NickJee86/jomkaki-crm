@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, reserveInboundMessage, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAiFallbackRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
@@ -18,6 +18,9 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-5.6-luna');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, 'none');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
@@ -378,7 +381,42 @@ test('post-quote sales questions receive an immediate natural Malay answer inste
   assert.match(documents.text, /IC depan dan belakang/);
   assert.match(budget.text, /Bajet bulanan/);
   assert.match(unknown.text, /model, ansuran bulanan, dokumen/);
+  assert.equal(unknown.aiFallback, true);
   [documents, budget, unknown].forEach(result => assert.equal(result.handled, true));
+});
+
+test('knowledge AI fallback request is privacy-preserving, fast and cannot expose an unsupported amount', async () => {
+  const request = buildAiFallbackRequest({
+    text: 'boleh explain lagi?',
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Selected Product Model': 'Y16ZR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    routeBusinessUnit: 'MOTOR',
+    phone: '60123456789'
+  });
+  assert.equal(request.model, 'gpt-5.6-luna');
+  assert.deepEqual(request.reasoning, { effort: 'none' });
+  assert.equal(request.store, false);
+  assert.equal(request.safety_identifier.length, 64);
+  assert.equal(request.input.includes('60123456789'), false);
+  assert.equal(request.max_output_tokens, 180);
+
+  const fetchImpl = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, 'gpt-5.6-luna');
+    assert.equal(body.store, false);
+    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? 😊 Soalan kedua?' }] }] }) };
+  };
+  const reply = await requestAiFallbackReply({
+    text: 'boleh explain lagi?',
+    state: { 'Current Step': 'STEP_04_DOCUMENTS' },
+    phone: '60123456789',
+    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-5.6-luna' },
+    fetchImpl
+  });
+  assert.equal(reply.includes('😊'), false);
+  assert.equal((reply.match(/\?/g) || []).length, 1);
+  assert.equal(sanitizeAiFallbackReply('Harga ialah RM999. Berapa bajet anda?', 'MS'), '');
+  assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
 });
 
 test('other-model request suggests a small approved regional list and asks one question', () => {

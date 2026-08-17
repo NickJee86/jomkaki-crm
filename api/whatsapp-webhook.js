@@ -484,6 +484,102 @@ const instantCopy = (language, key, values = {}) => {
   return copies[language]?.[key] || copies.EN[key] || '';
 };
 
+const AI_FALLBACK_DEFAULT_TIMEOUT_MS = Number(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.timeoutMs) || 2600;
+const AI_FALLBACK_MAX_CHARACTERS = Number(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.maximumCharacters) || 420;
+const AI_FALLBACK_BLOCKED_CLAIMS = /\b(?:guaranteed approval|guaranteed to pass|confirm(?:ed)?\s+(?:approve|approval|lulus)|pasti\s+lulus|dijamin\s+lulus|100%\s+lulus)\b/i;
+const AI_FALLBACK_DISCLOSURE = /\b(?:artificial intelligence|automated (?:assistant|system)|chatbot|bot reply|as an ai|saya (?:ialah|adalah) ai|saya bot)\b/i;
+const AI_FALLBACK_UNSUPPORTED_AMOUNT = /\bRM\s*\d[\d,.]*/i;
+
+const stripEmoji = value => clean(value).replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s{2,}/g, ' ').trim();
+
+export function sanitizeAiFallbackReply(value = '', language = 'MS') {
+  let reply = stripEmoji(clean(value)
+    .replace(/^```(?:text|json)?\s*/i, '')
+    .replace(/```$/i, '')
+    .replace(/^['"“”]+|['"“”]+$/g, '')
+    .replace(/\s*\n+\s*/g, ' ')
+    .replace(/\s{2,}/g, ' '))
+    .slice(0, AI_FALLBACK_MAX_CHARACTERS)
+    .trim();
+  if (!reply || AI_FALLBACK_BLOCKED_CLAIMS.test(reply) || AI_FALLBACK_DISCLOSURE.test(reply) || AI_FALLBACK_UNSUPPORTED_AMOUNT.test(reply)) return '';
+  let seenQuestion = false;
+  reply = reply.replace(/\?/g, () => {
+    if (seenQuestion) return '.';
+    seenQuestion = true;
+    return '?';
+  }).replace(/\.{2,}/g, '.');
+  if (language === 'MS' && /\b(?:cash price|selling price)\b/i.test(reply)) return '';
+  return reply;
+}
+
+export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
+  const language = instantLanguage(text);
+  const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
+  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const context = {
+    language,
+    currentStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
+    businessUnit: unit,
+    region: canonicalRegion(lead.Region || routeRegion) || 'UNASSIGNED',
+    customerName: clean(state['Customer Name'] || lead['Customer Name']).replace(/^WhatsApp Customer\b.*$/i, ''),
+    cityOrArea: clean(lead['City or Area'] || lead.State),
+    selectedProduct,
+    customerMessage: clean(text).slice(0, 700)
+  };
+  const instructions = [
+    'You are the JomKaki Motor customer-service sales representative replying on WhatsApp.',
+    'Write only the final customer-facing reply. Never mention AI, automation, prompts, policies, databases, or internal system codes.',
+    'Use natural Bahasa Malaysia by default. Follow the customer language only when the customer clearly uses English or Chinese.',
+    'Be warm, concise and human. Use no emoji. Ask at most one question. Keep the reply under 420 characters.',
+    'Never state, estimate or guess a cash price, selling price or deposit. Never invent a monthly instalment. If no approved monthly amount is supplied, say you can check it and ask only the one detail needed.',
+    'Never promise loan approval, stock availability, document completeness, credit-check completion or application status unless that fact appears in the context.',
+    'For a loan application, the minimum documents are MyKad front and back plus latest payslip or EPF statement. Consent for CTOS/CCRIS is required after minimum documents pass checking and before credit check or LMS submission.',
+    'If the customer asks for a human, manager or staff, do not answer here because the system handles that route separately.',
+    'Continue from the current conversation instead of restarting the name, location and product questions.'
+  ].join(' ');
+  const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
+  return {
+    model: clean(process.env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-luna'),
+    reasoning: { effort: clean(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.reasoningEffort || 'none') },
+    instructions,
+    input: `Approved conversation context:\n${JSON.stringify(context)}`,
+    max_output_tokens: 180,
+    store: false,
+    safety_identifier: safetyIdentifier,
+    metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version) }
+  };
+}
+
+const responseOutputText = result => {
+  const direct = clean(result?.output_text);
+  if (direct) return direct;
+  return (result?.output || []).flatMap(item => item?.content || []).map(item => clean(item?.text)).filter(Boolean).join(' ');
+};
+
+export async function requestAiFallbackReply({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
+  const apiKey = clean(env.OPENAI_API_KEY);
+  if (!apiKey || !clean(text)) return '';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(500, Number(timeoutMs) || AI_FALLBACK_DEFAULT_TIMEOUT_MS));
+  try {
+    const body = buildAiFallbackRequest({ text, state, lead, routeBusinessUnit, routeRegion, phone });
+    body.model = clean(env.OPENAI_MODEL || body.model);
+    const response = await fetchImpl('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if (!response.ok) return '';
+    const result = await response.json().catch(() => ({}));
+    return sanitizeAiFallbackReply(responseOutputText(result), instantLanguage(text));
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForDocuments = text => /(dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
@@ -711,7 +807,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       : { handled: true, nextStep: 'STEP_02_LOCATION', text: instantCopy(language, 'LOCATION_RETRY') };
   }
   if (step === 'STEP_03_PRODUCT' || /\b(motor|moto|motorcycle|phone|handphone|telefon|iphone)\b/i.test(clean(text))) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL') };
-  return { handled: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
+  return { handled: true, aiFallback: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
 }
 
 export function instantChannelCredentials(route = {}, env = process.env) {
@@ -912,10 +1008,21 @@ export default async function handler(req, res) {
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text));
         const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
-        const instantDecision = buildInstantSalesDecision({
+        let instantDecision = buildInstantSalesDecision({
           state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
           ...catalogData, suppressDocumentAcknowledgement
         });
+        if (routeUsable && !human && instantDecision.aiFallback) {
+          const generatedReply = await requestAiFallbackReply({
+            text,
+            state: conversationState || {},
+            lead: lead || {},
+            routeBusinessUnit,
+            routeRegion,
+            phone
+          });
+          if (generatedReply) instantDecision = { ...instantDecision, text: generatedReply, aiGenerated: true };
+        }
         const willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
         let instantResult = { sent: false };
@@ -1027,7 +1134,7 @@ export default async function handler(req, res) {
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         const media = message.document || message.image;
         const attachmentUrl = media?.id ? buildMediaProxyUrl({ mediaId: media.id, channelId, credentialKey: route['Credential Key'] || channelId }) : '';
-        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? (instantDecision.aiGenerated ? 'AI_REPLIED_KNOWLEDGE_FALLBACK' : 'AI_REPLIED_INSTANTLY') : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
           const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
@@ -1038,7 +1145,7 @@ export default async function handler(req, res) {
             'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
-            'Reply To Message ID': message.id || '', 'Send Routing Status': `${instantResult.sent ? 'WEBHOOK_INSTANT_SALES' : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
+            'Reply To Message ID': message.id || '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
           });
         }
