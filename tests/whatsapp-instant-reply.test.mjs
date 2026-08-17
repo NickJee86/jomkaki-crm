@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, reserveInboundMessage, resolveCustomerLocation, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
+import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -11,6 +12,27 @@ const route = {
   'Credential Key': 'WHATSAPP_WEST_01',
   'Outbound Enabled': 'TRUE'
 };
+
+test('approved Notion knowledge snapshot governs language, pricing and consent rules', () => {
+  assert.equal(JOMKAKI_KNOWLEDGE.status, 'APPROVED');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
+  assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
+    'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
+  ]);
+});
+
+test('inbound message reservation blocks concurrent duplicate delivery and permits retry after release', () => {
+  const messageId = `wamid.test.${Date.now()}`;
+  assert.equal(reserveInboundMessage(messageId, 1000), true);
+  assert.equal(reserveInboundMessage(messageId, 1001), false);
+  releaseInboundMessage(messageId);
+  assert.equal(reserveInboundMessage(messageId, 1002), true);
+  releaseInboundMessage(messageId);
+});
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
   const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
