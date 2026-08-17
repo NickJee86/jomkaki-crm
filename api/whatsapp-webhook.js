@@ -468,6 +468,8 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send them one by one.',
+      SHOP_LOAN: 'Yes, we offer shop-loan applications. Eligibility depends on the applicant details and supporting documents, and I can guide you through the check step by step.',
+      SHOP_LOAN_MODEL: 'Which motorcycle model would you like to check?',
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
       HELP: 'Certainly. I can help with models, monthly instalments, required documents, or application status. What would you like me to check?',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
@@ -493,6 +495,8 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar satu per satu.',
+      SHOP_LOAN: 'Boleh, kami ada menyediakan permohonan loan kedai. Kelayakan bergantung pada maklumat pemohon dan dokumen sokongan, dan saya boleh bantu semak langkah demi langkah.',
+      SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
       HELP: 'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
       DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.',
@@ -517,6 +521,8 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
+      SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
+      SHOP_LOAN_MODEL: '你想查询哪一款摩托？',
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
       HELP: '可以。我能协助查询型号、月供、所需文件或申请进度。你想先查询哪一项？',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
@@ -658,11 +664,19 @@ const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
 const asksForDocuments = text => /(dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
+const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
 const asksForOtherModels = text => /(model lain|motor lain|phone lain|telefon lain|apa model.*(?:ada|lain)|other models?|what else.*(?:available|have)|其他型号|别的型号)/i.test(clean(text));
 const saysThanks = text => /^(?:terima kasih|thanks?(?: you)?|tq|thank you|谢谢|多谢)[.! ]*$/i.test(clean(text));
 
-const modelAliasStopWords = new Set(['apple', 'iphone', 'phone', 'handphone', 'telefon', 'motor', 'model', 'official', 'standard', 'baru', 'new', 'pro', 'max', 'silver', 'black', 'white', 'blue', 'orange', 'gold', 'green', 'red', 'grey', 'gray']);
+const modelAliasStopWords = new Set([
+  'apple', 'iphone', 'phone', 'handphone', 'telefon', 'motor', 'motorcycle', 'motosikal', 'model',
+  'official', 'standard', 'baru', 'new', 'pro', 'max', 'silver', 'black', 'white', 'blue', 'orange',
+  'gold', 'green', 'red', 'grey', 'gray', 'scooter', 'skuter', 'cub', 'moped',
+  'east', 'west', 'malaysia', 'malaysian', 'sabah', 'sarawak', 'labuan', 'kuching', 'bintulu',
+  'miri', 'sibu', 'limbang', 'selangor', 'kuala', 'lumpur', 'penang', 'johor', 'perak', 'kedah',
+  'kelantan', 'terengganu', 'pahang', 'melaka', 'negeri', 'sembilan', 'putrajaya'
+]);
 const compactModelText = value => normalizedWords(value).replace(/\s+/g, '');
 const oneEditAway = (left, right) => {
   if (Math.abs(left.length - right.length) > 1) return false;
@@ -836,6 +850,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
+  if (step === 'STEP_02_LOCATION') {
+    const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
+    if (location) return {
+      handled: true,
+      nextStep: 'STEP_03_PRODUCT',
+      productUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit),
+      location,
+      text: instantCopy(language, 'PRODUCT', { location: location.city || location.state })
+    };
+  }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
   const requestedTenure = requestedMonthlyTenure(text, fallbackUnit || routeBusinessUnit);
   const selectedModel = normalizedWords(state['Selected Product Model']);
@@ -931,6 +955,23 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       product,
       imageUrl: approvedImage,
       text: continuation.text
+    };
+  }
+  if (asksAboutShopLoan(text)) {
+    const continuation = profileContinuation({
+      language,
+      state,
+      lead,
+      baseText: instantCopy(language, 'SHOP_LOAN'),
+      completeStep: step || 'STEP_03_PRODUCT'
+    });
+    const needsModelQuestion = continuation.nextStep === 'STEP_03_PRODUCT' && !selectedModel;
+    return {
+      handled: true,
+      shopLoanIntent: true,
+      nextStep: continuation.nextStep,
+      productUnit: unit,
+      text: [continuation.text, needsModelQuestion ? instantCopy(language, 'SHOP_LOAN_MODEL') : ''].filter(Boolean).join(' ')
     };
   }
   if (step === 'STEP_04_DOCUMENTS' && isDocumentStatusQuestion(text)) {

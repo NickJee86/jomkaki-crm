@@ -237,6 +237,48 @@ test('instant sales flow asks name, then location, then product', () => {
   assert.match(location.text, /motor atau telefon/i);
 });
 
+test('a shop-loan question is answered before requesting missing profile details', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_WELCOME', 'Product Category': 'MOTOR' },
+    lead: {},
+    text: 'kalau sy mahu beli motor under kedai dpt tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    motorCatalog: [
+      { 'Catalog ID': 'MTR-SYM-HUSKY200', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky 200 scooter east malaysia sabah sarawak' },
+      { 'Catalog ID': 'MTR-MODA-MOCA110', Brand: 'MODA', Model: 'Moca 110', Active: 'TRUE', 'Search Keywords': 'moda moca 110 scooter east malaysia sabah sarawak' }
+    ]
+  });
+  assert.equal(decision.shopLoanIntent, true);
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /loan kedai/i);
+  assert.match(decision.text, /nama anda/i);
+  assert.doesNotMatch(decision.text, /Husky|Moca|pilih satu/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a customer location can never be mistaken for catalog search keywords', () => {
+  const motorCatalog = [
+    { 'Catalog ID': 'MTR-SYM-HUSKY200', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky 200 husky200 scooter skuter east malaysia sabah sarawak' },
+    { 'Catalog ID': 'MTR-MODA-MOCA110', Brand: 'MODA', Model: 'Moca 110', Active: 'TRUE', 'Search Keywords': 'moda moca moca 110 moca110 scooter skuter east malaysia sabah sarawak' }
+  ];
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).product, null);
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).ambiguous, false);
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'nick', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'nick' },
+    text: 'kuching sarawak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', 'Branch ID': 'BR-SWK-KCH', 'Team ID': 'TEAM-MOTOR-EAST-STK', 'Branch Name': 'Kuching', City: 'Kuching', 'Direct Coverage Areas': 'Kuching|Sarawak' }],
+    motorCatalog
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.location.branchId, 'BR-SWK-KCH');
+  assert.match(decision.text, /model|motor atau telefon/i);
+  assert.doesNotMatch(decision.text, /Husky|Moca|pilih satu/i);
+});
+
 test('short or ambiguous customer messages default to Bahasa Melayu', () => {
   const greeting = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Jim', messageType: 'text' });
