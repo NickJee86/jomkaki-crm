@@ -385,7 +385,7 @@ test('a tenure follow-up answers only the requested monthly rate without resendi
   });
   assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
   assert.equal(decision.imageUrl, undefined);
-  assert.match(decision.text, /3 years/);
+  assert.match(decision.text, /3 tahun/);
   assert.match(decision.text, /RM310/);
   assert.doesNotMatch(decision.text, /RM225|IC depan|slip gaji/i);
 });
