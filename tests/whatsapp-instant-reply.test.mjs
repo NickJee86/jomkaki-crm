@@ -241,10 +241,43 @@ test('short or ambiguous customer messages default to Bahasa Melayu', () => {
   assert.doesNotMatch(greeting.text, /May I know/i);
 });
 
+test('a model question is answered before repeating missing profile questions', () => {
+  const decision = buildInstantSalesDecision({
+    state: {
+      'Current Step': 'STEP_01_NAME',
+      'Last AI Message': 'Hai, selamat datang ke JomKaki Motor. Boleh saya tahu nama anda?',
+      'Product Category': 'MOTOR'
+    },
+    lead: { 'Customer Name': 'WhatsApp Customer 2387', Region: 'EAST_MALAYSIA', 'Selected Branch ID': 'BR-SWK-BTU' },
+    text: 'Y15', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg', 'Search Keywords': 'yamaha y15 y15zr y15 zr' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.productIntent, true);
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /Y15ZR|RM327/);
+  assert.doesNotMatch(decision.text, /Maaf|supaya saya boleh teruskan|Boleh saya tahu nama anda/i);
+});
+
+test('a first-message model enquiry gets the answer and then one natural profile question', () => {
+  const decision = buildInstantSalesDecision({
+    state: {}, lead: {}, text: 'Y15', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg', 'Search Keywords': 'yamaha y15 y15zr y15 zr' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /RM327/);
+  assert.match(decision.text, /nama anda/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
 test('instant product reply sends approved image and only one monthly instalment', () => {
   const decision = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
-    lead: { Region: 'WEST_MALAYSIA' }, text: 'I am looking for Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'WEST_MALAYSIA', State: 'Selangor', 'City or Area': 'Petaling Jaya' }, text: 'I am looking for Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '394', 'Monthly 4 Years (RM)': '318', 'Monthly 5 Years (RM)': '273', 'Selling Price (RM)': '12000', 'Deposit (RM)': '1000' }]
   });
@@ -299,7 +332,7 @@ test('the whole catalogue accepts natural customer shorthand instead of only sel
 test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
-    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' },
     text: 'motor nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
     motorCatalog: [
       { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax n max' },
@@ -319,7 +352,7 @@ test('an unpriced base model falls back to its approved priced variant instead o
 test('a recognised model without approved regional pricing gets a useful reply instead of silence', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
-    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax' }],
     motorPricing: []
   });
@@ -345,7 +378,6 @@ test('ambiguous shorthand asks one natural clarification instead of guessing', (
   assert.match(decision.text, /Maksud anda Yamaha Y16 ABS atau Yamaha Y16ZR/);
   assert.doesNotMatch(decision.text, /RM\d/);
 });
-
 
 test('brand-only questions do not invent an arbitrary model shortlist', () => {
   const catalog = [
@@ -390,6 +422,7 @@ test('a tenure follow-up answers only the requested monthly rate without resendi
   assert.match(decision.text, /RM310/);
   assert.doesNotMatch(decision.text, /RM225|IC depan|slip gaji/i);
 });
+
 test('phone shorthand groups colour rows and identifies the requested model family', () => {
   const catalog = [
     { 'Catalog ID': 'HP-17PM-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 256gb black official' },
