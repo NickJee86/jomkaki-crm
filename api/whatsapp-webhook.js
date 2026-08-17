@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { getAccessToken } from './_auth.js';
+import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -15,7 +16,7 @@ const INBOUND_RESERVATION_TTL_MS = 5 * 60 * 1000;
 const inboundMessageReservations = globalThis.__JOMKAKI_INBOUND_RESERVATIONS__ ||= new Map();
 const sheetReadCache = globalThis.__JOMKAKI_SHEET_READ_CACHE__ ||= new Map();
 
-function reserveInboundMessage(messageId, now = Date.now()) {
+export function reserveInboundMessage(messageId, now = Date.now()) {
   const id = clean(messageId);
   if (!id) return true;
   for (const [key, reservedAt] of inboundMessageReservations) {
@@ -26,7 +27,7 @@ function reserveInboundMessage(messageId, now = Date.now()) {
   return true;
 }
 
-function releaseInboundMessage(messageId) {
+export function releaseInboundMessage(messageId) {
   const id = clean(messageId);
   if (id) inboundMessageReservations.delete(id);
 }
@@ -38,10 +39,10 @@ function sheetCacheTtl(range) {
   return 0;
 }
 
-function invalidateSheetDataCache(sheet) {
+function invalidateSheetDataCache(sheet, includeHeaders = false) {
   const prefix = `${sheet}!`;
   for (const key of sheetReadCache.keys()) {
-    if (key.startsWith(prefix) && !key.endsWith('!1:1')) sheetReadCache.delete(key);
+    if (key.startsWith(prefix) && (includeHeaders || !key.endsWith('!1:1'))) sheetReadCache.delete(key);
   }
 }
 const requiresManager = text => /(human|agent|manager|supervisor|real person|真人|人工|客服|经理|主管|pegawai|pengurus|ejen|orang sebenar)/i.test(clean(text));
@@ -103,6 +104,7 @@ async function ensureHeaders(token, sheet, requiredHeaders) {
   if (!missing.length) return;
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
+  invalidateSheetDataCache(sheet, true);
 }
 
 async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
@@ -112,6 +114,19 @@ async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z'
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
   if (!data.length) return;
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, `Unable to update ${sheet}`);
+  invalidateSheetDataCache(sheet);
+}
+
+async function bindDocumentsToApplication(token, documents = [], applicationId = '') {
+  const pending = documents.filter(row => clean(row['Lead ID']) && !clean(row['Application ID']) && row.rowNumber);
+  if (!pending.length || !clean(applicationId)) return;
+  const [headers = []] = await readSheet(token, 'Document_Log!1:1');
+  const applicationColumn = headers.indexOf('Application ID');
+  if (applicationColumn < 0) return;
+  const data = pending.map(row => ({ range: `Document_Log!${columnName(applicationColumn)}${row.rowNumber}`, values: [[applicationId]] }));
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, 'Unable to bind customer documents to application');
+  invalidateSheetDataCache('Document_Log');
+  pending.forEach(row => { row['Application ID'] = applicationId; });
 }
 
 const truth = value => clean(value).toUpperCase() === 'TRUE';
@@ -128,15 +143,15 @@ export function hasRecentDocumentAcknowledgement(state = {}, now = Date.now(), w
   return documentReply && Number.isFinite(lastAt) && Math.max(0, Number(now) - lastAt) < windowMs;
 }
 
-
 export function inferDocumentTypeFromFileName(fileName = '') {
-  const name = clean(fileName).toUpperCase();
-  if (/CONSENT|CCRIS|CTOS/.test(name)) return 'CTOS_CCRIS_CONSENT_SIGNED';
-  if (/PROOF_OF_IDENTITY|MYKAD|IDENTITY|IC[_ -]?(FRONT|BACK)?/.test(name)) return 'IDENTITY_DOCUMENT';
-  if (/PAYSLIP|PAYSLIPS|SALARY/.test(name)) return 'PAYSLIP';
-  if (/EPF|KWSP/.test(name)) return 'EPF_STATEMENT';
-  if (/BANK[_ -]?STATEMENT/.test(name)) return 'BANK_STATEMENT';
-  if (/PROOF_OF_ADDRESS|UTILITY|ADDRESS/.test(name)) return 'PROOF_OF_ADDRESS';
+  const value = normalizedWords(fileName);
+  if (!value) return 'UNCLASSIFIED';
+  if (/\b(consent|ccris|ctos|kebenaran|authorisation|authorization)\b/.test(value)) return 'CTOS_CCRIS_CONSENT_SIGNED';
+  if (/\b(proof of identity|identity|mykad|kad pengenalan|passport|ic front|ic back)\b/.test(value)) return 'IDENTITY_DOCUMENT';
+  if (/\b(payslips?|pay slips?|salary slips?|slip gaji)\b/.test(value)) return 'PAYSLIP';
+  if (/\b(epf|kwsp|provident)\b/.test(value)) return 'EPF_STATEMENT';
+  if (/\b(bank statement|penyata bank)\b/.test(value)) return 'BANK_STATEMENT';
+  if (/\b(proof of address|address proof|utility|bil air|bil elektrik)\b/.test(value)) return 'PROOF_OF_ADDRESS';
   return 'UNCLASSIFIED';
 }
 
@@ -144,50 +159,74 @@ export function isDocumentStatusQuestion(value = '') {
   const text = normalizedWords(value);
   return /\b(dah|sudah|semua|dokumen|document|fail|file)\b.*\b(hantar|send|sent|cukup|lengkap|complete|check|semak|kurang|missing)\b/.test(text)
     || /\b(apa|what)\b.*\b(lagi|else|dokumen|document|perlu|need|missing)\b/.test(text)
-    || /\b(semua dah hantar|dah hantar semua|sudah hantar semua|all sent|sent everything|what else is needed)\b/.test(text);
+    || /\b(semua dah hantar|dah hantar semua|sudah hantar semua|all sent|sent everything|what else is needed)\b/.test(text)
+    || /(?:都发完|已经发完|还缺|还需要|什么文件)/u.test(clean(value));
 }
 
-export function buildDocumentProgressReply(language = 'MS', documents = []) {
+const documentTypeFromRow = row => {
+  const stored = clean(row['Document Type'] || row.type).toUpperCase();
+  return stored && stored !== 'UNCLASSIFIED' ? stored : inferDocumentTypeFromFileName(row['File Name'] || row.fileName);
+};
+
+const uniqueDocumentRows = documents => {
   const seen = new Set();
-  const rows = documents.filter(row => {
-    const fileName = clean(row['File Name']).toLowerCase();
-    const key = fileName || clean(row['Media ID'] || row['Message ID'] || row['Document ID']).toLowerCase();
+  return documents.filter(row => {
+    const fileName = clean(row['File Name'] || row.fileName).toLowerCase();
+    const key = fileName || clean(row['Media ID'] || row.mediaId || row['Message ID'] || row.messageId || row['Document ID'] || row.id).toLowerCase();
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
   });
-  if (!rows.length) return language === 'EN'
-    ? 'I cannot see any document in your application yet. Please send the front and back of your MyKad, plus your latest payslip or EPF statement here.'
-    : 'Saya belum nampak dokumen dalam permohonan anda. Boleh hantar IC depan dan belakang, serta slip gaji terkini atau penyata EPF di sini.';
-  const types = new Set(rows.map(row => {
-    const stored = clean(row['Document Type']).toUpperCase();
-    return stored && stored !== 'UNCLASSIFIED' ? stored : inferDocumentTypeFromFileName(row['File Name']);
-  }));
+};
+
+const documentProgress = documents => {
+  const rows = uniqueDocumentRows(documents);
+  const types = new Set(rows.map(documentTypeFromRow));
+  const accepted = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'ACCEPTED']);
+  const pending = rows.some(row => !accepted.has(clean(row['Verification Status'] || row.verification).toUpperCase()));
+  const failed = rows.some(row => ['REJECTED', 'FAILED', 'BLURRY', 'POOR'].includes(clean(row['Verification Status'] || row['Quality Status'] || row.verification || row.quality).toUpperCase()));
+  const hasCombinedIdentity = types.has('IDENTITY_DOCUMENT');
+  const missing = [];
+  if (!types.has('IC_FRONT') && !hasCombinedIdentity) missing.push('IC depan');
+  if (!types.has('IC_BACK') && !hasCombinedIdentity) missing.push('IC belakang');
+  if (![...types].some(type => ['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT'].includes(type))) missing.push('slip gaji atau penyata EPF');
   const labels = [
-    [types.has('IDENTITY_DOCUMENT') || types.has('IC_FRONT') || types.has('IC_BACK'), 'kad pengenalan'],
+    [hasCombinedIdentity || types.has('IC_FRONT') || types.has('IC_BACK'), 'kad pengenalan'],
     [types.has('PAYSLIP') || types.has('SALARY_SLIP'), 'slip gaji'],
-    [types.has('EPF_STATEMENT') || types.has('EPF'), 'penyata EPF'],
+    [types.has('EPF') || types.has('EPF_STATEMENT'), 'penyata EPF'],
     [types.has('BANK_STATEMENT'), 'penyata bank'],
     [types.has('PROOF_OF_ADDRESS'), 'bukti alamat'],
     [types.has('CTOS_CCRIS_CONSENT_SIGNED'), 'borang kebenaran CTOS/CCRIS']
   ].filter(([present]) => present).map(([, label]) => label);
-  const accepted = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'ACCEPTED']);
-  const pending = rows.some(row => !accepted.has(clean(row['Verification Status']).toUpperCase()));
-  const received = labels.length ? labels.join(', ') : rows.length + ' fail';
-  if (pending) return language === 'EN'
-    ? `I have received ${rows.length} file${rows.length === 1 ? '' : 's'} (${received}). Checking is still in progress. You do not need to resend anything; I will tell you clearly if a document is missing.`
-    : `Saya sudah terima ${rows.length} fail (${received}). Semakan masih berjalan. Tak perlu hantar semula; saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.`;
-  const hasIdentity = types.has('IDENTITY_DOCUMENT') || (types.has('IC_FRONT') && types.has('IC_BACK'));
-  const hasIncome = ['PAYSLIP', 'SALARY_SLIP', 'EPF_STATEMENT', 'EPF', 'INCOME_PROOF'].some(type => types.has(type));
-  const missing = [];
-  if (!hasIdentity) missing.push('IC depan dan belakang');
-  if (!hasIncome) missing.push('slip gaji terkini atau penyata EPF');
-  if (missing.length) return language === 'EN'
-    ? `Your documents have been checked. I still need: ${missing.join(' and ')}.`
-    : `Dokumen sudah disemak. Yang masih diperlukan: ${missing.join(' dan ')}.`;
-  return language === 'EN'
-    ? 'Your main documents are complete. The next step is the CTOS/CCRIS consent form.'
-    : 'Dokumen utama sudah lengkap. Langkah seterusnya ialah borang kebenaran CTOS/CCRIS.';
+  return { rows, types, pending, failed, missing, labels };
+};
+
+export function buildDocumentProgressReply(language = 'MS', documents = []) {
+  const status = documentProgress(documents);
+  if (!status.rows.length) {
+    if (language === 'ZH') return '我目前还没有在您的申请里看到文件。请把 MyKad 正反面，以及最新薪水单或 EPF 记录发到这里。';
+    if (language === 'EN') return 'I cannot see any document in your application yet. Please send the front and back of your MyKad, plus your latest payslip or EPF statement here.';
+    return 'Saya belum nampak dokumen dalam permohonan anda. Boleh hantar IC depan dan belakang, serta slip gaji terkini atau penyata EPF di sini.';
+  }
+  const received = status.labels.length ? status.labels.join(', ') : `${status.rows.length} fail`;
+  if (status.failed) {
+    if (language === 'ZH') return `我已经收到 ${status.rows.length} 份文件，但其中有文件不清楚或未通过检查。我会明确告诉您需要重新发送哪一份，不需要全部重发。`;
+    if (language === 'EN') return `I have received ${status.rows.length} file${status.rows.length === 1 ? '' : 's'}, but at least one is unclear or did not pass checking. I will tell you exactly which file needs to be resent; you do not need to resend everything.`;
+    return `Baik, saya sudah terima ${status.rows.length} fail. Ada dokumen yang kurang jelas atau belum lulus semakan. Saya akan beritahu fail yang tepat untuk dihantar semula; tak perlu hantar semuanya sekali lagi.`;
+  }
+  if (status.pending) {
+    if (language === 'ZH') return `我已经收到 ${status.rows.length} 份文件，包括${received}。系统正在核对完整性，目前不需要重新发送。检查完成后，我会清楚告诉您是否还缺任何文件。`;
+    if (language === 'EN') return `I have received ${status.rows.length} file${status.rows.length === 1 ? '' : 's'}, including ${received}. They are still being checked, so there is no need to resend anything now. I will tell you clearly if anything is missing after the check.`;
+    return `Baik, saya sudah terima ${status.rows.length} fail termasuk ${received}. Semakan masih berjalan, jadi tak perlu hantar semula sekarang. Selepas semakan siap, saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.`;
+  }
+  if (status.missing.length) {
+    if (language === 'ZH') return `已收到的文件包括${received}。目前还需要：${status.missing.join('、')}。其他文件不需要重新发送。`;
+    if (language === 'EN') return `I have received ${received}. The remaining items are: ${status.missing.join(', ')}. You do not need to resend the other documents.`;
+    return `Dokumen yang sudah diterima termasuk ${received}. Yang masih diperlukan ialah ${status.missing.join(' dan ')}. Dokumen lain tak perlu dihantar semula.`;
+  }
+  if (language === 'ZH') return '最低所需文件已经齐全并通过检查。下一步我会发送 CTOS/CCRIS 同意书给您签署。';
+  if (language === 'EN') return 'The minimum documents are complete and have passed checking. Next, I will send the CTOS/CCRIS consent form for your signature.';
+  return 'Dokumen minimum sudah lengkap dan lulus semakan. Langkah seterusnya, saya akan hantar borang kebenaran CTOS/CCRIS untuk ditandatangani.';
 }
 
 export function isStaleInboundMessage(receivedAt = '', latestInboundAt = '') {
@@ -333,12 +372,58 @@ export function buildInitialConversationState({ lead = {}, application = {}, rou
   };
 }
 
+export function buildAutomaticApplication({ lead = {}, state = {}, route = {}, decision = {}, applicationId = '', receivedAt = '', channelId = '', businessUnit = '', teamId = '' } = {}) {
+  const timestamp = clean(receivedAt) || new Date().toISOString();
+  const unit = canonicalBusinessUnit(decision.productUnit || state['Product Category'] || businessUnit || lead['Business Unit']) || 'MOTOR';
+  const product = decision.product || {};
+  return {
+    'Application ID': clean(applicationId) || makeId('APP'),
+    'Lead ID': clean(lead['Lead ID']),
+    'Created At': timestamp,
+    'Updated At': timestamp,
+    'Applicant Name': clean(state['Customer Name'] || lead['Customer Name']),
+    'Phone Number': clean(lead['Phone Number']),
+    Region: clean(lead.Region),
+    'Business Unit': unit,
+    'Customer ID': clean(lead['Customer ID']),
+    'Team ID': clean(teamId || lead['Team ID']),
+    'Origin WhatsApp Channel ID': clean(channelId || route['Internal Channel ID']),
+    'Product Category': unit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
+    'Product Brand': clean(product.Brand || state['Selected Product Brand']),
+    'Product Model': clean(product.Model || state['Selected Product Model']),
+    'Product Variant': clean(product.Variant) || 'Standard',
+    'Motor Type': unit === 'MOTOR' ? 'NEW' : '',
+    'Application Status': 'DRAFT',
+    'Current Stage': 'DOCUMENT_COLLECTION',
+    'Processing Mode': 'AI_MANAGED',
+    'Assigned Branch ID': clean(lead['Selected Branch ID'] || state['Selected Branch ID']),
+    'Assigned SA ID': '',
+    'Document Status': 'PENDING',
+    'Minimum Documents Complete': 'FALSE',
+    'Missing Documents': JOMKAKI_KNOWLEDGE.documents.minimum.join(', '),
+    'Credit Consent Status': 'NOT_SENT',
+    'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED',
+    'SA Review Required': 'FALSE',
+    'Created By': 'META_WEBHOOK',
+    'Updated By': 'META_WEBHOOK'
+  };
+}
+
+export function buildMediaProxyUrl({ mediaId = '', channelId = '', credentialKey = '', expires = 0, secret = process.env.META_APP_SECRET, baseUrl = process.env.JOMKAKI_CRM_PUBLIC_URL || 'https://jomkaki-crm.vercel.app' } = {}) {
+  const id = clean(mediaId), channel = clean(channelId), credential = credentialPrefix(credentialKey || channelId);
+  const expiry = Number(expires) || Math.floor(Date.now() / 1000) + 21600;
+  if (!id || !channel || !credential || !clean(secret)) return '';
+  const signature = crypto.createHmac('sha256', clean(secret)).update(`${id}|${channel}|${credential}|${expiry}`).digest('hex');
+  const query = new URLSearchParams({ id, channel, credential, expires: String(expiry), signature });
+  return `${clean(baseUrl).replace(/\/$/, '')}/api/whatsapp-media?${query.toString()}`;
+}
+
 const instantLanguage = text => {
   const value = clean(text);
   if (/[\u3400-\u9fff]/u.test(value)) return 'ZH';
   if (/\b(hai|saya|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari)\b/i.test(value)) return 'MS';
   if (/\b(i|i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply)\b/i.test(value)) return 'EN';
-  return 'MS';
+  return JOMKAKI_KNOWLEDGE.conversation.defaultLanguage;
 };
 
 const instantCopy = (language, key, values = {}) => {
@@ -520,20 +605,17 @@ const instantRate = (product, pricingRows = [], unit = '', region = '') => {
   });
   const row = ranked[0];
   if (!row) return null;
-  const rates = canonicalBusinessUnit(unit) === 'HANDPHONE'
-    ? [['60 months', row['Monthly 60 Months (RM)']], ['48 months', row['Monthly 48 Months (RM)']], ['36 months', row['Monthly 36 Months (RM)']], ['24 months', row['Monthly 24 Months (RM)']], ['12 months', row['Monthly 12 Months (RM)']]]
-    : [['5 years', row['Monthly 5 Years (RM)']], ['4 years', row['Monthly 4 Years (RM)']], ['3 years', row['Monthly 3 Years (RM)']]];
+  const rates = approvedMonthlyRateFields(unit).map(([tenure, field]) => [tenure, row[field]]);
   const selected = rates.find(([, amount]) => customerAmount(amount));
   return selected ? { tenure: selected[0], amount: customerAmount(selected[1]) } : null;
 };
 
-export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], documents = [], suppressDocumentAcknowledgement = false } = {}) {
+export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], suppressDocumentAcknowledgement = false } = {}) {
   const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
   if (['image', 'document'].includes(clean(messageType).toLowerCase())) return suppressDocumentAcknowledgement
     ? { handled: false, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: '' }
     : { handled: true, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
   if (!['text', 'button', 'interactive'].includes(clean(messageType).toLowerCase())) return { handled: false };
-  if (step === 'STEP_04_DOCUMENTS' && isDocumentStatusQuestion(text)) return { handled: true, nextStep: 'STEP_04_DOCUMENTS', text: buildDocumentProgressReply(language, documents) };
   if (/^(hi|hello|hey|hai|你好|嗨)[!. ]*$/i.test(clean(text)) || !step || step === 'STEP_01_WELCOME') return { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME') };
   const explicitUnit = productUnitFromText(text, ''), fallbackUnit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit);
   const allCatalogs = [
@@ -579,6 +661,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, text = '', me
       imageUrl: approvedImage,
       text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount })
     };
+  }
+  if (step === 'STEP_04_DOCUMENTS' && isDocumentStatusQuestion(text)) {
+    return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: unit, text: buildDocumentProgressReply(language, documents) };
   }
   if (step === 'STEP_01_NAME') {
     const name = extractCustomerName(text);
@@ -672,6 +757,7 @@ async function updateOutboxStatus(token, providerId, status, errorMessage = '') 
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-JomKaki-Knowledge-Version', JOMKAKI_KNOWLEDGE.version);
   if (req.method === 'GET') {
     if (clean(req.query['hub.mode']) === 'subscribe' && clean(req.query['hub.verify_token']) === clean(process.env.WHATSAPP_VERIFY_TOKEN)) return res.status(200).send(clean(req.query['hub.challenge']));
     return res.status(403).send('Verification failed');
@@ -696,22 +782,22 @@ export default async function handler(req, res) {
     if (!inboundMessages.some(message => !message.__skipDuplicate)) return res.status(200).json({ ok: true, duplicate: true });
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const [leadRows, routeRows, branchRows, stateRows, inboxRows, documentRows] = await Promise.all([
+    const [leadRows, routeRows, branchRows, stateRows, inboxRows] = await Promise.all([
       readSheet(token, 'Leads!A1:AP1000'),
       readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
       readSheet(token, 'Branch_Master!A1:S1000'),
       readSheet(token, 'Conversation_State!A1:AK2000'),
-      readSheet(token, 'Customer_Inbox!F1:F1200'),
-      readSheet(token, 'Document_Log!A1:Z2000')
+      readSheet(token, 'Customer_Inbox!F1:F1200')
     ]);
     const leads = objects(leadRows);
     const routes = objects(routeRows);
     const branches = objects(branchRows);
     const conversationStates = objects(stateRows);
-    const documents = objects(documentRows);
     let applicationsPromise;
     let catalogDataPromise;
+    let documentsPromise;
     const loadApplications = () => applicationsPromise ||= readSheet(token, 'Applications!A1:CC1000').then(objects);
+    const loadDocuments = () => documentsPromise ||= readSheet(token, 'Document_Log!A1:AD2000').then(objects);
     const loadCatalogData = () => catalogDataPromise ||= Promise.all([
       readSheet(token, 'Motor_Model_Catalog!A1:Q1000'),
       readSheet(token, 'Motor_Loan_Pricing!A1:Z1000'),
@@ -791,9 +877,11 @@ export default async function handler(req, res) {
         const locationConfirmed = !!clean(lead?.['City or Area'] || lead?.State || conversationState?.['Selected Branch ID']);
         const needsCatalog = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(currentStep) || locationConfirmed;
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
+        const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text));
+        const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
         const instantDecision = buildInstantSalesDecision({
-          state: conversationState || {}, lead: lead || {}, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
-          ...catalogData, documents: lead ? documents.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [], suppressDocumentAcknowledgement
+          state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
+          ...catalogData, suppressDocumentAcknowledgement
         });
         const willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
@@ -811,9 +899,17 @@ export default async function handler(req, res) {
           lead['Last Inbound At'] = receivedAt;
           lead['Last Customer Reply At'] = receivedAt;
         }
-        const shouldLoadApplication = ['image', 'document'].includes(clean(message.type).toLowerCase()) || !!clean(conversationState?.['Application ID']);
+        const shouldEnsureApplication = mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || clean(instantDecision.nextStep).toUpperCase() === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text);
+        const shouldLoadApplication = shouldEnsureApplication || !!clean(conversationState?.['Application ID']);
         const applications = shouldLoadApplication ? await loadApplications() : [];
-        const application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
+        let application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
+        if (!clean(application['Application ID']) && shouldEnsureApplication) {
+          application = buildAutomaticApplication({ lead, state: conversationState || {}, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
+          await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
+          await appendObject(token, 'Applications', application);
+          applications.push(application);
+          await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
+        }
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
         if (!conversationState) {
           conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
@@ -858,6 +954,7 @@ export default async function handler(req, res) {
             Object.assign(lead, leadIdentity);
           }
           const latestInbound = {
+            'Application ID': clean(application['Application ID'] || conversationState['Application ID']),
             'Last Customer Message': clean(text),
             'Last Message ID': clean(message.id),
             'Last Customer Reply At': clean(receivedAt),
@@ -895,7 +992,9 @@ export default async function handler(req, res) {
         }
         if (documentAckReserved && !instantResult.sent) documentBatchAcknowledgements.delete(documentAckKey);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
-        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        const media = message.document || message.image;
+        const attachmentUrl = media?.id ? buildMediaProxyUrl({ mediaId: media.id, channelId, credentialKey: route['Credential Key'] || channelId }) : '';
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? 'AI_REPLIED_INSTANTLY' : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
           const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
@@ -911,14 +1010,14 @@ export default async function handler(req, res) {
           });
         }
         if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'AC');
-        const media = message.document || message.image;
         if (media?.id) {
           await ensureHeaders(token, 'Document_Log', ['Uploaded By', 'Reviewed By', 'Reviewed At']);
+          const inferredDocumentType = inferDocumentTypeFromFileName(message.document?.filename || '');
           await appendObject(token, 'Document_Log', {
           'Document ID': makeId('DOC'), 'Application ID': application['Application ID'] || '', 'Lead ID': lead['Lead ID'] || '',
           'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Message ID': message.id || '',
-          'Document Type': 'UNCLASSIFIED', 'Media ID': media.id, 'Mime Type': media.mime_type || '', 'File Name': message.document?.filename || '',
-          'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
+          'Document Type': inferredDocumentType, 'Media ID': media.id, 'Mime Type': media.mime_type || '', 'File Name': message.document?.filename || '', 'File URL': attachmentUrl,
+          'Classification Status': inferredDocumentType === 'UNCLASSIFIED' ? 'AI_QUEUED' : 'FILENAME_CLASSIFIED_PENDING_AI', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
           'Manual Review Required': 'FALSE', Remarks: 'Received from WhatsApp and queued for automatic AI validation', 'Updated At': new Date().toISOString(), 'Uploaded By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Customer ID': lead['Customer ID'] || ''
           });
         }
