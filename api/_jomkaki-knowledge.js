@@ -1,6 +1,6 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-17.4',
+  version: '2026-08-17.5',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   status: 'APPROVED',
   conversation: Object.freeze({
@@ -23,7 +23,8 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
   }),
   pricing: Object.freeze({
     exposeCashPrice: false,
-    exposeDeposit: false,
+    exposeMotorDeposit: true,
+    exposeHandphoneDeposit: false,
     motorMonthlyFields: Object.freeze([
       ['5 years', 'Monthly 5 Years (RM)'],
       ['4 years', 'Monthly 4 Years (RM)'],
