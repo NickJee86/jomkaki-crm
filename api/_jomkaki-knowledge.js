@@ -1,6 +1,6 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-17.3',
+  version: '2026-08-17.4',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   status: 'APPROVED',
   conversation: Object.freeze({
@@ -9,6 +9,8 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
     discloseAutomation: false,
     maximumQuestionsPerReply: 1,
     emojiPolicy: 'ONLY_WHEN_NATURAL',
+    answerCustomerIntentBeforeProfileQuestions: true,
+    profileCollectionIsNonBlocking: true,
     firstQuestions: Object.freeze(['CUSTOMER_NAME', 'CUSTOMER_LOCATION', 'PRODUCT_AND_MODEL']),
     aiFallback: Object.freeze({
       enabled: true,
