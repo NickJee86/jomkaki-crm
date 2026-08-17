@@ -52,6 +52,6 @@ test('Consent does not incorrectly count as a routine application document',()=>
   const readiness=api.slice(api.indexOf('function deriveDocumentReadiness'),api.indexOf('export default async function handler'));
   assert.match(readiness,/routineDocuments/);
   assert.match(readiness,/CREDIT_CONSENT_DOCUMENT_TYPE/);
-  assert.match(api,/Applications!A1:BX1000/);
-  assert.doesNotMatch(api,/Applications!A1:BN1000/);
+  assert.match(api,/Applications!A1:CZ1000/);
+  assert.match(api,/appendDimension/);
 });
