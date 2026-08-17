@@ -74,7 +74,7 @@ async function updateOutbox(token, rowNumber, changes) {
 
 async function updateApplication(token, applicationId, changes) {
   if (!clean(applicationId)) return;
-  const rows = await readSheet(token, 'Applications!A1:CC2000');
+  const rows = await readSheet(token, 'Applications!A1:CZ2000');
   const headers = rows[0] || [], idIndex = headers.indexOf('Application ID');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(applicationId));
   if (rowIndex < 1) return;
