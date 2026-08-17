@@ -345,6 +345,36 @@ test('ambiguous shorthand asks one natural clarification instead of guessing', (
   assert.doesNotMatch(decision.text, /RM\d/);
 });
 
+
+test('brand-only questions do not invent an arbitrary model shortlist', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-EGOA', Brand: 'Yamaha', Model: 'Ego Avantiz', Active: 'TRUE', 'Search Keywords': 'yamaha ego avantiz' },
+    { 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear' },
+    { 'Catalog ID': 'MTR-YAM-Y16', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr' }
+  ];
+  assert.equal(matchInstantProduct('nak tanya motor yamaha', catalog).product, null);
+  assert.equal(matchInstantProduct('nak tanya motor yamaha', catalog).ambiguous, false);
+});
+
+test('short clarification answers are combined with the previous customer model words', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-EGOA', Brand: 'Yamaha', Model: 'Ego Avantiz', Active: 'TRUE', 'Search Keywords': 'yamaha ego avantiz' },
+    { 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear' },
+    { 'Catalog ID': 'MTR-YAM-EGOGH', Brand: 'Yamaha', Model: 'Ego Gear Hybrid', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear hybrid' }
+  ];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Last Customer Message': 'ego' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'gear', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: catalog,
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-EGOG', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '250' }]
+  });
+  assert.equal(decision.product.Model, 'Ego Gear');
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /Ego Gear/);
+  assert.doesNotMatch(decision.text, /Gear Hybrid|Pilih satu/i);
+});
+
 test('phone shorthand groups colour rows and identifies the requested model family', () => {
   const catalog = [
     { 'Catalog ID': 'HP-17PM-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 256gb black official' },
