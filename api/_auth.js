@@ -18,10 +18,11 @@ const legacyPasswordHash = value => crypto.createHash('sha256').update(String(va
 const normaliseRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const normaliseRole = value => clean(value).toUpperCase() === 'BRANCH_MANAGER' ? 'BRANCH_SUPERVISOR' : clean(value).toUpperCase();
 const normaliseBusinessAccess = (value, role) => {
+  const normalizedRole = normaliseRole(role);
+  if (normalizedRole === 'ADMIN' || normalizedRole === 'REGION_MANAGER') return 'BOTH';
   const access = clean(value).toUpperCase();
   if (['MOTOR', 'HANDPHONE', 'BOTH'].includes(access)) return access;
-  const normalizedRole = normaliseRole(role);
-  if (normalizedRole === 'ADMIN' || normalizedRole === 'STAFF') return 'BOTH';
+  if (normalizedRole === 'STAFF') return 'BOTH';
   if (normalizedRole === 'BUSINESS_MANAGER') return 'HANDPHONE';
   return 'MOTOR';
 };
@@ -50,8 +51,8 @@ const staffAccounts = () => {
 
 const environmentAccounts = () => [
   { username: process.env.CRM_ADMIN_USERNAME || 'admin', password: process.env.CRM_ACCESS_PASSWORD, role: 'ADMIN', region: 'ALL', businessAccess: 'BOTH', name: process.env.CRM_ADMIN_NAME || 'Nick Jee' },
-  { username: process.env.CRM_EAST_MANAGER_USERNAME, password: process.env.CRM_EAST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'EAST_MALAYSIA', businessAccess: 'MOTOR', name: process.env.CRM_EAST_MANAGER_NAME || 'East Malaysia Manager' },
-  { username: process.env.CRM_WEST_MANAGER_USERNAME, password: process.env.CRM_WEST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'WEST_MALAYSIA', businessAccess: 'MOTOR', name: process.env.CRM_WEST_MANAGER_NAME || 'West Malaysia Manager' },
+  { username: process.env.CRM_EAST_MANAGER_USERNAME, password: process.env.CRM_EAST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'EAST_MALAYSIA', businessAccess: 'BOTH', name: process.env.CRM_EAST_MANAGER_NAME || 'East Malaysia Manager' },
+  { username: process.env.CRM_WEST_MANAGER_USERNAME, password: process.env.CRM_WEST_MANAGER_PASSWORD, role: 'REGION_MANAGER', region: 'WEST_MALAYSIA', businessAccess: 'BOTH', name: process.env.CRM_WEST_MANAGER_NAME || 'West Malaysia Manager' },
   ...staffAccounts()
 ].filter(account => account.username && (account.password || account.passwordHash)).map(account => ({ ...account, role: normaliseRole(account.role), businessAccess: normaliseBusinessAccess(account.businessAccess, account.role), authSource: 'environment', authVersion: 'environment' }));
 
