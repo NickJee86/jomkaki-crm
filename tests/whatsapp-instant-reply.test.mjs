@@ -294,7 +294,8 @@ test('instant motor reply sends approved deposit, image and only one monthly ins
 });
 
 test('a customer can ask the deposit for the already selected motor', () => {
-  const decision = buildInstantSalesDe…31 tokens truncated… Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
     lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'deposit berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299', 'Deposit (RM)': '1500', 'Selling Price (RM)': '13000' }]
