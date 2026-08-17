@@ -14,7 +14,7 @@ test('The supplied consent form is published as a fixed CRM template',()=>{
   assert.ok(file.length>10_000);
   assert.equal(file.subarray(0,4).toString(),'%PDF');
   assert.match(ui,/ctos-ccris-consent-bph-v4\.pdf/);
-  assert.match(html,/20260811-credit-consent2/);
+  assert.match(html,/business-architecture\.css\?v=20260817-product-photo-approval1/);
 });
 
 test('New Application and secure upload accept signed consent separately',()=>{
@@ -30,13 +30,16 @@ test('Consent has a full send, upload, manager verification and readiness workfl
   assert.match(ui,/post\('sendCreditConsent'/);
   assert.match(ui,/post\('verifyCreditConsent'/);
   assert.match(ui,/post\('prepareCreditCheck'/);
-  assert.match(ui,/Manager verified/);
+  assert.match(ui,/AI validated/);
   assert.match(ui,/Sample only · actions disabled/);
   assert.match(api,/if \(action === 'sendCreditConsent'\)/);
   assert.match(api,/if \(action === 'setCreditConsentOutcome'\)/);
   assert.match(api,/if \(action === 'verifyCreditConsent'\)/);
   assert.match(api,/if \(action === 'prepareCreditCheck'\)/);
   assert.match(api,/SIGNED_PENDING_VERIFICATION/);
+  assert.match(api,/mode: 'AUTOMATED_QUEUE'/);
+  assert.match(api,/'Send Status': 'PENDING'/);
+  assert.doesNotMatch(api,/MANUAL_PENDING:CONSENT_REQUEST/);
 });
 
 test('Credit checking is blocked until consent and documents are ready',()=>{

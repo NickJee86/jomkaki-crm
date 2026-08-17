@@ -62,13 +62,13 @@ const rowBusinessUnit = row => {
 };
 const businessAllows = (access, unit) => canonicalBusinessAccess(access) === 'BOTH' || canonicalBusinessAccess(access) === canonicalBusinessUnit(unit);
 const businessSheets = unit => canonicalBusinessUnit(unit) === 'HANDPHONE'
-  ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'AB', pricingMax: 'AO', idPrefix: 'HP' }
-  : { unit: 'MOTOR', catalog: 'Motor_Model_Catalog', pricing: 'Motor_Loan_Pricing', catalogMax: 'AB', pricingMax: 'AM', idPrefix: 'MTR' };
-const handphoneCatalogApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Branch Availability', 'Supersedes Catalog ID'];
+  ? { unit: 'HANDPHONE', catalog: 'Handphone_Model_Catalog', pricing: 'Handphone_Loan_Pricing', catalogMax: 'AD', pricingMax: 'AO', idPrefix: 'HP' }
+  : { unit: 'MOTOR', catalog: 'Motor_Model_Catalog', pricing: 'Motor_Loan_Pricing', catalogMax: 'AD', pricingMax: 'AM', idPrefix: 'MTR' };
+const handphoneCatalogApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Branch Availability', 'Supersedes Catalog ID', 'Image File ID', 'Image MIME Type'];
 const handphonePricingApprovalHeaders = ['Approval Status', 'Submitted By', 'Submitted At', 'Approved By', 'Approved At', 'Approval Notes', 'Publish Requested', 'Promotion Publish Requested', 'Submitted Region', 'Submitted Branch ID', 'Minimum Product Price (RM)', 'Admin Review Required', 'Supersedes Pricing ID'];
-const handphoneCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Operating System', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image Caption (MS)', 'Stock Check Mode', 'Region Availability', 'Warehouse Availability', 'Search Keywords'];
+const handphoneCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Operating System', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image File ID', 'Image MIME Type', 'Image Caption (MS)', 'Stock Check Mode', 'Region Availability', 'Warehouse Availability', 'Search Keywords'];
 const handphonePricingPublishFields = ['Catalog ID', 'Brand', 'Model', 'Variant', 'Price Zone', 'Monthly 12 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 60 Months (RM)', 'Effective From', 'Effective To', 'Internal Notes'];
-const motorCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Fuel Type', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image Caption (MS)', 'Stock Check Mode', 'Branch Availability', 'Warehouse Availability', 'Search Keywords'];
+const motorCatalogPublishFields = ['Brand', 'Model', 'Variant', 'Category', 'Fuel Type', 'Popularity Tier', 'Product Page URL', 'Image URL', 'Image File ID', 'Image MIME Type', 'Image Caption (MS)', 'Stock Check Mode', 'Branch Availability', 'Warehouse Availability', 'Search Keywords'];
 const motorPricingPublishFields = ['Catalog ID', 'Brand', 'Model', 'Variant', 'Price Zone', 'Deposit (RM)', 'Monthly 3 Years (RM)', 'Monthly 4 Years (RM)', 'Monthly 5 Years (RM)', 'Effective From', 'Effective To', 'Internal Notes', 'Promotion Name', 'Promotion Deposit (RM)', 'Promotion Start', 'Promotion End', 'Promotion Notes'];
 const selectedFields = (row, fields) => Object.fromEntries(fields.map(field => [field, row[field]]));
 export const productApprovalStatus = row => clean(row?.['Approval Status']).toUpperCase() || (clean(row?.['Submitted By']) ? 'PENDING_APPROVAL' : 'APPROVED');
@@ -292,6 +292,29 @@ async function uploadSecondHandMotorPhoto(file, inventoryId) {
   return graph(token, `/drives/${drive.id}/items/${motorFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
     method: 'PUT', headers: { 'content-type': mimeType }, body: bytes
   });
+}
+
+async function uploadProductCatalogImage(file, catalogId, businessUnit) {
+  const { bytes, mimeType } = validateUploadFile(file, { label: 'Product photo', imageOnly: true });
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new Error('Use a JPG, PNG or WebP product photo so WhatsApp can display it');
+  const token = await getSharePointToken();
+  const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
+  const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
+  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
+  const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
+  const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
+  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
+  if (!drive) throw new Error('SharePoint document library was not found');
+  const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
+  const catalogFolder = await ensureFolder(token, drive.id, root.id, 'CRM Product Catalog Photos');
+  const unitFolder = await ensureFolder(token, drive.id, catalogFolder.id, canonicalBusinessUnit(businessUnit));
+  const productFolder = await ensureFolder(token, drive.id, unitFolder.id, catalogId);
+  const extension = mimeType.split('/')[1].replace('jpeg', 'jpg');
+  const safeName = `${catalogId}-${Date.now()}.${extension}`;
+  const uploaded = await graph(token, `/drives/${drive.id}/items/${productFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
+    method: 'PUT', headers: { 'content-type': mimeType }, body: bytes
+  });
+  return { ...uploaded, mimeType };
 }
 
 const makeId = prefix => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
@@ -836,13 +859,36 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { type: 'CRM_SECOND_HAND_MOTOR_SUBMITTED_FOR_APPROVAL', description: `${brand} ${model} added and submitted for approval at ${location || branchId}` });
         return res.status(201).json({ live: true, inventoryId: newInventoryId, approvalStatus: 'PENDING_APPROVAL' });
       }
-      if (['saveCatalogItem', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled', 'reviewProductCatalog', 'reviewProductPricing', 'reviewHandphoneCatalog', 'reviewHandphonePricing', 'setHandphoneStockAvailability'].includes(action)) {
+      if (['saveCatalogItem', 'uploadProductCatalogImage', 'savePricingPromotion', 'setCatalogItemEnabled', 'setPricingEnabled', 'setPromotionEnabled', 'reviewProductCatalog', 'reviewProductPricing', 'reviewHandphoneCatalog', 'reviewHandphonePricing', 'setHandphoneStockAvailability'].includes(action)) {
         const businessUnit = canonicalBusinessUnit(body.businessUnit) || 'MOTOR';
         const config = businessSheets(businessUnit);
         const admin = canonicalRole(session.role) === 'ADMIN';
         if (!canSubmitProduct(session, businessUnit)) return res.status(403).json({ live: false, error: `${businessUnit === 'HANDPHONE' ? 'Handphone' : 'Motor'} product submission access is required.` });
         await ensureSheetHeaders(req, config.catalog, handphoneCatalogApprovalHeaders);
         await ensureSheetHeaders(req, config.pricing, handphonePricingApprovalHeaders);
+        if (action === 'uploadProductCatalogImage') {
+          const catalogId = clean(body.catalogId);
+          if (!catalogId) throw new Error('Save the product before uploading its photo');
+          const [rows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]);
+          const record = rowsToObjects(rows).find(row => clean(row['Catalog ID']) === catalogId);
+          if (!record) throw new Error('Save the product before uploading its photo');
+          if (!productVisibleToSession(session, record, 'catalog', businessUnit)) return res.status(403).json({ live: false, error: 'This product is outside your permitted region.' });
+          const approvalStatus = productApprovalStatus(record);
+          if (!admin && approvalStatus === 'APPROVED') throw new Error('Submit the product change first, then attach the photo to its pending approval record');
+          const uploaded = await uploadProductCatalogImage(body.file || {}, catalogId, businessUnit);
+          const publicBase = (clean(process.env.JOMKAKI_CRM_PUBLIC_URL) || 'https://jomkaki-crm.vercel.app').replace(/\/$/, '');
+          const imageUrl = `${publicBase}/api/product-image?businessUnit=${encodeURIComponent(businessUnit)}&catalogId=${encodeURIComponent(catalogId)}&v=${Date.now()}`;
+          const pendingApproval = !admin || approvalStatus !== 'APPROVED';
+          await updateObject(req, config.catalog, 'Catalog ID', catalogId, {
+            'Image URL': imageUrl, 'Image File ID': uploaded.id, 'Image MIME Type': uploaded.mimeType,
+            'Image Approved': pendingApproval ? 'FALSE' : 'TRUE', 'Approval Status': pendingApproval ? 'PENDING_APPROVAL' : 'APPROVED',
+            Active: pendingApproval ? 'FALSE' : record.Active, 'Submitted By': pendingApproval ? session.username : record['Submitted By'],
+            'Submitted At': pendingApproval ? now() : record['Submitted At'], 'Approved By': pendingApproval ? '' : session.username,
+            'Approved At': pendingApproval ? '' : now(), 'Approval Notes': '', 'Last Verified At': now().slice(0, 10)
+          }, config.catalogMax);
+          await writeActivity(req, session, { type: `CRM_${businessUnit}_CATALOG_IMAGE_UPLOADED`, description: `${businessUnit} ${record.Brand} ${record.Model} photo uploaded${pendingApproval ? ' for Admin approval' : ' and approved by Admin'}` });
+          return res.status(201).json({ live: true, catalogId, businessUnit, imageUrl, approvalStatus: pendingApproval ? 'PENDING_APPROVAL' : 'APPROVED' });
+        }
         if (action === 'setHandphoneStockAvailability') {
           if (businessUnit !== 'HANDPHONE') throw new Error('Branch stock updates are available for Handphone only');
           const catalogId = clean(body.catalogId), branchId = clean(body.branchId || session.branchId), status = clean(body.status).toUpperCase(), quantity = amount(body.quantity, 'Stock quantity', true);
@@ -1641,10 +1687,10 @@ export default async function handler(req, res) {
     }
 
     if (resource === 'catalog') {
-      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Model_Catalog!A1:AB1000', 'Handphone_Model_Catalog!A1:AB1000']);
+      const [motorRows, handphoneRows] = await readRanges(req, ['Motor_Model_Catalog!A1:AD1000', 'Handphone_Model_Catalog!A1:AD1000']);
       const mapCatalog = (row, businessUnit) => ({
         id: row['Catalog ID'], businessUnit, brand: row.Brand, model: row.Model, variant: row.Variant, category: row.Category, fuel: row['Fuel Type'], operatingSystem: row['Operating System'], tier: row['Popularity Tier'],
-        productPageUrl: row['Product Page URL'], imageUrl: row['Image URL'], image: truth(row['Image Approved']) ? row['Image URL'] : '', imageCaption: row['Image Caption (MS)'], imageApproved: truth(row['Image Approved']),
+        productPageUrl: row['Product Page URL'], imageUrl: row['Image URL'], image: truth(row['Image Approved']) ? row['Image URL'] : '', imagePreview: (canSubmitProduct(session, businessUnit) || canReviewProduct(session)) ? row['Image URL'] : '', imageCaption: row['Image Caption (MS)'], imageApproved: truth(row['Image Approved']),
         active: truth(row.Active), stock: row['Stock Check Mode'], branchAvailability: row['Branch Availability'], branchStock: businessUnit === 'HANDPHONE' ? handphoneBranchStockEntries(row['Branch Availability']) : [], regionAvailability: row['Region Availability'], warehouseAvailability: row['Warehouse Availability'], searchKeywords: row['Search Keywords'], lastVerified: row['Last Verified At'],
         approvalStatus: productApprovalStatus(row), submittedBy: row['Submitted By'], submittedAt: row['Submitted At'], approvedBy: row['Approved By'], approvedAt: row['Approved At'], approvalNotes: row['Approval Notes'], publishRequested: truth(row['Publish Requested']), submittedRegion: row['Submitted Region'], submittedBranchId: row['Submitted Branch ID'], supersedesCatalogId: row['Supersedes Catalog ID'], canEdit: canSubmitProduct(session, businessUnit) && !(canonicalRole(session.role) === 'ADMIN' && productApprovalStatus(row) !== 'APPROVED'), canReview: canReviewProduct(session) && productApprovalStatus(row) === 'PENDING_APPROVAL'
       });
