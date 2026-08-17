@@ -53,4 +53,3 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
-
