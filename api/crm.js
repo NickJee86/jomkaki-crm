@@ -203,6 +203,22 @@ async function ensureSheetHeaders(req, sheet, requiredHeaders) {
   const missing = requiredHeaders.filter(header => !headers.includes(header));
   if (!missing.length) return headers;
   const token = await getAccessToken(req);
+  const metadataResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties(columnCount))`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  if (!metadataResponse.ok) throw new Error(`Unable to inspect ${sheet} grid (${metadataResponse.status})`);
+  const metadata = await metadataResponse.json();
+  const properties = (metadata.sheets || []).map(item => item.properties || {}).find(item => item.title === sheet);
+  if (!properties) throw new Error(`${sheet} worksheet was not found`);
+  const requiredColumnCount = headers.length + missing.length;
+  const currentColumnCount = Number(properties.gridProperties?.columnCount || 0);
+  if (requiredColumnCount > currentColumnCount) {
+    const expandResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ requests: [{ appendDimension: { sheetId: properties.sheetId, dimension: 'COLUMNS', length: requiredColumnCount - currentColumnCount } }] })
+    });
+    if (!expandResponse.ok) throw new Error(`Unable to expand ${sheet} grid (${expandResponse.status})`);
+  }
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, {
     method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] })
@@ -1160,7 +1176,7 @@ export default async function handler(req, res) {
       }
       if (action === 'sendCreditConsent') {
         const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches), application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1192,7 +1208,7 @@ export default async function handler(req, res) {
       if (action === 'setCreditConsentOutcome') {
         const applicationId = clean(body.applicationId), outcome = clean(body.outcome).toUpperCase();
         if (!['DECLINED', 'WITHDRAWN'].includes(outcome)) throw new Error('Consent outcome must be Declined or Withdrawn');
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1205,7 +1221,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to verify credit consent.' });
         const applicationId = clean(body.applicationId), decision = clean(body.decision || 'VERIFIED').toUpperCase();
         if (!['VERIFIED', 'REJECTED'].includes(decision)) throw new Error('Consent decision must be Verified or Rejected');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1231,7 +1247,7 @@ export default async function handler(req, res) {
       if (action === 'prepareCreditCheck') {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to prepare a credit check.' });
         const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1246,7 +1262,7 @@ export default async function handler(req, res) {
       if (action === 'uploadDocument') {
         const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
         if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
         const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
         if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
@@ -1287,7 +1303,7 @@ export default async function handler(req, res) {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
         const statuses = ['DRAFT', 'IN_PROGRESS', 'MANUAL_REVIEW', 'APPROVED', 'REJECTED', 'COMPLETED', 'CANCELLED'];
-        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
+        const [leadRows, applicationRows, branchRows, saRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -1324,7 +1340,7 @@ export default async function handler(req, res) {
         if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to resolve an AI document exception.' });
         const documentId = clean(body.documentId), verification = clean(body.verification).toUpperCase(), quality = clean(body.quality).toUpperCase();
         if (!['PENDING', 'VERIFIED', 'REJECTED'].includes(verification) || !['PENDING_REVIEW', 'GOOD', 'POOR'].includes(quality)) throw new Error('A valid review decision is required');
-        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
         if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
@@ -1347,7 +1363,7 @@ export default async function handler(req, res) {
       }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
-        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000']);
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
@@ -1388,7 +1404,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ live: true, applicationId });
       }
       if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -1510,7 +1526,7 @@ export default async function handler(req, res) {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CC1000', 'Branch_Master!A1:S1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
