@@ -9,7 +9,7 @@ test('automatic consent delivery synchronizes application consent state',()=>{
   assert.match(source,/JKM_CREDIT_CONSENT_REQUEST/);
   assert.match(source,/Credit Consent Status': 'SENT'/);
   assert.match(source,/CONSENT_PENDING_SIGNATURE/);
-  assert.match(source,/Applications!A1:CC2000/);
+  assert.match(source,/Applications!A1:CZ2000/);
 });
 const activeRoute = { 'Internal Channel ID': 'JKM-WA-EAST-01', 'Phone Number ID': 'E-100', 'Credential Key': 'JKM_WA_EAST_01', Active: 'TRUE', 'Outbound Enabled': 'TRUE' };
 
