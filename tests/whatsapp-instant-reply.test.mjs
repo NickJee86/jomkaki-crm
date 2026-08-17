@@ -18,8 +18,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-5.6-luna');
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, 'none');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-4.1-mini');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, '');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
@@ -38,14 +38,14 @@ test('inbound message reservation blocks concurrent duplicate delivery and permi
 });
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
+  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /已收到/);
+  assert.match(chinese, /å·²æ”¶åˆ°/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /received/);
   [chinese, malay, english].forEach(message => {
-    assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i);
+    assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i);
     assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
   });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
@@ -216,7 +216,7 @@ test('instant sales flow asks name, then location, then product', () => {
   assert.match(welcome.text, /nama/i);
   assert.match(welcome.text, /terima kasih|ansuran bulanan/i);
   assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
-  assert.doesNotMatch(welcome.text, /[👍😊🙂🤖]/u);
+  assert.doesNotMatch(welcome.text, /[ðŸ‘ðŸ˜ŠðŸ™‚ðŸ¤–]/u);
 
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
   assert.equal(name.customerName, 'Nick');
@@ -393,8 +393,8 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     routeBusinessUnit: 'MOTOR',
     phone: '60123456789'
   });
-  assert.equal(request.model, 'gpt-5.6-luna');
-  assert.deepEqual(request.reasoning, { effort: 'none' });
+  assert.equal(request.model, 'gpt-4.1-mini');
+  assert.equal(request.reasoning, undefined);
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier.length, 64);
   assert.equal(request.input.includes('60123456789'), false);
@@ -402,18 +402,19 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
 
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
-    assert.equal(body.model, 'gpt-5.6-luna');
+    assert.equal(body.model, 'gpt-4.1-mini');
+    assert.equal(body.reasoning, undefined);
     assert.equal(body.store, false);
-    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? 😊 Soalan kedua?' }] }] }) };
+    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? ðŸ˜Š Soalan kedua?' }] }] }) };
   };
   const reply = await requestAiFallbackReply({
     text: 'boleh explain lagi?',
     state: { 'Current Step': 'STEP_04_DOCUMENTS' },
     phone: '60123456789',
-    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-5.6-luna' },
+    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-4.1-mini' },
     fetchImpl
   });
-  assert.equal(reply.includes('😊'), false);
+  assert.equal(reply.includes('ðŸ˜Š'), false);
   assert.equal((reply.match(/\?/g) || []).length, 1);
   assert.equal(sanitizeAiFallbackReply('Harga ialah RM999. Berapa bajet anda?', 'MS'), '');
   assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
@@ -439,3 +440,4 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
+
