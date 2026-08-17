@@ -98,10 +98,34 @@ async function appendObject(token, sheet, object) {
   invalidateSheetDataCache(sheet);
 }
 
+
+async function ensureSheetColumnCapacity(token, sheet, requiredColumnCount) {
+  const metadataResponse = await googleRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties(columnCount))`,
+    { headers: { authorization: `Bearer ${token}` } },
+    `Unable to inspect ${sheet} grid`
+  );
+  const metadata = await metadataResponse.json();
+  const properties = (metadata.sheets || []).map(item => item.properties || {}).find(item => item.title === sheet);
+  if (!properties) throw new Error(`${sheet} worksheet was not found`);
+  const currentColumnCount = Number(properties.gridProperties?.columnCount || 0);
+  if (requiredColumnCount <= currentColumnCount) return;
+  await googleRequest(
+    `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`,
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ requests: [{ appendDimension: { sheetId: properties.sheetId, dimension: 'COLUMNS', length: requiredColumnCount - currentColumnCount } }] })
+    },
+    `Unable to expand ${sheet} grid`
+  );
+}
+
 async function ensureHeaders(token, sheet, requiredHeaders) {
   const [headers = []] = await readSheet(token, `${sheet}!1:1`);
   const missing = requiredHeaders.filter(header => !headers.includes(header));
   if (!missing.length) return;
+  await ensureSheetColumnCapacity(token, sheet, headers.length + missing.length);
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
   invalidateSheetDataCache(sheet, true);
@@ -928,7 +952,7 @@ export default async function handler(req, res) {
     let applicationsPromise;
     let catalogDataPromise;
     let documentsPromise;
-    const loadApplications = () => applicationsPromise ||= readSheet(token, 'Applications!A1:CC1000').then(objects);
+    const loadApplications = () => applicationsPromise ||= readSheet(token, 'Applications!A1:CZ1000').then(objects);
     const loadDocuments = () => documentsPromise ||= readSheet(token, 'Document_Log!A1:AD2000').then(objects);
     const loadCatalogData = () => catalogDataPromise ||= Promise.all([
       readSheet(token, 'Motor_Model_Catalog!A1:Q1000'),
