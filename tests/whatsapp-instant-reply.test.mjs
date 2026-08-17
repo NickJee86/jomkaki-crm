@@ -109,8 +109,9 @@ test('document follow-up questions receive a useful reply instead of silence', (
   assert.equal(decision.handled, true);
   assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
   assert.match(decision.text, /sudah terima 5 fail/i);
-  assert.match(decision.text, /semakan masih berjalan/i);
+  assert.match(decision.text, /dokumen minimum ialah IC depan dan belakang/i);
   assert.match(decision.text, /tak perlu hantar semula/i);
+  assert.match(decision.text, /CTOS\/CCRIS/i);
 });
 
 test('document progress lists only the missing requirement after verification', () => {
