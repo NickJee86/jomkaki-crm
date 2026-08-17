@@ -294,8 +294,7 @@ test('instant motor reply sends approved deposit, image and only one monthly ins
 });
 
 test('a customer can ask the deposit for the already selected motor', () => {
-  const decision = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+  const decision = buildInstantSalesDe…31 tokens truncated… Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
     lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'deposit berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299', 'Deposit (RM)': '1500', 'Selling Price (RM)': '13000' }]
@@ -341,6 +340,29 @@ test('customer model shorthand, spacing and small typo are recognised', () => {
   assert.equal(matchInstantProduct('rsx', catalog).product.Model, 'RS-X Winner');
   assert.equal(matchInstantProduct('nak rs x', catalog).product.Model, 'RS-X Winner');
   assert.equal(matchInstantProduct('nak ansuran murah', catalog).product, null);
+});
+
+test('a customer can switch from Y15ZR to LC V8 using normal local shorthand', () => {
+  const motorCatalog = [{
+    'Catalog ID': 'MTR-YAM-LC135V8', Brand: 'Yamaha', Model: 'LC135 V8', Active: 'TRUE',
+    'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/lc135-v8.jpg',
+    'Search Keywords': 'yamaha lc135 v8 lc v8 lcv8 lc8 135lc'
+  }];
+  assert.equal(matchInstantProduct('Saya mau lc v8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('nak lcv8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('lc8 ada?', motorCatalog).product.Model, 'LC135 V8');
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Ali', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
+    lead: { 'Customer Name': 'Ali', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'Saya mau lc v8', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog,
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-LC135V8', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Deposit (RM)': 'RM 500', 'Monthly 3 Years (RM)': 'RM 425', 'Monthly 4 Years (RM)': 'RM 344', 'Monthly 5 Years (RM)': 'RM 295' }]
+  });
+  assert.equal(decision.product.Model, 'LC135 V8');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/lc135-v8.jpg');
+  assert.match(decision.text, /deposit.*RM500/i);
+  assert.match(decision.text, /RM295/);
+  assert.doesNotMatch(decision.text, /Anda mahu saya semak yang mana|Y15ZR/i);
 });
 
 test('the whole catalogue accepts natural customer shorthand instead of only selected examples', () => {
