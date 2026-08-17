@@ -306,7 +306,7 @@ const stateAliases = [
   ['WEST_MALAYSIA', 'Perlis', ['perlis']],
   ['WEST_MALAYSIA', 'Putrajaya', ['putrajaya']]
 ];
-const includesTerm = (text, term) => (` ${text…13391 tokens truncated…ges || []) {
+const includesTerm = (text, term) => (` ${text…13495 tokens truncated…ges || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
         if (message.__skipDuplicate || (message.id && existingMessageIds.has(clean(message.id)))) continue;
