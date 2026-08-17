@@ -24,6 +24,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, '');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeMotorDeposit, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeHandphoneDeposit, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
@@ -276,7 +278,7 @@ test('a first-message model enquiry gets the answer and then one natural profile
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
-test('instant product reply sends approved image and only one monthly instalment', () => {
+test('instant motor reply sends approved deposit, image and only one monthly instalment', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
     lead: { 'Customer Name': 'Jim', Region: 'WEST_MALAYSIA', State: 'Selangor', 'City or Area': 'Petaling Jaya' }, text: 'I am looking for Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
@@ -286,8 +288,33 @@ test('instant product reply sends approved image and only one monthly instalment
   assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
   assert.equal(decision.imageUrl, 'https://cdn.example.test/y16zr.jpg');
   assert.match(decision.text, /RM273/);
-  assert.doesNotMatch(decision.text, /394|318|deposit|selling price/i);
+  assert.match(decision.text, /deposit.*RM1000/i);
+  assert.doesNotMatch(decision.text, /394|318|12000|selling price/i);
   assert.match(decision.text, /MyKad|payslip|EPF/i);
+});
+
+test('a customer can ask the deposit for the already selected motor', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'deposit berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299', 'Deposit (RM)': '1500', 'Selling Price (RM)': '13000' }]
+  });
+  assert.equal(decision.productIntent, true);
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /deposit.*RM1500/i);
+  assert.doesNotMatch(decision.text, /RM299|13000|harga jualan/i);
+});
+
+test('a missing motor deposit is never guessed', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'depo berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.match(decision.text, /belum ada dalam sistem|semak dengan cawangan/i);
+  assert.doesNotMatch(decision.text, /RM\d/i);
 });
 
 test('known customer model reply survives a stale Make conversation step', () => {
@@ -447,6 +474,26 @@ test('phone shorthand can override a stale motor category without asking the cus
   });
   assert.equal(decision.productUnit, 'HANDPHONE');
   assert.match(decision.text, /RM199/);
+});
+
+test('handphone quotes remain monthly-only even when source rows contain deposit and selling price', () => {
+  const base = {
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'HANDPHONE' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, messageType: 'text', routeBusinessUnit: 'HANDPHONE', routeRegion: 'EAST_MALAYSIA',
+    handphoneCatalog: [{ 'Catalog ID': 'HP-17PM', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Active: 'TRUE', 'Search Keywords': 'iphone 17 pro max' }],
+    handphonePricing: [{ 'Catalog ID': 'HP-17PM', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 60 Months (RM)': '199', 'Deposit (RM)': '888', 'Selling Price (RM)': '5999' }]
+  };
+  const quote = buildInstantSalesDecision({ ...base, text: 'nak iphone 17 pro max' });
+  assert.match(quote.text, /RM199/);
+  assert.doesNotMatch(quote.text, /deposit|RM888|5999|harga jualan|selling price/i);
+
+  const depositQuestion = buildInstantSalesDecision({
+    ...base,
+    state: { ...base.state, 'Selected Product Brand': 'Apple', 'Selected Product Model': 'iPhone 17 Pro Max' },
+    text: 'deposit berapa?'
+  });
+  assert.match(depositQuestion.text, /hanya.*ansuran bulanan/i);
+  assert.doesNotMatch(depositQuestion.text, /RM888|5999/i);
 });
 
 test('post-quote sales questions receive an immediate natural Malay answer instead of silence', () => {
