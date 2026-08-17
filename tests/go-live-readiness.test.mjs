@@ -62,7 +62,7 @@ test('Deployment prevents stale HTML while versioning frontend assets',()=>{
   const index=vercel.headers.find(entry=>entry.source==='/index.html');
   assert.equal(root.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
   assert.equal(index.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
-  assert.match(html,/product-business\.js\?v=20260817-product-photo-approval1/);
+  assert.match(html,/product-business\.js\?v=20260817-catalog-workflow2/);
   assert.match(html,/business-architecture\.js\?v=20260817-script-integrity-fix/);
   assert.ok(productUi.length>60000,'Product business bundle must not be truncated during deployment');
   assert.ok(businessUi.length>50000,'Business architecture bundle must not be truncated during deployment');

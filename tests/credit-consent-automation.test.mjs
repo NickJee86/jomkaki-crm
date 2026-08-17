@@ -14,7 +14,7 @@ test('The supplied consent form is published as a fixed CRM template',()=>{
   assert.ok(file.length>10_000);
   assert.equal(file.subarray(0,4).toString(),'%PDF');
   assert.match(ui,/ctos-ccris-consent-bph-v4\.pdf/);
-  assert.match(html,/business-architecture\.css\?v=20260817-product-photo-approval1/);
+  assert.match(html,/business-architecture\.css\?v=20260817-catalog-workflow2/);
 });
 
 test('New Application and secure upload accept signed consent separately',()=>{

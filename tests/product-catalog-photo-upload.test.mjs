@@ -37,12 +37,16 @@ test('Public product image route only resolves a catalog-linked SharePoint file'
   assert.doesNotMatch(imageApi, /req\.query\?\.fileId/);
 });
 
-test('Catalog exposes visible approval counts, status filter and pending photo preview', () => {
-  assert.match(ui, /Pending approval \(\$\{pendingCount\}\)/);
-  assert.match(ui, /Correction required \(\$\{rejectedCount\}\)/);
-  assert.match(ui, /catalogApprovalFilter/);
+test('Catalog keeps approved, pending and rejected records in separate workflow areas', () => {
+  assert.match(ui, /data-catalog-status="APPROVED"/);
+  assert.match(ui, /data-catalog-status="PENDING_APPROVAL"/);
+  assert.match(ui, /data-catalog-status="REJECTED"/);
+  assert.match(ui, /Rejected submissions stay here.*never mix with the live catalog/);
+  assert.match(ui, /let selectedStatus = approvedCount/);
+  assert.doesNotMatch(ui, /id="catalogApprovalFilter"/);
   assert.match(ui, /Pending photo approval/);
-  assert.match(css, /catalog-approval-summary/);
+  assert.match(css, /catalog-workflow-tabs/);
+  assert.match(css, /catalog-workflow-tab\.rejected\.active/);
   assert.match(css, /product-photo-preview/);
-  assert.match(html, /product-photo-approval1/);
+  assert.match(html, /catalog-workflow2/);
 });

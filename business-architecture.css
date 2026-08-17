@@ -48,11 +48,18 @@
 .handphone-option-note span{color:#607584;line-height:1.5}
 .handphone-option-table .inline-admin-actions{flex-wrap:nowrap}
 .catalog-toolbar{margin-top:2px}
-.catalog-approval-summary{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 14px}
-.catalog-approval-summary span{display:inline-flex;align-items:baseline;gap:6px;border:1px solid #dde7ea;border-radius:12px;padding:9px 12px;background:#fff;color:#607584;font-size:12px;box-shadow:0 5px 16px rgba(10,41,58,.04)}
-.catalog-approval-summary strong{color:#0a293a;font:800 18px Manrope,sans-serif}
-.catalog-status-filter{display:flex;align-items:center;gap:7px;color:#607584;font-size:12px;white-space:nowrap}
-.catalog-status-filter select{min-width:178px;border:1px solid #d7e2e6;border-radius:10px;padding:9px 34px 9px 10px;background:#fff;color:#17394a}
+.catalog-workflow-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
+.catalog-workflow-tab{display:grid;grid-template-columns:1fr auto;grid-template-areas:"label count" "help count";align-items:center;gap:2px 12px;min-height:76px;border:1px solid #dfe8eb;border-radius:15px;padding:13px 15px;background:#fff;color:#17394a;text-align:left;box-shadow:0 6px 18px rgba(10,41,58,.04);cursor:pointer;transition:.18s ease}
+.catalog-workflow-tab span{grid-area:label;font:800 13px Manrope,sans-serif}
+.catalog-workflow-tab strong{grid-area:count;font:800 25px Manrope,sans-serif;color:#0a293a}
+.catalog-workflow-tab small{grid-area:help;color:#718591;font-size:11px}
+.catalog-workflow-tab:hover{transform:translateY(-1px);border-color:#afc9d0}
+.catalog-workflow-tab.active{border-color:#0f9c8c;background:#effaf8;box-shadow:inset 0 0 0 1px #0f9c8c,0 8px 20px rgba(15,156,140,.09)}
+.catalog-workflow-tab.pending.active{border-color:#e58742;background:#fff7ef;box-shadow:inset 0 0 0 1px #e58742,0 8px 20px rgba(229,135,66,.09)}
+.catalog-workflow-tab.rejected.active{border-color:#c56b58;background:#fff5f2;box-shadow:inset 0 0 0 1px #c56b58,0 8px 20px rgba(197,107,88,.09)}
+.catalog-section-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:18px 2px 10px}
+.catalog-section-heading h2{margin:0;color:#0a293a;font:800 18px Manrope,sans-serif}
+.catalog-section-heading p{max-width:680px;margin:0;color:#607584;font-size:12px;line-height:1.45;text-align:right}
 .product-photo-preview{display:flex;min-height:92px;align-items:center;gap:14px;border:1px dashed #b9cdd3;border-radius:14px;padding:12px;background:#f8fbfc;color:#607584}
 .product-photo-preview img{width:112px;height:82px;object-fit:contain;border-radius:10px;background:#fff;border:1px solid #dce6e9}
 .pricing-safety-banner{display:flex;gap:12px;align-items:flex-start;margin-bottom:16px;border:1px solid #f0c29f;border-left:4px solid #f26522;border-radius:14px;padding:14px 16px;background:#fff8f2;color:#6b4a39}
@@ -70,7 +77,7 @@
 .handphone-shared-price-note strong{color:#9d4218}
 .handphone-shared-price-note span{color:#607584;line-height:1.45}
 @media(max-width:900px){.handphone-pricing-summary{align-items:flex-start;flex-direction:column}.handphone-pricing-summary .handphone-summary-stats{width:100%}}
-@media(max-width:680px){.business-type-picker{grid-template-columns:1fr}.handphone-catalog-overview{padding:20px}.handphone-summary-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.handphone-family-grid{grid-template-columns:1fr}.pricing-safety-banner{display:block}.pricing-safety-banner strong{display:block;margin-bottom:5px}.catalog-status-filter{width:100%;align-items:flex-start;flex-direction:column}.catalog-status-filter select{width:100%}}
+@media(max-width:680px){.business-type-picker{grid-template-columns:1fr}.handphone-catalog-overview{padding:20px}.handphone-summary-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.handphone-family-grid{grid-template-columns:1fr}.pricing-safety-banner{display:block}.pricing-safety-banner strong{display:block;margin-bottom:5px}.catalog-workflow-tabs{grid-template-columns:1fr}.catalog-section-heading{align-items:flex-start;flex-direction:column}.catalog-section-heading p{text-align:left}}
 .new-application-documents{margin:6px 0 2px;padding:18px;border:1px solid #d7e5e3;border-radius:16px;background:linear-gradient(145deg,#f5fbfa 0%,#fffaf6 100%)}
 .new-application-documents-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:14px}
 .new-application-documents-head span:first-child{display:block;margin-bottom:4px;color:#d95b20;font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
