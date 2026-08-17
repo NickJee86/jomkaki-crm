@@ -148,7 +148,6 @@ test('automatic WhatsApp application binds the lead, product and channel', () =>
 test('signed WhatsApp media proxy URLs expire and cannot be forged', () => {
   const url = buildMediaProxyUrl({ mediaId: 'MEDIA-1', channelId: 'JKM-WA-EAST-01', credentialKey: 'WHATSAPP_EAST_01', expires: 2000, secret: 'test-secret', baseUrl: 'https://crm.example.test' });
   const parsed = new URL(url);
-
   const query = Object.fromEntries(parsed.searchParams.entries());
   assert.equal(verifyMediaProxyQuery(query, 'test-secret', 1000).valid, true);
   assert.equal(verifyMediaProxyQuery({ ...query, id: 'MEDIA-2' }, 'test-secret', 1000).valid, false);
@@ -299,7 +298,6 @@ test('the whole catalogue accepts natural customer shorthand instead of only sel
 test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
-
     lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA' },
     text: 'motor nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
     motorCatalog: [
@@ -441,4 +439,3 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
-
