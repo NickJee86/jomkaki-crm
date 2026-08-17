@@ -18,6 +18,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.answerCustomerIntentBeforeProfileQuestions, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.profileCollectionIsNonBlocking, true);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-4.1-mini');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, '');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
