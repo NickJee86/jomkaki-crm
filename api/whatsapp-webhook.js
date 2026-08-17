@@ -538,9 +538,10 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     'Continue from the current conversation instead of restarting the name, location and product questions.'
   ].join(' ');
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
-  return {
-    model: clean(process.env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-luna'),
-    reasoning: { effort: clean(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.reasoningEffort || 'none') },
+  const model = clean(process.env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-4.1-mini');
+  const reasoningEffort = clean(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.reasoningEffort);
+  const request = {
+    model,
     instructions,
     input: `Approved conversation context:\n${JSON.stringify(context)}`,
     max_output_tokens: 180,
@@ -548,6 +549,8 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     safety_identifier: safetyIdentifier,
     metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version) }
   };
+  if (reasoningEffort && /^(?:gpt-5|o\d)/i.test(model)) request.reasoning = { effort: reasoningEffort };
+  return request;
 }
 
 const responseOutputText = result => {

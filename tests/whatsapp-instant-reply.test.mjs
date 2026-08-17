@@ -18,8 +18,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-5.6-luna');
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, 'none');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-4.1-mini');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, '');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
@@ -393,8 +393,8 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     routeBusinessUnit: 'MOTOR',
     phone: '60123456789'
   });
-  assert.equal(request.model, 'gpt-5.6-luna');
-  assert.deepEqual(request.reasoning, { effort: 'none' });
+  assert.equal(request.model, 'gpt-4.1-mini');
+  assert.equal(request.reasoning, undefined);
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier.length, 64);
   assert.equal(request.input.includes('60123456789'), false);
@@ -402,7 +402,8 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
 
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
-    assert.equal(body.model, 'gpt-5.6-luna');
+    assert.equal(body.model, 'gpt-4.1-mini');
+    assert.equal(body.reasoning, undefined);
     assert.equal(body.store, false);
     return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? 😊 Soalan kedua?' }] }] }) };
   };
@@ -410,7 +411,7 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     text: 'boleh explain lagi?',
     state: { 'Current Step': 'STEP_04_DOCUMENTS' },
     phone: '60123456789',
-    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-5.6-luna' },
+    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-4.1-mini' },
     fetchImpl
   });
   assert.equal(reply.includes('😊'), false);
