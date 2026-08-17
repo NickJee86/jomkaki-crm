@@ -239,9 +239,9 @@ export function buildDocumentProgressReply(language = 'MS', documents = []) {
     return `Baik, saya sudah terima ${status.rows.length} fail. Ada dokumen yang kurang jelas atau belum lulus semakan. Saya akan beritahu fail yang tepat untuk dihantar semula; tak perlu hantar semuanya sekali lagi.`;
   }
   if (status.pending) {
-    if (language === 'ZH') return `我已经收到 ${status.rows.length} 份文件，包括${received}。系统正在核对完整性，目前不需要重新发送。检查完成后，我会清楚告诉您是否还缺任何文件。`;
-    if (language === 'EN') return `I have received ${status.rows.length} file${status.rows.length === 1 ? '' : 's'}, including ${received}. They are still being checked, so there is no need to resend anything now. I will tell you clearly if anything is missing after the check.`;
-    return `Baik, saya sudah terima ${status.rows.length} fail termasuk ${received}. Semakan masih berjalan, jadi tak perlu hantar semula sekarang. Selepas semakan siap, saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.`;
+    if (language === 'ZH') return `店内贷款的最低文件要求是 MyKad 正反面，以及最新薪水单或 EPF 记录。我已经收到 ${status.rows.length} 份文件，包括${received}，目前正在核对，不需要重新发送。如果文件齐全，我会自动发送 CTOS/CCRIS 同意书给您签署。`;
+    if (language === 'EN') return `For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. I have received ${status.rows.length} file${status.rows.length === 1 ? '' : 's'}, including ${received}, and they are being checked, so there is no need to resend them. If everything is complete, I will send the CTOS/CCRIS consent form for your signature.`;
+    return `Untuk permohonan loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Saya sudah terima ${status.rows.length} fail anda termasuk ${received} dan sedang membuat semakan, jadi tak perlu hantar semula. Jika semuanya lengkap, saya akan hantar borang kebenaran CTOS/CCRIS untuk anda tandatangan.`;
   }
   if (status.missing.length) {
     if (language === 'ZH') return `已收到的文件包括${received}。目前还需要：${status.missing.join('、')}。其他文件不需要重新发送。`;
