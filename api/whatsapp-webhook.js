@@ -148,7 +148,6 @@ export function inferDocumentTypeFromFileName(fileName = '') {
   if (!value) return 'UNCLASSIFIED';
   if (/\b(consent|ccris|ctos|kebenaran|authorisation|authorization)\b/.test(value)) return 'CTOS_CCRIS_CONSENT_SIGNED';
   if (/\b(proof of identity|identity|mykad|kad pengenalan|passport|ic front|ic back)\b/.test(value)) return 'IDENTITY_DOCUMENT';
-
   if (/\b(payslips?|pay slips?|salary slips?|slip gaji)\b/.test(value)) return 'PAYSLIP';
   if (/\b(epf|kwsp|provident)\b/.test(value)) return 'EPF_STATEMENT';
   if (/\b(bank statement|penyata bank)\b/.test(value)) return 'BANK_STATEMENT';
@@ -299,7 +298,6 @@ export function resolveCustomerLocation(value = '', businessUnit = '', branches 
     const typo = !exact && compactAlias.length >= 5 && [...candidates].some(candidate => candidate.length >= 4 && editDistanceWithin(candidate, compactAlias, compactAlias.length >= 9 ? 2 : 1));
     return { region, state, alias, exact, typo, score: exact ? 1000 + compactAlias.length : typo ? 500 + compactAlias.length : 0 };
   })).filter(match => match.score > 0).sort((a, b) => b.score - a.score);
-
   const locationMatch = locationMatches[0];
   if (!locationMatch) return null;
   const { region, state, alias: area } = locationMatch;
@@ -450,7 +448,6 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE: `For ${brand} ${model}, the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
     },
     MS: {
-
       NAME: 'Hi, terima kasih kerana menghubungi JomKaki Motor. Saya boleh bantu semak pilihan motor atau telefon serta ansuran bulanan yang sesuai. Boleh saya tahu nama anda?',
       NAME_RETRY: 'Maaf, boleh saya tahu nama anda supaya saya boleh teruskan semakan?',
       LOCATION: `Salam kenal${name ? `, ${name}` : ''}. Anda tinggal di bandar atau negeri mana?`,
@@ -601,7 +598,6 @@ const oneEditAway = (left, right) => {
     if (left.length > right.length) i += 1;
     else if (right.length > left.length) j += 1;
     else { i += 1; j += 1; }
-
   }
   return edits + Number(i < left.length || j < right.length) <= 1;
 };
@@ -752,7 +748,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion) && locationConfirmed;
   if (productMatch.ambiguous && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
     const formattedOptions = productMatch.options.join(language === 'ZH' ? '、' : ' atau ');
-
     return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL_CLARIFY', { options: formattedOptions }) };
   }
   if (product && (step === 'STEP_03_PRODUCT' || step === 'STEP_04_DOCUMENTS' || identityReady)) {
@@ -903,7 +898,6 @@ export default async function handler(req, res) {
   const supplied = Buffer.from(signature), calculated = Buffer.from(expected);
   if (supplied.length !== calculated.length || !crypto.timingSafeEqual(supplied, calculated)) return res.status(401).json({ ok: false });
   let outboundSent = false;
-
   const reservedMessageIds = [];
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}');
@@ -1054,7 +1048,6 @@ export default async function handler(req, res) {
           await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
           await appendObject(token, 'Applications', application);
           applications.push(application);
-
           await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
         }
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
@@ -1180,4 +1173,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-
