@@ -375,6 +375,20 @@ test('short clarification answers are combined with the previous customer model 
   assert.doesNotMatch(decision.text, /Gear Hybrid|Pilih satu/i);
 });
 
+test('a tenure follow-up answers only the requested monthly rate without resending the product image', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Ego Gear', 'Last Customer Message': 'ego gear' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'berapa bulanan kalau 3 tahun', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/ego-gear.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-EGOG', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '310', 'Monthly 5 Years (RM)': '225' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /3 years/);
+  assert.match(decision.text, /RM310/);
+  assert.doesNotMatch(decision.text, /RM225|IC depan|slip gaji/i);
+});
 test('phone shorthand groups colour rows and identifies the requested model family', () => {
   const catalog = [
     { 'Catalog ID': 'HP-17PM-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 256gb black official' },
