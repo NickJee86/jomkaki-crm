@@ -923,7 +923,7 @@ async function openCustomer360(identity={}){
 openLead=async function openLeadCustomer360(id){return openCustomer360({leadId:id})}
 openApp=async function openApplicationCustomer360(id){return openCustomer360({applicationId:id})}
 
-const customer360Demos=[
+const archivedCustomer360Demos=[
   {
     id:'demo-complete',label:'AI complete - Ready for LMS',tone:'complete',
     lead:{id:'DEMO-LEAD-001',name:'Alicia Sample',phone:'60123456001',region:'EAST_MALAYSIA',source:'Facebook Ads',model:'Yamaha Y16ZR Standard',status:'QUALIFIED',applicationId:'DEMO-APP-001',applicationStatus:'READY_FOR_LMS',sa:'AI Automation',branch:'BR-EM-SATOK',city:'Kuching',notes:'Customer prefers a five-year financing plan and blue motorcycle.',nextFollowUp:'2026-08-10T10:30:00+08:00',created:'2026-08-09T09:10:00+08:00',time:'2026-08-10T09:25:00+08:00'},
@@ -972,7 +972,8 @@ const customer360Demos=[
     ]
   }
 ];
-function customer360DemoPanel(){if(state.user?.role!=='ADMIN')return'';return `<section class="panel customer-360-demo-panel"><div class="customer-360-demo-head"><div><span>Safe preview data</span><h3>Customer 360 samples</h3><p>Open both examples to compare an AI-complete case with a human follow-up exception. Samples are visible across the CRM but are never saved or exported.</p></div>${pill('Preview only',true)}</div><div class="customer-360-demo-grid">${customer360Demos.map(demo=>`<button class="customer-360-demo-card ${demo.tone}" data-demo-customer="${esc(demo.id)}"><span class="customer-360-demo-icon">${demo.tone==='complete'?'AI':'HF'}</span><span><strong>${esc(demo.application.customer)}</strong><small>${esc(demo.application.product)}</small><em>${esc(demo.label)}</em></span><b>Open sample</b></button>`).join('')}</div></section>`}
+const customer360Demos=[];
+function customer360DemoPanel(){return''}
 function bindCustomer360Demos(){document.querySelectorAll('[data-demo-customer]').forEach(button=>button.onclick=()=>openCustomer360Demo(button.dataset.demoCustomer).catch(error=>alert(error.message)))}
 async function openCustomer360Demo(id){
   const demo=customer360Demos.find(item=>item.id===id);if(!demo)return;
@@ -991,7 +992,7 @@ function dashboard(){const s=state.summary;app.innerHTML=head('Command Centre','
 
 // Client-only feature samples. They are injected after live reads and never pass through a write API.
 const demoFeatureResources=['leads','applications','documents','inbox','outbox','activity'];
-const demoFeatureViews=new Set(['dashboard','workbench','reports','leads','applications','documents','inbox','outbox','activity']);
+const demoFeatureViews=new Set();
 function demoRecordId(record){return String(record?.id||'').toUpperCase()}
 function isDemoRecord(record){return Boolean(record?.demo)||demoRecordId(record).startsWith('DEMO-')}
 function demoForIdentity({leadId='',applicationId='',phone='',id=''}={}){const normalized=normalizePhone(phone);return customer360Demos.find(demo=>demo.lead.id===leadId||demo.application.id===applicationId||demoRecordId({id})===demoRecordId(demo.lead)||demoRecordId({id})===demoRecordId(demo.application)||(normalized&&normalizePhone(demo.lead.phone)===normalized))}
@@ -1013,7 +1014,7 @@ function syncDemoFeatureData(){
 }
 function demoLabel(record){const demo=demoForRecord(record);return demo?`<span class="demo-label ${demo.tone}">DEMO · ${esc(demo.application.customer)}</span>`:''}
 function demoOpenButton(record,label='Open demo'){const demo=demoForRecord(record);return `<button class="row-action demo-open" data-demo-customer="${esc(demo?.id||record?.demoCustomerId||'')}">${esc(label)}</button>`}
-function demoFeatureBanner(){return `<section class="demo-feature-banner"><span class="demo-feature-icon">DEMO</span><div><strong>Feature preview with 2 connected sample customers</strong><p>Alicia shows an AI-complete case; Jason shows an incomplete-document human handover. Preview rows are never saved to Google Sheets, sent to WhatsApp, written to Make, or included in CSV exports.</p></div><button class="secondary" data-demo-customer="demo-complete">Open complete case</button><button class="secondary" data-demo-customer="demo-handover">Open handover case</button></section>`}
+function demoFeatureBanner(){return''}
 function applyDemoFeatureBanner(){
   if(state.user?.role!=='ADMIN'||!demoFeatureViews.has(state.view))return;
   if(state.view==='dashboard'){bindCustomer360Demos();return;}

@@ -43,35 +43,24 @@ test('Customer 360 has a dedicated responsive brand design',()=>{
   assert.match(css,/@media\(max-width:620px\)/);
 });
 
-test('Two safe samples demonstrate complete AI and human exception flows',()=>{
-  assert.match(app,/const customer360Demos=\[/);
-  assert.match(app,/AI complete - Ready for LMS/);
-  assert.match(app,/AI exception - Human follow-up/);
-  assert.match(app,/function openCustomer360Demo/);
-  assert.match(app,/Not saved to Google Sheets/);
-  assert.match(app,/Buttons that write data or send WhatsApp are disabled/);
-  assert.match(app,/state\.user\?\.role!==\'ADMIN\'/);
-  assert.match(css,/\.customer-360-demo-grid/);
+test('Production CRM does not inject preview customers',()=>{
+  assert.match(app,/const customer360Demos=\[\];/);
+  assert.match(app,/function customer360DemoPanel\(\)\{return\'\'\}/);
+  assert.match(app,/const demoFeatureViews=new Set\(\);/);
+  assert.match(app,/function demoFeatureBanner\(\)\{return\'\'\}/);
 });
 
-test('The same safe samples appear throughout every customer workflow feature',()=>{
+test('Stale preview rows are removed from every customer workflow feature',()=>{
   assert.match(app,/const demoFeatureResources=\['leads','applications','documents','inbox','outbox','activity'\]/);
-  assert.match(app,/const demoFeatureViews=new Set\(\['dashboard','workbench','reports','leads','applications','documents','inbox','outbox','activity'\]\)/);
   assert.match(app,/function syncDemoFeatureData/);
-  assert.match(app,/Feature preview with 2 connected sample customers/);
-  assert.doesNotMatch(app,/CSV export disabled in Demo preview/);
+  assert.match(app,/filter\(record=>!isDemoRecord\(record\)\)/);
   assert.match(app,/function channelReportSource/);
   assert.match(app,/Object\.assign\(state\.data,source\)/);
   assert.match(app,/Object\.assign\(state\.data,backup\)/);
-  assert.match(css,/\.demo-feature-banner/);
-  assert.match(css,/\.data-table tr\.demo-row/);
 });
 
-test('Complete Customer 360 sample includes automated signed consent before LMS readiness',()=>{
-  assert.match(app,/creditConsentStatus:'VERIFIED'/);
-  assert.match(app,/type:'CREDIT_CONSENT'/);
-  assert.match(app,/CONSENT_SENT_AUTOMATICALLY/);
-  assert.match(app,/CONSENT_AI_VERIFIED/);
-  assert.match(app,/Documents and signed consent are complete/);
+test('Archived sample definitions cannot enter active CRM state',()=>{
+  assert.match(app,/const archivedCustomer360Demos=\[/);
+  assert.match(app,/const customer360Demos=\[\];/);
+  assert.doesNotMatch(app,/customer360Demos=archivedCustomer360Demos/);
 });
-
