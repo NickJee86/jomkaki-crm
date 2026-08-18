@@ -156,6 +156,7 @@ async function bindDocumentsToApplication(token, documents = [], applicationId =
 const truth = value => clean(value).toUpperCase() === 'TRUE';
 const canonicalRegion = value => ['SARAWAK', 'SABAH', 'LABUAN', 'EAST MALAYSIA', 'EAST_MALAYSIA'].includes(clean(value).toUpperCase()) ? 'EAST_MALAYSIA' : clean(value).toUpperCase();
 const canonicalBusinessUnit = value => ['MOTOR', 'HANDPHONE'].includes(clean(value).toUpperCase()) ? clean(value).toUpperCase() : '';
+const asksForPromotion = text => /(?:\bpromosi\b|\bpromo\b|\bpromotion\b|\boffer\b|\bdeal\b)/i.test(clean(text));
 const credentialPrefix = value => clean(value).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 const normalizedWords = value => clean(value).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const customerAmount = value => clean(value).replace(/^RM\s*/i, '').replace(/,/g, '');
@@ -449,11 +450,15 @@ export function buildMediaProxyUrl({ mediaId = '', channelId = '', credentialKey
   return `${clean(baseUrl).replace(/\/$/, '')}/api/whatsapp-media?${query.toString()}`;
 }
 
-const instantLanguage = text => {
+const instantLanguage = (text, state = {}) => {
   const value = clean(text);
   if (/[\u3400-\u9fff]/u.test(value)) return 'ZH';
-  if (/\b(hai|saya|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari)\b/i.test(value)) return 'MS';
-  if (/\b(i|i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply)\b/i.test(value)) return 'EN';
+  if (/\b(hai|saya|sy|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari|ada|apa|tak|tidak|faham|cakap|kat|dekat|sekarang|skg|berapa|tolong|sudah|dah|kalau|kenapa)\b/i.test(value)) return 'MS';
+  if (/\b(i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply|please|can you|do you)\b/i.test(value)) return 'EN';
+  const lastReply = clean(state['Last AI Message']);
+  if (/[\u3400-\u9fff]/u.test(lastReply)) return 'ZH';
+  if (/\b(?:anda|boleh|saya|motor|telefon|ansuran|dokumen|negeri|bandar|terima kasih)\b/i.test(lastReply)) return 'MS';
+  if (/\b(?:you|your|which|monthly|motorcycle|phone|documents?|thank you)\b/i.test(lastReply)) return 'EN';
   return JOMKAKI_KNOWLEDGE.conversation.defaultLanguage;
 };
 
@@ -485,6 +490,10 @@ const instantCopy = (language, key, values = {}) => {
       TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
       DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation.`,
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} is not available in the system yet. I can check it with the branch for you.`,
+      PROMOTION_LOCATION: 'Current motorcycle promotions differ by area, so I will check the approved offers for your location first.',
+      PROMOTION_LIST: `Current approved motorcycle promotions for your area include ${options}.`,
+      PROMOTION_NONE: 'There is no approved active motorcycle promotion recorded for your area at the moment.',
+      PROMOTION_MODEL: 'Which model would you like me to check in detail?',
       HANDPHONE_DEPOSIT_POLICY: `For phones, I can only share the approved monthly instalment. The deposit and selling price are not quoted to customers.`,
       QUOTE_ONLY: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation.`,
       NAME_AFTER_ANSWER: 'May I know your name?',
@@ -512,6 +521,10 @@ const instantCopy = (language, key, values = {}) => {
       TENURE_UNAVAILABLE: `Ansuran ${localizedTenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
       DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan.`,
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} belum ada dalam sistem. Saya boleh semak dengan cawangan untuk anda.`,
+      PROMOTION_LOCATION: 'Promosi motor semasa berbeza mengikut kawasan, jadi saya akan semak tawaran yang diluluskan untuk lokasi anda dahulu.',
+      PROMOTION_LIST: `Antara promosi motor yang sedang aktif untuk kawasan anda ialah ${options}.`,
+      PROMOTION_NONE: 'Buat masa ini, belum ada promosi motor aktif yang diluluskan untuk kawasan anda dalam sistem.',
+      PROMOTION_MODEL: 'Model mana satu anda mahu saya semak dengan lebih lanjut?',
       HANDPHONE_DEPOSIT_POLICY: `Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Deposit dan harga jualan tidak diberikan kepada pelanggan.`,
       QUOTE_ONLY: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       NAME_AFTER_ANSWER: 'Boleh saya tahu nama anda?',
@@ -598,7 +611,7 @@ export function sanitizeAiFallbackReply(value = '', language = 'MS') {
 }
 
 export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
-  const language = instantLanguage(text);
+  const language = instantLanguage(text, state);
   const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
   const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
   const context = {
@@ -660,7 +673,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
     });
     if (!response.ok) return '';
     const result = await response.json().catch(() => ({}));
-    return sanitizeAiFallbackReply(responseOutputText(result), instantLanguage(text));
+    return sanitizeAiFallbackReply(responseOutputText(result), instantLanguage(text, state));
   } catch {
     return '';
   } finally {
@@ -846,8 +859,40 @@ const instantRate = (product, pricingRows = [], unit = '', region = '', requeste
   return selected ? { tenure: selected[0], amount: customerAmount(selected[1]), deposit } : null;
 };
 
+const activeMotorPromotions = (catalogRows = [], pricingRows = [], region = '', today = new Date().toISOString().slice(0, 10)) => {
+  const normalizedRegion = canonicalRegion(region);
+  const products = new Map(catalogRows.filter(row => truth(row.Active)).map(row => [clean(row['Catalog ID']), row]));
+  const promotions = pricingRows.filter(row => {
+    const zone = clean(row['Price Zone']).toUpperCase();
+    const appliesToRegion = !normalizedRegion || canonicalRegion(zone) === normalizedRegion || ['ALL_BRANCHES', 'ALL'].includes(zone);
+    const start = clean(row['Promotion Start']), end = clean(row['Promotion End']);
+    return products.has(clean(row['Catalog ID']))
+      && truth(row.Active)
+      && ['APPROVED', ''].includes(clean(row['Quote Approval Status']).toUpperCase())
+      && truth(row['Promotion Active'])
+      && clean(row['Promotion Approval Status']).toUpperCase() === 'APPROVED'
+      && appliesToRegion
+      && (!start || start <= today)
+      && (!end || end >= today);
+  }).map(row => ({ row, product: products.get(clean(row['Catalog ID'])) }));
+  const seen = new Set();
+  return promotions.filter(({ product }) => {
+    const key = `${normalizedWords(product.Brand)}|${normalizedWords(product.Model)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const promotionOptionText = ({ row = {}, product = {} } = {}) => {
+  const model = [clean(product.Brand), clean(product.Model)].filter(Boolean).join(' ');
+  const name = clean(row['Promotion Name']);
+  const deposit = customerAmount(row['Promotion Deposit (RM)']);
+  return [model, name ? `(${name})` : '', deposit ? `deposit RM${deposit}` : ''].filter(Boolean).join(' ');
+};
+
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], suppressDocumentAcknowledgement = false } = {}) {
-  const language = instantLanguage(text), step = clean(state['Current Step']).toUpperCase();
+  const language = instantLanguage(text, state), step = clean(state['Current Step']).toUpperCase();
   if (['image', 'document'].includes(clean(messageType).toLowerCase())) return suppressDocumentAcknowledgement
     ? { handled: false, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: '' }
     : { handled: true, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
@@ -858,6 +903,26 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
+  if (asksForPromotion(text)) {
+    const hasLocation = !!clean(lead['City or Area'] || lead.State);
+    const promotions = hasLocation ? activeMotorPromotions(motorCatalog, motorPricing, lead.Region || routeRegion) : [];
+    const promotionAnswer = hasLocation
+      ? instantCopy(language, promotions.length ? 'PROMOTION_LIST' : 'PROMOTION_NONE', { options: promotions.slice(0, 3).map(promotionOptionText).join('; ') })
+      : instantCopy(language, 'PROMOTION_LOCATION');
+    const baseText = [
+      promotionAnswer,
+      !hasLocation && usableCustomerName(state['Customer Name'] || lead['Customer Name']) ? instantCopy(language, 'LOCATION_AFTER_ANSWER') : ''
+    ].filter(Boolean).join(' ');
+    const continuation = profileContinuation({ language, state, lead, baseText, completeStep: step || 'STEP_03_PRODUCT' });
+    const needsModelQuestion = hasLocation && continuation.nextStep === (step || 'STEP_03_PRODUCT');
+    return {
+      handled: true,
+      promotionIntent: true,
+      nextStep: continuation.nextStep,
+      productUnit: 'MOTOR',
+      text: [continuation.text, needsModelQuestion ? instantCopy(language, 'PROMOTION_MODEL') : ''].filter(Boolean).join(' ')
+    };
+  }
   if (step === 'STEP_02_LOCATION') {
     const location = resolveCustomerLocation(text, productUnitFromText(text, routeBusinessUnit), branches);
     if (location) return {
@@ -1021,7 +1086,7 @@ export function guardConversationProgress({ state = {}, documents = [], text = '
   const currentStep = clean(state['Current Step']).toUpperCase();
   const nextStep = clean(decision.nextStep).toUpperCase();
   if (!decision.handled || currentStep !== 'STEP_04_DOCUMENTS' || !['STEP_01_WELCOME', 'STEP_01_NAME', 'STEP_02_LOCATION'].includes(nextStep)) return decision;
-  const language = instantLanguage(text);
+  const language = instantLanguage(text, state);
   const documentQuestion = isDocumentStatusQuestion(text) || asksForDocuments(text) || wantsToApply(text);
   const withoutRestartQuestion = clean(decision.text).replace(
     /\s*(?:Boleh saya tahu nama anda(?: supaya[^?]*)?|Boleh saya tahu anda (?:tinggal|berada) di bandar atau negeri mana|May I know your name|What is your name|Which city or state are you in)\??\s*$/i,
