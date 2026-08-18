@@ -413,6 +413,45 @@ test('customer frustration triggers a useful recovery reply and never repeats th
   assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
 });
 
+test('loan kedai perlukan apa returns the required documents even when AI misclassifies it as processing time', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'loan kedai perlukan apa', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    aiIntent: { intent: 'PROCESSING_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.91 }
+  });
+  assert.equal(decision.documentRequirementsIntent, true);
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /IC depan dan belakang/i);
+  assert.match(decision.text, /slip gaji terkini atau penyata EPF/i);
+  assert.match(decision.text, /semua sekali/i);
+  assert.doesNotMatch(decision.text, /1[–-]3 hari|model|bajet bulanan/i);
+});
+
+test('frustration after a missed document question answers the original question instead of suggesting models', () => {
+  const decision = buildInstantSalesDecision({
+    state: {
+      'Current Step': 'STEP_03_PRODUCT',
+      'Customer Name': 'Amin',
+      'Product Category': 'MOTOR',
+      'Last Customer Message': 'loan kedai perlukan apa',
+      'Last AI Message': 'Biasanya proses mengambil masa 1-3 hari bekerja.'
+    },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'tak faham ke soalan saya', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }],
+    aiIntent: { intent: 'FRUSTRATED', language: 'MS', businessUnit: 'MOTOR', confidence: 0.99 }
+  });
+  assert.equal(decision.serviceRecovery, true);
+  assert.equal(decision.documentRequirementsIntent, true);
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /Maaf/i);
+  assert.match(decision.text, /IC depan dan belakang/i);
+  assert.match(decision.text, /slip gaji terkini atau penyata EPF/i);
+  assert.doesNotMatch(decision.text, /Yamaha|Y15ZR|bajet bulanan|1[–-]3 hari/i);
+});
+
 test('a promotion question is answered before the missing location question', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Charles', 'Product Category': 'MOTOR', 'Last AI Message': 'Salam kenal, Charles. Anda tinggal di bandar atau negeri mana?' },

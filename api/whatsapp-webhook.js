@@ -518,6 +518,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
       AVAILABLE_MODELS: `Available options I can check include ${models}. Would you prefer a cub, scooter, or a model based on your monthly budget?`,
       SERVICE_RECOVERY: `Sorry, my earlier reply was not helpful. I understand you want a clear answer. ${models ? `Available options I can check include ${models}. ` : ''}What monthly budget would be comfortable for you?`,
+      DOCUMENT_REQUIREMENTS_RECOVERY: 'Sorry, my earlier reply did not answer your question. For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. You may send all files together; there is no need to send them one by one.',
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
@@ -559,6 +560,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
       AVAILABLE_MODELS: `Antara pilihan yang saya boleh semak sekarang ialah ${models}. Anda lebih suka kapcai, skuter atau ikut bajet bulanan?`,
       SERVICE_RECOVERY: `Maaf, jawapan tadi memang tak membantu. Saya faham anda mahu jawapan yang jelas. ${models ? `Antara pilihan yang saya boleh semak ialah ${models}. ` : ''}Bajet bulanan yang anda selesa sekitar berapa?`,
+      DOCUMENT_REQUIREMENTS_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Untuk loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Boleh hantar semua fail sekali gus; tak perlu hantar satu per satu.',
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
       SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
@@ -596,6 +598,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
       AVAILABLE_MODELS: `目前可以查询的选择包括 ${models}。你想找 kapcai、scooter，还是按月供预算选择？`,
       SERVICE_RECOVERY: `抱歉，刚才的回复没有解决你的问题。${models ? `目前可以查询的选择包括 ${models}。` : ''}请问你希望每月供款大约多少？`,
+      DOCUMENT_REQUIREMENTS_RECOVERY: '不好意思，刚才没有正确回答你的问题。店内贷款所需的基本文件是身份证正反面，以及最新薪水单或 EPF 报表。可以一次发送所有文件，不需要逐份发送。',
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
       SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
@@ -908,7 +911,7 @@ const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|per
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
-const asksForDocuments = text => /(dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|需要什么文件|要什么文件)/i.test(clean(text));
+const asksForDocuments = text => /(?:dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|(?:loan\s*(?:kedai|shop)|shop\s*loan).{0,35}(?:perlukan?|perlu|need|required|kena\s*(?:sedia|hantar)|sediakan).{0,20}(?:apa|ape|what)|(?:apa|ape|what).{0,20}(?:yang\s*)?(?:perlu|need|required|kena\s*sediakan).{0,35}(?:loan\s*(?:kedai|shop)|shop\s*loan)|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
@@ -1162,6 +1165,8 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
   const previousCustomerText = clean(state['Last Customer Message']);
+  const frustrationDetected = interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text);
+  const recoveringDocumentQuestion = frustrationDetected && conversationalDocumentRequirement(previousCustomerText);
   const documentStatusQuestion = interpretedIntent === 'DOCUMENT_STATUS'
     || (isDocumentStatusQuestion(text) && (documents.length > 0 || /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(clean(text))));
   const documentRequirementQuestion = interpretedIntent === 'DOCUMENT_REQUIREMENTS'
@@ -1175,6 +1180,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (documentRequirementQuestion) {
     const continuation = profileContinuation({ language, state, lead, baseText: instantCopy(language, 'APPLY'), completeStep: 'STEP_04_DOCUMENTS' });
     return { handled: true, documentRequirementsIntent: true, nextStep: continuation.nextStep, productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: continuation.text };
+  }
+  if (recoveringDocumentQuestion) {
+    return {
+      handled: true,
+      serviceRecovery: true,
+      documentRequirementsIntent: true,
+      nextStep: 'STEP_04_DOCUMENTS',
+      productUnit: explicitUnit || fallbackUnit || 'MOTOR',
+      text: instantCopy(language, 'DOCUMENT_REQUIREMENTS_RECOVERY')
+    };
   }
   const unitOnly = /^(?:motor|moto|motorcycle|motosikal|phone|handphone|telefon|iphone)[!. ]*$/i.test(clean(text));
   if (unitOnly) {
@@ -1385,7 +1400,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const suggestionPricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
   const suggestions = availableModelSuggestions(catalogPool, suggestionPricing, unit, lead.Region || routeRegion);
   const suggestionText = suggestions.join(language === 'ZH' ? '、' : ', ');
-  if (interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text)) {
+  if (frustrationDetected) {
     return { handled: true, serviceRecovery: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'SERVICE_RECOVERY', { models: suggestionText }) };
   }
   if (['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent) || asksForOtherModels(text) || asksForAvailableModels(text)) {

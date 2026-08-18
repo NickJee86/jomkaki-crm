@@ -1,6 +1,6 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-18.7',
+  version: '2026-08-18.8',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: Object.freeze([
     'https://app.notion.com/p/3bfc040b616e81a38377cbe7b55bea1a',
