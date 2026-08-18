@@ -1,6 +1,6 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-18.6',
+  version: '2026-08-18.7',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: Object.freeze([
     'https://app.notion.com/p/3bfc040b616e81a38377cbe7b55bea1a',
@@ -54,6 +54,10 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
   }),
   documents: Object.freeze({
     minimum: Object.freeze(['IC_FRONT', 'IC_BACK', 'INCOME_PROOF']),
+    consentDispatchOnFirstApplicationDocument: true,
+    consentCanProceedWithMissingDocuments: true,
+    applicationDetailsStartAfterConsentSigned: true,
+    documentsAndConsentCollectedInParallel: true,
     consentRequiredBeforeCreditCheck: true,
     consentRequiredBeforeLms: true,
     batchAcknowledgementSeconds: 120
@@ -70,4 +74,3 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
-

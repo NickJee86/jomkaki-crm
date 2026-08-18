@@ -1237,10 +1237,10 @@ export default async function handler(req, res) {
         const route = routing.channel;
         if (!route || !truth(route.Active) || !truth(route['Outbound Enabled'])) throw new Error('No active official WhatsApp channel is available for this customer');
         const timestamp = now(), consentUrl = `https://jomkaki-rider.vercel.app${CREDIT_CONSENT_TEMPLATE_PATH}`;
-        const message = `JomKaki Rider: Dokumen dan maklumat permohonan anda telah lengkap. Sila muat turun, lengkapkan dan tandatangani Borang Kebenaran CTOS/CCRIS ini, kemudian hantar semula PDF atau gambar yang jelas di WhatsApp ini. Borang: ${consentUrl}`;
+        const message = `JomKaki Rider: Sila lengkapkan dan tandatangani Borang Kebenaran CTOS/CCRIS ini, kemudian hantar semula PDF atau gambar yang jelas di WhatsApp ini. Tak perlu tunggu semua dokumen lengkap; dokumen atau maklumat yang masih kurang boleh diberikan kemudian. Borang: ${consentUrl}`;
         await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
-          'Updated At': timestamp, 'Current Stage': 'CONSENT_PENDING_SIGNATURE', 'Credit Consent Status': 'QUEUED', 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
+          'Updated At': timestamp, 'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS', 'Credit Consent Status': 'QUEUED', 'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
           'Credit Consent Sent At': '', 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': session.username
         }, 'CC');
         const outboxId = makeId('OUT');

@@ -13,6 +13,10 @@ const retryDelay = attempt => new Promise(resolve => setTimeout(resolve, [0, 80,
 const DOCUMENT_ACK_WINDOW_MS = 120000;
 const DEFAULT_MAX_INBOUND_AGE_MS = 10 * 60 * 1000;
 const documentBatchAcknowledgements = new Map();
+const CONSENT_DISPATCH_RESERVATION_TTL_MS = 5 * 60 * 1000;
+const consentDispatchReservations = globalThis.__JOMKAKI_CONSENT_DISPATCH_RESERVATIONS__ ||= new Map();
+export const CREDIT_CONSENT_TEMPLATE_URL = 'https://jomkaki-rider.vercel.app/assets/ctos-ccris-consent-bph-v4.pdf';
+export const CREDIT_CONSENT_TEMPLATE_VERSION = 'BPH_V4.0_01112020';
 const INBOUND_RESERVATION_TTL_MS = 5 * 60 * 1000;
 const inboundMessageReservations = globalThis.__JOMKAKI_INBOUND_RESERVATIONS__ ||= new Map();
 const sheetReadCache = globalThis.__JOMKAKI_SHEET_READ_CACHE__ ||= new Map();
@@ -31,6 +35,35 @@ export function reserveInboundMessage(messageId, now = Date.now()) {
 export function releaseInboundMessage(messageId) {
   const id = clean(messageId);
   if (id) inboundMessageReservations.delete(id);
+}
+
+export function shouldDispatchEarlyConsent({ messageType = '', application = {}, routeUsable = true, human = false } = {}) {
+  if (!JOMKAKI_KNOWLEDGE.documents.consentDispatchOnFirstApplicationDocument) return false;
+  if (!routeUsable || human || !['image', 'document'].includes(clean(messageType).toLowerCase())) return false;
+  const status = clean(application['Credit Consent Status']).toUpperCase();
+  return !['QUEUED', 'SENT', 'SIGNED_PENDING_VERIFICATION', 'VERIFIED', 'DECLINED', 'WITHDRAWN'].includes(status);
+}
+
+export function reserveEarlyConsentDispatch(applicationId, now = Date.now()) {
+  const id = clean(applicationId);
+  if (!id) return false;
+  for (const [key, reservedAt] of consentDispatchReservations) {
+    if (now - reservedAt > CONSENT_DISPATCH_RESERVATION_TTL_MS) consentDispatchReservations.delete(key);
+  }
+  if (consentDispatchReservations.has(id)) return false;
+  consentDispatchReservations.set(id, now);
+  return true;
+}
+
+export function releaseEarlyConsentDispatch(applicationId) {
+  const id = clean(applicationId);
+  if (id) consentDispatchReservations.delete(id);
+}
+
+export function buildEarlyConsentReply(language = 'MS') {
+  if (language === 'ZH') return `文件已经收到。在我检查文件的同时，请先填写并签署 CTOS/CCRIS 同意书，然后把清楚的 PDF 或照片发回这个 WhatsApp：${CREDIT_CONSENT_TEMPLATE_URL}。不需要等其他文件齐全；缺少的资料之后可以继续补交。`;
+  if (language === 'EN') return `Your document has been received. While I check it, please complete and sign the CTOS/CCRIS consent form, then return a clear PDF or photo in this WhatsApp chat: ${CREDIT_CONSENT_TEMPLATE_URL}. You do not need to wait for every other document; any missing items can be submitted afterwards.`;
+  return `Dokumen ini sudah diterima. Sementara saya semak, sila lengkapkan dan tandatangani Borang Kebenaran CTOS/CCRIS ini, kemudian hantar semula PDF atau gambar yang jelas dalam WhatsApp ini: ${CREDIT_CONSENT_TEMPLATE_URL}. Tak perlu tunggu semua dokumen lengkap; dokumen yang masih kurang boleh dihantar kemudian.`;
 }
 
 function sheetCacheTtl(range) {
@@ -242,7 +275,7 @@ export function buildDocumentProgressReply(language = 'MS', documents = []) {
   if (status.pending) {
     if (language === 'ZH') return `店内贷款的最低文件要求是 MyKad 正反面，以及最新薪水单或 EPF 记录。我已经收到 ${status.rows.length} 份文件，包括${received}，目前正在核对，不需要重新发送。如果文件齐全，我会自动发送 CTOS/CCRIS 同意书给您签署。`;
     if (language === 'EN') return `For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. I have received ${status.rows.length} file${status.rows.length === 1 ? '' : 's'}, including ${received}, and they are being checked, so there is no need to resend them. If everything is complete, I will send the CTOS/CCRIS consent form for your signature.`;
-    return `Untuk permohonan loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Saya sudah terima ${status.rows.length} fail anda termasuk ${received} dan sedang membuat semakan, jadi tak perlu hantar semula. Jika semuanya lengkap, saya akan hantar borang kebenaran CTOS/CCRIS untuk anda tandatangan.`;
+    return `Untuk permohonan loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Saya sudah terima ${status.rows.length} fail anda termasuk ${received} dan sedang membuat semakan, jadi tak perlu hantar semula. Borang kebenaran CTOS/CCRIS boleh ditandatangani sekarang tanpa menunggu semua dokumen lengkap.`;
   }
   if (status.missing.length) {
     if (language === 'ZH') return `已收到的文件包括${received}。目前还需要：${status.missing.join('、')}。其他文件不需要重新发送。`;
@@ -532,7 +565,7 @@ const instantCopy = (language, key, values = {}) => {
       SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
       HELP: 'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
-      DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; saya akan beritahu dengan jelas jika ada dokumen yang masih kurang.',
+      DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; dokumen yang masih kurang boleh dihantar kemudian.',
       TENURE_QUOTE: `Untuk ${brand} ${model}, ansuran ${localizedTenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       TENURE_UNAVAILABLE: `Ansuran ${localizedTenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
       DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan.`,
@@ -1413,7 +1446,10 @@ async function sendInstantSalesMessage({ route, phone, decision }) {
   if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
   const binding = instantChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
-  const payload = imageUrl
+  const documentUrl = clean(decision.documentUrl);
+  const payload = documentUrl
+    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'document', document: { link: documentUrl, filename: clean(decision.documentFilename) || 'JomKaki Rider CTOS CCRIS Consent Form.pdf', caption: clean(decision.text).slice(0, 1024) } }
+    : imageUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
     : { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: clean(decision.text) } };
   const response = await fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
@@ -1427,7 +1463,9 @@ async function sendInstantSalesMessage({ route, phone, decision }) {
     binding,
     providerMessageId: clean(result.messages?.[0]?.id),
     error: response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
-    messageType: imageUrl
+    messageType: documentUrl
+      ? 'DOCUMENT'
+      : imageUrl
       ? (decision.productUnit === 'HANDPHONE' ? 'HANDPHONE_IMAGE' : 'MOTOR_IMAGE')
       : 'TEXT'
   };
@@ -1636,7 +1674,7 @@ export default async function handler(req, res) {
           });
           if (generatedReply) instantDecision = { ...instantDecision, text: generatedReply, aiGenerated: true };
         }
-        const willReply = routeUsable && !human && instantDecision.handled;
+        let willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
         let instantResult = { sent: false };
         if (!lead) {
@@ -1659,10 +1697,25 @@ export default async function handler(req, res) {
         let application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
         if (!clean(application['Application ID']) && shouldEnsureApplication) {
           application = buildAutomaticApplication({ lead, state: conversationState || {}, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
-          await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
+          await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
           await appendObject(token, 'Applications', application);
           applications.push(application);
           await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
+        }
+        const earlyConsentReserved = shouldDispatchEarlyConsent({ messageType: message.type, application, routeUsable, human })
+          && reserveEarlyConsentDispatch(application['Application ID']);
+        if (earlyConsentReserved) {
+          instantDecision = {
+            handled: true,
+            documentQueued: true,
+            consentDispatch: true,
+            nextStep: clean(conversationState?.['Current Step']) || 'STEP_04_DOCUMENTS',
+            productUnit: clean(instantDecision.productUnit || routeBusinessUnit),
+            text: buildEarlyConsentReply('MS'),
+            documentUrl: CREDIT_CONSENT_TEMPLATE_URL,
+            documentFilename: 'JomKaki Rider CTOS CCRIS Consent Form.pdf'
+          };
+          willReply = true;
         }
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
         if (!conversationState) {
@@ -1732,6 +1785,20 @@ export default async function handler(req, res) {
           instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
           if (instantResult.sent) {
             outboundSent = true;
+            if (instantDecision.consentDispatch) {
+              const consentSentAt = new Date().toISOString();
+              const consentChanges = {
+                'Updated At': consentSentAt,
+                'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS',
+                'Credit Consent Status': 'SENT',
+                'Credit Consent Template Version': CREDIT_CONSENT_TEMPLATE_VERSION,
+                'Credit Consent Sent At': consentSentAt,
+                'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED',
+                'Updated By': 'META_WEBHOOK_CONSENT_FIRST'
+              };
+              await updateObject(token, 'Applications', 'Application ID', application['Application ID'], consentChanges, 'CC');
+              Object.assign(application, consentChanges);
+            }
             const deliveredState = {
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
@@ -1742,6 +1809,7 @@ export default async function handler(req, res) {
             Object.assign(conversationState, deliveredState);
           }
         }
+        if (instantDecision.consentDispatch && !instantResult.sent) releaseEarlyConsentDispatch(application['Application ID']);
         if (documentAckReserved && !instantResult.sent) documentBatchAcknowledgements.delete(documentAckKey);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         const media = message.document || message.image;
@@ -1753,11 +1821,11 @@ export default async function handler(req, res) {
           const outboxId = instantDecision.imageUrl && message.id ? `${imageOutboxPrefix}-${message.id}` : makeId('OUT');
           await appendObject(token, 'Message_Outbox', {
             'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
-            'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantDecision.text), 'Image URL': clean(instantDecision.imageUrl),
+            'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantDecision.text), 'Image URL': clean(instantDecision.imageUrl || instantDecision.documentUrl),
             'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
-            'Reply To Message ID': message.id || '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
+            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
           });
         }

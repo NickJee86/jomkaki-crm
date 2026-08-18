@@ -26,6 +26,15 @@ export function buildMetaPayload(row = {}) {
     if (!name) throw new Error('Approved Meta template name is missing');
     return { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: clean(row.Language || 'en_US') } } };
   }
+  const body = clean(row['Message Text']);
+  if (clean(row['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') {
+    const documentUrl = clean(row['Document URL']) || clean(body.match(/https:\/\/\S+?\.pdf(?:\?\S*)?/i)?.[0]);
+    if (!/^https:\/\//i.test(documentUrl)) throw new Error('Consent document URL must use HTTPS');
+    return {
+      messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'document',
+      document: { link: documentUrl, filename: 'JomKaki Rider CTOS CCRIS Consent Form.pdf', caption: body.slice(0, 1024) }
+    };
+  }
   const imageUrl = clean(row['Image URL']);
   const imageMessage = Boolean(imageUrl) || ['IMAGE', 'MOTOR_IMAGE', 'HANDPHONE_IMAGE', 'PRODUCT_IMAGE', 'SESSION_IMAGE'].includes(messageType);
   if (imageMessage) {
@@ -36,7 +45,6 @@ export function buildMetaPayload(row = {}) {
       image: { link: imageUrl, ...(caption ? { caption } : {}) }
     };
   }
-  const body = clean(row['Message Text']);
   if (!body) throw new Error('Outbox message text is missing');
   return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } };
 }
@@ -122,7 +130,7 @@ export default async function handler(req, res) {
     const timestamp = new Date().toISOString();
     await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Attempt Count': String(attemptCount), 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'WhatsApp Number ID': binding.phoneNumberId, 'Send Routing Status': `VERCEL_CHANNEL_DISPATCH:${binding.channelId}` });
     if (clean(outbox['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') {
-      await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_PENDING_SIGNATURE', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
+      await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
     }
     return res.status(200).json({ ok: true, outboxId, channelId: binding.channelId, status: 'SENT', providerMessageId });
   } catch (error) {
