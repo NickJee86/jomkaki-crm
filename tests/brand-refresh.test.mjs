@@ -4,12 +4,12 @@ import fs from 'node:fs';
 
 const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const css=fs.readFileSync(new URL('../brand-refresh.css',import.meta.url),'utf8');
-const logo=fs.readFileSync(new URL('../jomkaki-motor-logo.jpg',import.meta.url));
+const logo=fs.readFileSync(new URL('../jomkaki-rider-logo.png',import.meta.url));
 
-test('Official JomKaki Motor logo is used in every brand surface',()=>{
-  assert.match(html,/rel="icon"[^>]+jomkaki-motor-logo\.jpg/);
-  assert.equal((html.match(/src="\.\/jomkaki-motor-logo\.jpg/g)||[]).length,2);
-  assert.match(html,/brand-refresh\.css\?v=20260808-official-logo-1/);
+test('Official JomKaki Rider logo is used in every brand surface',()=>{
+  assert.match(html,/rel="icon"[^>]+jomkaki-rider-logo\.png/);
+  assert.equal((html.match(/src="\.\/jomkaki-rider-logo\.png/g)||[]).length,2);
+  assert.match(html,/brand-refresh\.css\?v=20260818-rider-brand1/);
   assert.ok(logo.length>100000,'official logo image should be present');
 });
 

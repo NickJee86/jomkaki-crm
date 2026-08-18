@@ -71,7 +71,7 @@ export function sharePointConfigurationStatus(env = process.env) {
     credentialsConfigured,
     targetConfigured: true,
     hostname: clean(env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com',
-    sitePath: clean(env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments',
+    sitePath: clean(env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments',
     libraryName: clean(env.SHAREPOINT_LIBRARY_NAME) || 'Documents',
     writeVerified,
     writeVerifiedAt,

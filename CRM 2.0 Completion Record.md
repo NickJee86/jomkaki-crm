@@ -1,7 +1,7 @@
-# JomKaki Motor CRM 2.0 — Completion Record
+# JomKaki Rider CRM 2.0 — Completion Record
 
-Updated: 12 August 2026  
-Production: https://jomkaki-crm.vercel.app/
+Updated: 14 August 2026  
+Production: https://jomkaki-rider.vercel.app/
 
 ## Current production flow
 
@@ -67,6 +67,10 @@ Production: https://jomkaki-crm.vercel.app/
 - The Meta App Secret was rotated; the new secret, verification token and official West 01 Phone Number ID were stored as protected Vercel environment variables.
 - Vercel was redeployed after the Meta environment update and reported `Ready` in Production.
 - The deployed Meta callback challenge returned the exact expected challenge, confirming that the Vercel Webhook verification path and current verification token are working.
+- WhatsApp Manager now reports West 01 as `Connected`; the display name is approved and two-step verification is enabled.
+- The protected Make S00B dispatch secret is configured in both Vercel and Make, and the new Vercel production deployment is `Ready`.
+- West 01 is enabled for inbound acceptance testing. Outbound remains disabled until an approved test phone completes the controlled live test.
+- The official JomKaki logo is saved as the production WhatsApp business profile picture; Meta may take a few minutes to display it everywhere.
 
 ## External activation blockers
 

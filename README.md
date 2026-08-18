@@ -1,6 +1,6 @@
-# JomKaki Motor CRM 2.0 — Production Release
+# JomKaki Rider CRM 2.0 — Production Release
 
-Production CRM for JomKaki Motor, deployed on Vercel and connected to the existing Google Sheets operational database.
+Production CRM for JomKaki Rider, deployed on Vercel and connected to the existing Google Sheets operational database.
 
 ## Included
 
@@ -47,7 +47,7 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 - `SHAREPOINT_CLIENT_ID`
 - `SHAREPOINT_CLIENT_SECRET` (Sensitive)
 - `SHAREPOINT_HOSTNAME` (defaults to `rexmgt.sharepoint.com`)
-- `SHAREPOINT_SITE_PATH` (defaults to `/sites/JomkakiMotorSecureDocuments`)
+- `SHAREPOINT_SITE_PATH` (defaults to `/sites/JomKakiRiderSecureDocuments`)
 - `SHAREPOINT_LIBRARY_NAME` (defaults to `Documents`)
 - `WHATSAPP_SEND_MODE` (`MANUAL` now; change to `CLOUD` after Meta authorization)
 - `WHATSAPP_ACCESS_TOKEN` (Sensitive; required only for Cloud mode)
@@ -57,7 +57,7 @@ Production CRM for JomKaki Motor, deployed on Vercel and connected to the existi
 - `WHATSAPP_VERIFY_TOKEN` (Sensitive; used to verify the Meta webhook)
 - `META_APP_SECRET` (Sensitive; used to verify webhook signatures)
 
-Meta webhook callback URL: `https://jomkaki-crm.vercel.app/api/whatsapp-webhook`
+Meta webhook callback URL: `https://jomkaki-rider.vercel.app/api/whatsapp-webhook`
 
 Current Meta staging status (11 August 2026):
 
@@ -115,7 +115,7 @@ Current Meta staging status (11 August 2026):
 
 The Google service account must have Editor access to the CRM spreadsheet for operational write actions. Read-only views continue to work if write permission is unavailable.
 
-The Microsoft Entra application must have application permission `Sites.Selected`, with write access granted only to the JomkakiMotorSecureDocuments site. Avoid tenant-wide `Sites.ReadWrite.All` in production.
+The Microsoft Entra application must have application permission `Sites.Selected`, with write access granted only to the JomKakiRiderSecureDocuments site. Avoid tenant-wide `Sites.ReadWrite.All` in production.
 
 ## Deployment
 

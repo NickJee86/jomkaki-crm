@@ -42,7 +42,7 @@ export default async function handler(req, res) {
     if (!record || !fileId) return res.status(404).send('Product image not found');
     const token = await sharePointToken();
     const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
-    const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomkakiMotorSecureDocuments';
+    const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
     const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
     const siteResponse = await graph(token, `/sites/${host}:${sitePath}?$select=id`), site = await siteResponse.json();
     const drivesResponse = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`), drives = await drivesResponse.json();
