@@ -9,8 +9,8 @@ const css=fs.readFileSync(new URL('../customer-360.css',import.meta.url),'utf8')
 
 test('Every customer entry opens the same Customer 360',()=>{
   assert.match(app,/async function openCustomer360/);
-  assert.match(app,/async function openLead\(id\)\{return openCustomer360/);
-  assert.match(app,/async function openApp\(id\)\{return openCustomer360/);
+  assert.match(app,/openLead=async function openLeadCustomer360\(id\)\{return openCustomer360/);
+  assert.match(app,/openApp=async function openApplicationCustomer360\(id\)\{return openCustomer360/);
   assert.match(app,/data-customer-profile/);
   assert.match(app,/function bindCustomerProfileButtons/);
   assert.match(app,/function customerSearchCandidates/);
@@ -74,3 +74,4 @@ test('Complete Customer 360 sample includes automated signed consent before LMS 
   assert.match(app,/CONSENT_AI_VERIFIED/);
   assert.match(app,/Documents and signed consent are complete/);
 });
+
