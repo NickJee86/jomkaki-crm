@@ -40,6 +40,10 @@ test('Consent has a full send, upload, manager verification and readiness workfl
   assert.match(api,/mode: 'AUTOMATED_QUEUE'/);
   assert.match(api,/'Send Status': 'PENDING'/);
   assert.doesNotMatch(api,/MANUAL_PENDING:CONSENT_REQUEST/);
+  const send=api.slice(api.indexOf("if (action === 'sendCreditConsent')"),api.indexOf("if (action === 'setCreditConsentOutcome')"));
+  assert.match(send,/Tak perlu tunggu semua dokumen lengkap/);
+  assert.match(send,/CONSENT_AND_DOCUMENTS_IN_PROGRESS/);
+  assert.doesNotMatch(send,/Dokumen dan maklumat permohonan anda telah lengkap/);
 });
 
 test('Credit checking is blocked until consent and documents are ready',()=>{

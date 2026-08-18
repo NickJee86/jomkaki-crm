@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAiFallbackRequest, buildAiIntentRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, requestAiIntent, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAiFallbackRequest, buildAiIntentRequest, buildAutomaticApplication, buildDocumentProgressReply, buildEarlyConsentReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, CREDIT_CONSENT_TEMPLATE_URL, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseEarlyConsentDispatch, releaseInboundMessage, requestAiFallbackReply, requestAiIntent, reserveEarlyConsentDispatch, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldDispatchEarlyConsent, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
@@ -32,9 +32,32 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.primarySalesPath, true);
   assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.proactivelyPromoteCashPurchase, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.consentDispatchOnFirstApplicationDocument, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.consentCanProceedWithMissingDocuments, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsStartAfterConsentSigned, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.documentsAndConsentCollectedInParallel, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
   ]);
+});
+
+test('the first application document immediately sends the consent PDF without waiting for all documents', () => {
+  const application = { 'Application ID': 'APP-CONSENT-FIRST', 'Credit Consent Status': 'NOT_SENT', 'Minimum Documents Complete': 'FALSE' };
+  assert.equal(shouldDispatchEarlyConsent({ messageType: 'document', application }), true);
+  assert.equal(shouldDispatchEarlyConsent({ messageType: 'image', application }), true);
+  assert.equal(shouldDispatchEarlyConsent({ messageType: 'text', application }), false);
+  assert.equal(shouldDispatchEarlyConsent({ messageType: 'document', application: { ...application, 'Credit Consent Status': 'SENT' } }), false);
+  assert.equal(shouldDispatchEarlyConsent({ messageType: 'document', application, human: true }), false);
+  assert.equal(reserveEarlyConsentDispatch(application['Application ID'], 1000), true);
+  assert.equal(reserveEarlyConsentDispatch(application['Application ID'], 1001), false);
+  releaseEarlyConsentDispatch(application['Application ID']);
+  const reply = buildEarlyConsentReply('MS');
+  assert.match(reply, /tandatangani Borang Kebenaran CTOS\/CCRIS/);
+  assert.match(reply, /Tak perlu tunggu semua dokumen lengkap/);
+  assert.match(reply, new RegExp(CREDIT_CONSENT_TEMPLATE_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(source, /type: 'document'/);
+  assert.match(source, /WEBHOOK_CONSENT_FIRST/);
+  assert.match(source, /Credit Consent Status': 'SENT'/);
 });
 
 test('inbound message reservation blocks concurrent duplicate delivery and permits retry after release', () => {

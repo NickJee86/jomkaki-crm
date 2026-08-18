@@ -8,8 +8,19 @@ const source = fs.readFileSync(new URL('../api/whatsapp-outbox-send.js', import.
 test('automatic consent delivery synchronizes application consent state',()=>{
   assert.match(source,/JKM_CREDIT_CONSENT_REQUEST/);
   assert.match(source,/Credit Consent Status': 'SENT'/);
-  assert.match(source,/CONSENT_PENDING_SIGNATURE/);
+  assert.match(source,/CONSENT_AND_DOCUMENTS_IN_PROGRESS/);
   assert.match(source,/Applications!A1:CZ2000/);
+});
+
+test('consent requests send the actual PDF as a WhatsApp document', () => {
+  const payload = buildMetaPayload({
+    'Phone Number': '0123456789',
+    'Template Name': 'JKM_CREDIT_CONSENT_REQUEST',
+    'Message Text': 'Sila tandatangan borang: https://jomkaki-rider.vercel.app/assets/ctos-ccris-consent-bph-v4.pdf'
+  });
+  assert.equal(payload.type, 'document');
+  assert.match(payload.document.link, /ctos-ccris-consent-bph-v4\.pdf/);
+  assert.match(payload.document.filename, /JomKaki Rider/);
 });
 const activeRoute = { 'Internal Channel ID': 'JKM-WA-EAST-01', 'Phone Number ID': 'E-100', 'Credential Key': 'JKM_WA_EAST_01', Active: 'TRUE', 'Outbound Enabled': 'TRUE' };
 
