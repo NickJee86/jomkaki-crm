@@ -50,7 +50,10 @@ test('Customer 360 cannot remain on an endless loading screen',()=>{
   assert.match(app,/data-360-retry/);
   assert.match(app,/The customer record could not be loaded/);
   assert.match(css,/\.customer-360-load-warning/);
-  assert.match(html,/app-v2\.js\?v=20260818-document-status1/);
+  assert.match(html,/app-v2\.js\?v=20260818-document-status2/);
+  assert.match(app,/function customer360DocumentRequirement/);
+  assert.match(app,/IDENTITY_DOCUMENT/);
+  assert.match(app,/Received · Pending AI/);
 });
 
 test('Production CRM does not inject preview customers',()=>{
