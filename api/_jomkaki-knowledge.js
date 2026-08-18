@@ -1,6 +1,6 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-18.5',
+  version: '2026-08-18.6',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: Object.freeze([
     'https://app.notion.com/p/3bfc040b616e81a38377cbe7b55bea1a',
@@ -19,8 +19,8 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
     aiFallback: Object.freeze({
       enabled: true,
       model: 'gpt-5.6-terra',
-      reasoningEffort: 'low',
-      timeoutMs: 3200,
+      reasoningEffort: 'none',
+      timeoutMs: 2200,
       maximumCharacters: 420,
       noSilenceFallback: true
     })
@@ -70,3 +70,4 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
+
