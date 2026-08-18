@@ -593,6 +593,14 @@ const acceptedVerification = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'AC
 const acceptedQuality = new Set(['GOOD', 'PASS', 'PASSED', 'ACCEPTED']);
 const incomeDocumentTypes = new Set(['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT']);
 
+const missingRequiredDocumentTypes = types => {
+  const missing = [], hasCombinedIdentity = types.has('IDENTITY_DOCUMENT');
+  if (!types.has('IC_FRONT') && !hasCombinedIdentity) missing.push('IC_FRONT');
+  if (!types.has('IC_BACK') && !hasCombinedIdentity) missing.push('IC_BACK');
+  if (![...types].some(type => incomeDocumentTypes.has(type))) missing.push('INCOME_PROOF');
+  return missing;
+};
+
 export function deriveDocumentReadiness(documents = []) {
   const routineDocuments = documents.filter(row => clean(row['Document Type'] || row.type).toUpperCase() !== CREDIT_CONSENT_DOCUMENT_TYPE);
   const accepted = routineDocuments.filter(row => {
@@ -601,10 +609,7 @@ export function deriveDocumentReadiness(documents = []) {
     return acceptedVerification.has(verification) && (!quality || acceptedQuality.has(quality)) && clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() !== 'TRUE';
   });
   const types = new Set(accepted.map(row => clean(row['Document Type'] || row.type).toUpperCase()));
-  const missing = [];
-  if (!types.has('IC_FRONT')) missing.push('IC_FRONT');
-  if (!types.has('IC_BACK')) missing.push('IC_BACK');
-  if (![...types].some(type => incomeDocumentTypes.has(type))) missing.push('INCOME_PROOF');
+  const missing = missingRequiredDocumentTypes(types);
   const exception = routineDocuments.some(row => clean(row['Manual Review Required'] || row.reviewRequired).toUpperCase() === 'TRUE' || ['POOR', 'BLURRY', 'FAILED', 'REJECTED'].includes(clean(row['Quality Status'] || row.quality || row['Verification Status'] || row.verification).toUpperCase()));
   return { complete: missing.length === 0 && !exception, missing, exception };
 }
@@ -613,7 +618,18 @@ const documentSummary = documents => {
   const received = documents.filter(row => clean(row['Document Type']));
   const types = [...new Set(received.map(row => row['Document Type']).filter(Boolean))];
   const readiness = deriveDocumentReadiness(received);
-  return { count: received.length, types, needsReview: readiness.exception, aiComplete: readiness.complete, missing: readiness.missing, latest: received.map(x => x['Updated At'] || x['Received At']).filter(Boolean).sort().at(-1) || '' };
+  const routineReceived = received.filter(row => clean(row['Document Type']).toUpperCase() !== CREDIT_CONSENT_DOCUMENT_TYPE);
+  const usableReceived = routineReceived.filter(row => !['REJECTED', 'FAILED'].includes(clean(row['Verification Status'] || row.verification).toUpperCase()));
+  const receivedTypes = new Set(usableReceived.map(row => clean(row['Document Type'] || row.type).toUpperCase()));
+  const receivedMissing = missingRequiredDocumentTypes(receivedTypes);
+  const pendingTypes = [...new Set(usableReceived.filter(row => {
+    const verification = clean(row['Verification Status'] || row.verification).toUpperCase();
+    const quality = clean(row['Quality Status'] || row.quality).toUpperCase();
+    return !acceptedVerification.has(verification) || (quality && !acceptedQuality.has(quality));
+  }).map(row => clean(row['Document Type'] || row.type).toUpperCase()).filter(Boolean))];
+  const classificationPending = pendingTypes.includes('UNCLASSIFIED');
+  const documentStatus = readiness.exception ? 'AI_EXCEPTION' : classificationPending ? 'AI_CHECK_PENDING' : receivedMissing.length ? 'COLLECTING' : readiness.complete ? 'AI_VERIFIED_COMPLETE' : 'AI_CHECK_PENDING';
+  return { count: received.length, types, needsReview: readiness.exception, aiComplete: readiness.complete, missing: readiness.missing, receivedMissing, pendingTypes, classificationPending, documentStatus, latest: received.map(x => x['Updated At'] || x['Received At']).filter(Boolean).sort().at(-1) || '' };
 };
 
 export default async function handler(req, res) {
@@ -1325,23 +1341,29 @@ export default async function handler(req, res) {
           'Manual Review Required': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'TRUE' : 'FALSE', Remarks: clean(body.remarks), 'Uploaded By': session.username, 'Business Unit': rowBusinessUnit(applicationRecord || leadRecord || {}), 'Customer ID': clean(applicationRecord?.['Customer ID'] || leadRecord?.['Customer ID'])
         });
         if (applicationRecord) {
-          const requiredDocumentTypes = ['IC_FRONT', 'IC_BACK', 'INCOME_PROOF'];
-          const receivedDocumentTypes = new Set(rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId && clean(row['Verification Status']).toUpperCase() !== 'REJECTED').map(row => clean(row['Document Type']).toUpperCase()));
-          receivedDocumentTypes.add(documentType.toUpperCase());
-          const missingDocumentTypes = requiredDocumentTypes.filter(type => !receivedDocumentTypes.has(type));
+          const applicationDocuments = rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId);
+          applicationDocuments.push({
+            'Document Type': documentType,
+            'Verification Status': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'PENDING' : 'PENDING_AI',
+            'Quality Status': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'PENDING_REVIEW' : 'PENDING_AI',
+            'Manual Review Required': documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE ? 'TRUE' : 'FALSE',
+            'Received At': timestamp
+          });
+          const liveDocumentStatus = documentSummary(applicationDocuments);
           const applicationChanges = {
             'Updated At': timestamp,
-            'Document Status': missingDocumentTypes.length ? 'COLLECTING' : 'AI_CHECK_PENDING',
-            'Minimum Documents Complete': missingDocumentTypes.length ? 'FALSE' : 'TRUE',
-            'Missing Documents': missingDocumentTypes.join(', '),
-            'Current Stage': missingDocumentTypes.length ? 'DOCUMENT_COLLECTION' : 'DOCUMENT_VERIFICATION',
+            'Document Status': liveDocumentStatus.documentStatus,
+            'Minimum Documents Complete': liveDocumentStatus.aiComplete ? 'TRUE' : 'FALSE',
+            'Missing Documents': liveDocumentStatus.classificationPending ? '' : liveDocumentStatus.receivedMissing.join(', '),
+            'Verification Pending Documents': liveDocumentStatus.pendingTypes.join(', '),
+            'Current Stage': liveDocumentStatus.classificationPending ? 'DOCUMENT_VERIFICATION' : liveDocumentStatus.receivedMissing.length ? 'DOCUMENT_COLLECTION' : liveDocumentStatus.aiComplete ? 'DOCUMENTS_VERIFIED' : 'DOCUMENT_VERIFICATION',
             'Updated By': session.username
           };
           if (documentType.toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE) Object.assign(applicationChanges, {
             'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION', 'Credit Consent Template Version': clean(applicationRecord['Credit Consent Template Version']) || CREDIT_CONSENT_TEMPLATE_VERSION,
             'Credit Consent Signed At': timestamp, 'Credit Consent Document ID': documentId, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': 'BLOCKED_CONSENT_VERIFICATION'
           });
-          await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
+          await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders, 'Verification Pending Documents']);
           await updateObject(req, 'Applications', 'Application ID', applicationId, applicationChanges, 'BX');
         }
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
@@ -1625,8 +1647,8 @@ export default async function handler(req, res) {
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, tenureUnit: businessUnit === 'HANDPHONE' ? 'MONTHS' : 'YEARS', deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)'] || effectiveDeposit(quote)) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)'] || quote['Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '', customerId: row['Customer ID'], teamId: row['Team ID'], originChannelId: row['Origin WhatsApp Channel ID'],
-          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.aiComplete ? 'AI_VERIFIED_COMPLETE' : docs.needsReview ? 'AI_EXCEPTION' : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
-          missingDocuments: docs.aiComplete ? '' : (row['Missing Documents'] || docs.missing.join(', ')), documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
+          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.count ? docs.documentStatus : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete ? 'TRUE' : 'FALSE',
+          missingDocuments: docs.count ? (docs.classificationPending ? '' : docs.receivedMissing.join(', ')) : (row['Missing Documents'] || ''), verificationPendingDocuments: docs.pendingTypes.join(', '), verifiedMissingDocuments: docs.missing.join(', '), documentClassificationPending: docs.classificationPending, documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
           employerName: row['Employer Name'], employerAddress: row['Employer Address'], employerPhone: row['Employer Phone'],
           employmentDurationMonths: row['Employment Duration Months'], jobPosition: row['Job Position'], basicSalary: row['Basic Salary'],

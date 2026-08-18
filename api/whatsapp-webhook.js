@@ -66,6 +66,74 @@ export function buildEarlyConsentReply(language = 'MS') {
   return `Dokumen ini sudah diterima. Sementara saya semak, sila lengkapkan dan tandatangani Borang Kebenaran CTOS/CCRIS ini, kemudian hantar semula PDF atau gambar yang jelas dalam WhatsApp ini: ${CREDIT_CONSENT_TEMPLATE_URL}. Tak perlu tunggu semua dokumen lengkap; dokumen yang masih kurang boleh dihantar kemudian.`;
 }
 
+const APPLICATION_DETAIL_FIELDS = [
+  { step: 'APP_DETAILS_IC_NUMBER', header: 'Applicant IC Number', valid: value => /^\d{12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Sila berikan nombor IC penuh anda (12 digit).', invalid: 'Nombor IC perlu mempunyai 12 digit. Sila semak dan hantar semula.' },
+  { step: 'APP_DETAILS_EMAIL', header: 'Email', valid: value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(value)), normalize: value => clean(value).toLowerCase(), prompt: 'Apakah alamat e-mel anda?', invalid: 'Alamat e-mel itu nampaknya belum lengkap. Sila hantar dalam format seperti nama@email.com.' },
+  { step: 'APP_DETAILS_HOME_ADDRESS', header: 'Home Address', valid: value => clean(value).length >= 8, normalize: clean, prompt: 'Apakah alamat rumah penuh anda?', invalid: 'Sila berikan alamat rumah yang lebih lengkap.' },
+  { step: 'APP_DETAILS_EMPLOYER_NAME', header: 'Employer Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah nama majikan atau syarikat tempat anda bekerja?', invalid: 'Sila berikan nama majikan atau syarikat anda.' },
+  { step: 'APP_DETAILS_EMPLOYER_ADDRESS', header: 'Employer Address', valid: value => clean(value).length >= 5, normalize: clean, prompt: 'Apakah alamat majikan anda?', invalid: 'Sila berikan alamat majikan yang lebih lengkap.' },
+  { step: 'APP_DETAILS_EMPLOYER_PHONE', header: 'Employer Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon majikan anda?', invalid: 'Nombor telefon majikan perlu mempunyai 9 hingga 12 digit.' },
+  { step: 'APP_DETAILS_REFERENCE_1_NAME', header: 'Reference 1 Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Sekarang maklumat rujukan pertama. Apakah nama penuhnya?', invalid: 'Sila berikan nama rujukan pertama.' },
+  { step: 'APP_DETAILS_REFERENCE_1_PHONE', header: 'Reference 1 Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon rujukan pertama?', invalid: 'Nombor telefon rujukan perlu mempunyai 9 hingga 12 digit.' },
+  { step: 'APP_DETAILS_REFERENCE_1_RELATIONSHIP', header: 'Reference 1 Relationship', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah hubungan rujukan pertama dengan anda?', invalid: 'Sila nyatakan hubungan rujukan pertama dengan anda.' },
+  { step: 'APP_DETAILS_REFERENCE_2_NAME', header: 'Reference 2 Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah nama penuh rujukan kedua?', invalid: 'Sila berikan nama rujukan kedua.' },
+  { step: 'APP_DETAILS_REFERENCE_2_PHONE', header: 'Reference 2 Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon rujukan kedua?', invalid: 'Nombor telefon rujukan perlu mempunyai 9 hingga 12 digit.' },
+  { step: 'APP_DETAILS_REFERENCE_2_RELATIONSHIP', header: 'Reference 2 Relationship', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah hubungan rujukan kedua dengan anda?', invalid: 'Sila nyatakan hubungan rujukan kedua dengan anda.' },
+  { step: 'APP_DETAILS_PRODUCT_BRAND', header: 'Product Brand', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah jenama motor atau telefon yang anda pilih?', invalid: 'Sila berikan jenama produk yang anda pilih.' },
+  { step: 'APP_DETAILS_PRODUCT_MODEL', header: 'Product Model', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah model motor atau telefon yang anda pilih?', invalid: 'Sila berikan model produk yang anda pilih.' },
+  { step: 'APP_DETAILS_LOAN_TENURE', header: 'LOAN_TENURE', valid: (value, unit) => unit === 'HANDPHONE' ? /^[1-5]$/.test((clean(value).match(/[1-5]/) || [])[0] || '') : /^[3-5]$/.test((clean(value).match(/[3-5]/) || [])[0] || ''), normalize: (value, unit) => { const years = (clean(value).match(/[1-5]/) || [])[0] || ''; return unit === 'HANDPHONE' ? String(Number(years) * 12) : years; }, prompt: 'Berapa tahun tempoh ansuran yang anda mahu?', invalid: 'Untuk motor, pilih 3 hingga 5 tahun. Untuk telefon, pilih 1 hingga 5 tahun.' },
+  { step: 'APP_DETAILS_BANK_ACCOUNT', header: 'Bank Account Available', valid: value => /^(?:ya|yes|ada|tidak|tak|tiada|no)$/i.test(clean(value)), normalize: value => /^(?:ya|yes|ada)$/i.test(clean(value)) ? 'YES' : 'NO', prompt: 'Adakah anda mempunyai akaun bank peribadi? Jawab Ya atau Tidak.', invalid: 'Sila jawab Ya atau Tidak untuk akaun bank peribadi.' }
+];
+
+const applicationDetailHeader = (field, unit) => field.header === 'LOAN_TENURE' ? (unit === 'HANDPHONE' ? 'Loan Tenure Months' : 'Loan Tenure Years') : field.header;
+const APPLICATION_DETAIL_APPLICATION_HEADERS = [...new Set([
+  ...APPLICATION_DETAIL_FIELDS.filter(field => field.header !== 'LOAN_TENURE').map(field => field.header),
+  'Loan Tenure Years',
+  'Loan Tenure Months',
+  'Document Status',
+  'Minimum Documents Complete',
+  'Missing Documents',
+  'Missing Application Fields',
+  'Verification Pending Documents',
+  'Credit Consent Signed At'
+])];
+const applicationDetailField = step => APPLICATION_DETAIL_FIELDS.find(field => field.step === (clean(step).toUpperCase() === 'APPLICATION_DETAILS_PENDING' ? 'APP_DETAILS_IC_NUMBER' : clean(step).toUpperCase()));
+const applicationDetailMissing = (application, unit) => APPLICATION_DETAIL_FIELDS.filter(field => !clean(application[applicationDetailHeader(field, unit)]));
+
+export function isApplicationDetailStep(step = '') {
+  const value = clean(step).toUpperCase();
+  return value === 'APPLICATION_DETAILS_PENDING' || value.startsWith('APP_DETAILS_');
+}
+
+export function shouldStartApplicationDetails({ messageType = '', application = {}, currentStep = '', routeUsable = true, human = false } = {}) {
+  if (!routeUsable || human || isApplicationDetailStep(currentStep) || clean(currentStep).toUpperCase() === 'APPLICATION_DETAILS_COMPLETE') return false;
+  const consentStatus = clean(application['Credit Consent Status']).toUpperCase();
+  return ['image', 'document'].includes(clean(messageType).toLowerCase()) && ['QUEUED', 'SENT', 'SIGNED_PENDING_VERIFICATION', 'VERIFIED'].includes(consentStatus);
+}
+
+export function applicationDetailSideQuestion(value = '') {
+  const text = normalizedWords(value);
+  return /\b(apa|berapa|bila|mana|kenapa|macam mana|how|what|when|where|why|cash|deposit|dokumen|document|promo|promosi|harga|ansuran|model)\b/.test(text) || /[?？]/.test(clean(value));
+}
+
+export function buildApplicationDetailsTurn({ currentStep = '', text = '', application = {}, businessUnit = 'MOTOR', start = false } = {}) {
+  const unit = clean(businessUnit).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
+  if (start) {
+    const first = applicationDetailMissing(application, unit)[0];
+    return first
+      ? { handled: true, nextStep: first.step, text: `Dokumen sudah diterima. Sementara semakan dibuat, kita boleh terus lengkapkan maklumat permohonan. ${first.prompt}`, changes: {}, missingFields: applicationDetailMissing(application, unit).map(field => applicationDetailHeader(field, unit)) }
+      : { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Maklumat permohonan anda sudah lengkap. Dokumen yang masih kurang boleh dihantar kemudian di sini.', changes: {}, missingFields: [] };
+  }
+  const field = applicationDetailField(currentStep);
+  if (!field) return { handled: false };
+  if (!field.valid(text, unit)) return { handled: true, nextStep: field.step, text: field.invalid, changes: {}, missingFields: applicationDetailMissing(application, unit).map(item => applicationDetailHeader(item, unit)) };
+  const header = applicationDetailHeader(field, unit), changes = { [header]: field.normalize(text, unit) }, projected = { ...application, ...changes };
+  const next = applicationDetailMissing(projected, unit)[0];
+  return next
+    ? { handled: true, nextStep: next.step, text: `Baik, sudah dicatat. ${next.prompt}`, changes, missingFields: applicationDetailMissing(projected, unit).map(item => applicationDetailHeader(item, unit)) }
+    : { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Maklumat permohonan anda sudah lengkap. Dokumen yang masih kurang boleh dihantar kemudian di sini. Selepas dokumen dan borang kebenaran disahkan, permohonan akan disediakan untuk LMS.', changes, missingFields: [] };
+}
+
 function sheetCacheTtl(range) {
   if (/!1:1$/.test(range)) return 5 * 60 * 1000;
   if (/^(?:WhatsApp_Number_Master|Branch_Master|Motor_Model_Catalog|Motor_Loan_Pricing|Handphone_Model_Catalog|Handphone_Loan_Pricing)!/.test(range)) return 30 * 1000;
@@ -239,15 +307,23 @@ const uniqueDocumentRows = documents => {
 
 const documentProgress = documents => {
   const rows = uniqueDocumentRows(documents);
-  const types = new Set(rows.map(documentTypeFromRow));
   const accepted = new Set(['VERIFIED', 'AI_VERIFIED', 'APPROVED', 'ACCEPTED']);
-  const pending = rows.some(row => !accepted.has(clean(row['Verification Status'] || row.verification).toUpperCase()));
   const failed = rows.some(row => ['REJECTED', 'FAILED', 'BLURRY', 'POOR'].includes(clean(row['Verification Status'] || row['Quality Status'] || row.verification || row.quality).toUpperCase()));
+  const usableRows = rows.filter(row => !['REJECTED', 'FAILED', 'BLURRY', 'POOR'].includes(clean(row['Verification Status'] || row['Quality Status'] || row.verification || row.quality).toUpperCase()));
+  const types = new Set(usableRows.map(documentTypeFromRow));
+  const pendingRows = usableRows.filter(row => !accepted.has(clean(row['Verification Status'] || row.verification).toUpperCase()));
+  const pending = pendingRows.length > 0;
+  const pendingTypes = [...new Set(pendingRows.map(documentTypeFromRow).filter(type => type && type !== 'CTOS_CCRIS_CONSENT_SIGNED'))];
   const hasCombinedIdentity = types.has('IDENTITY_DOCUMENT');
-  const missing = [];
-  if (!types.has('IC_FRONT') && !hasCombinedIdentity) missing.push('IC depan');
-  if (!types.has('IC_BACK') && !hasCombinedIdentity) missing.push('IC belakang');
-  if (![...types].some(type => ['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT'].includes(type))) missing.push('slip gaji atau penyata EPF');
+  const missing = [], missingCodes = [];
+  if (!types.has('IC_FRONT') && !hasCombinedIdentity) { missing.push('IC depan'); missingCodes.push('IC_FRONT'); }
+  if (!types.has('IC_BACK') && !hasCombinedIdentity) { missing.push('IC belakang'); missingCodes.push('IC_BACK'); }
+  if (![...types].some(type => ['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT'].includes(type))) { missing.push('slip gaji atau penyata EPF'); missingCodes.push('INCOME_PROOF'); }
+  const acceptedTypes = new Set(usableRows.filter(row => accepted.has(clean(row['Verification Status'] || row.verification).toUpperCase())).map(documentTypeFromRow));
+  const hasVerifiedCombinedIdentity = acceptedTypes.has('IDENTITY_DOCUMENT'), verifiedMissingCodes = [];
+  if (!acceptedTypes.has('IC_FRONT') && !hasVerifiedCombinedIdentity) verifiedMissingCodes.push('IC_FRONT');
+  if (!acceptedTypes.has('IC_BACK') && !hasVerifiedCombinedIdentity) verifiedMissingCodes.push('IC_BACK');
+  if (![...acceptedTypes].some(type => ['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT'].includes(type))) verifiedMissingCodes.push('INCOME_PROOF');
   const labels = [
     [hasCombinedIdentity || types.has('IC_FRONT') || types.has('IC_BACK'), 'kad pengenalan'],
     [types.has('PAYSLIP') || types.has('SALARY_SLIP'), 'slip gaji'],
@@ -256,7 +332,7 @@ const documentProgress = documents => {
     [types.has('PROOF_OF_ADDRESS'), 'bukti alamat'],
     [types.has('CTOS_CCRIS_CONSENT_SIGNED'), 'borang kebenaran CTOS/CCRIS']
   ].filter(([present]) => present).map(([, label]) => label);
-  return { rows, types, pending, failed, missing, labels };
+  return { rows, types, pending, pendingTypes, failed, missing, missingCodes, verifiedMissingCodes, verifiedComplete: verifiedMissingCodes.length === 0 && !failed, labels };
 };
 
 export function buildDocumentProgressReply(language = 'MS', documents = []) {
@@ -1641,6 +1717,7 @@ export default async function handler(req, res) {
         let human = requiresManager(text);
         const currentStep = clean(conversationState?.['Current Step']).toUpperCase();
         const mediaInbound = ['image', 'document'].includes(clean(message.type).toLowerCase());
+        const inferredInboundDocumentType = inferDocumentTypeFromFileName(message.document?.filename || '');
         const documentAckKey = `${channelId || numberId || 'UNROUTED'}:${phone}`;
         const nowMs = Date.now();
         if (documentBatchAcknowledgements.size > 500) {
@@ -1716,6 +1793,55 @@ export default async function handler(req, res) {
           await appendObject(token, 'Applications', application);
           applications.push(application);
           await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
+        }
+        if (clean(application['Application ID']) && inferredInboundDocumentType === 'CTOS_CCRIS_CONSENT_SIGNED' && !['VERIFIED', 'DECLINED', 'WITHDRAWN'].includes(clean(application['Credit Consent Status']).toUpperCase())) {
+          const signedAt = new Date().toISOString();
+          await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
+          await updateObject(token, 'Applications', 'Application ID', application['Application ID'], {
+            'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION',
+            'Credit Consent Signed At': signedAt,
+            'Updated At': signedAt,
+            'Updated By': 'META_WEBHOOK_CONSENT_RECEIVED'
+          }, 'CZ');
+          Object.assign(application, {
+            'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION',
+            'Credit Consent Signed At': signedAt,
+            'Updated At': signedAt,
+            'Updated By': 'META_WEBHOOK_CONSENT_RECEIVED'
+          });
+        }
+        const activeApplicationDetailStep = isApplicationDetailStep(currentStep);
+        const detailSideQuestion = activeApplicationDetailStep && conversationalText && applicationDetailSideQuestion(text);
+        let applicationDetailTurn = null;
+        if (routeUsable && !human && activeApplicationDetailStep && conversationalText && !detailSideQuestion) {
+          applicationDetailTurn = buildApplicationDetailsTurn({ currentStep, text, application, businessUnit: routeBusinessUnit });
+        } else if (shouldStartApplicationDetails({ messageType: message.type, application, currentStep, routeUsable, human })) {
+          applicationDetailTurn = buildApplicationDetailsTurn({ application, businessUnit: routeBusinessUnit, start: true });
+        }
+        if (applicationDetailTurn?.handled) {
+          const detailTimestamp = new Date().toISOString(), detailComplete = applicationDetailTurn.nextStep === 'APPLICATION_DETAILS_COMPLETE';
+          const detailChanges = {
+            ...applicationDetailTurn.changes,
+            'Updated At': detailTimestamp,
+            'Current Stage': detailComplete ? 'APPLICATION_DETAILS_COMPLETE' : 'APPLICATION_DETAILS_PENDING',
+            'Application Status': detailComplete ? 'APPLICATION_DETAILS_COMPLETE' : 'INFORMATION_COLLECTION_IN_PROGRESS',
+            'Missing Application Fields': applicationDetailTurn.missingFields.join(','),
+            'Updated By': 'META_WEBHOOK_APPLICATION_DETAILS'
+          };
+          await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
+          await updateObject(token, 'Applications', 'Application ID', application['Application ID'], detailChanges, 'CZ');
+          Object.assign(application, detailChanges);
+          instantDecision = {
+            handled: true,
+            applicationDetails: true,
+            nextStep: applicationDetailTurn.nextStep,
+            productUnit: routeBusinessUnit,
+            text: applicationDetailTurn.text
+          };
+          willReply = true;
+        } else if (activeApplicationDetailStep && conversationalText && detailSideQuestion) {
+          instantDecision = { ...instantDecision, nextStep: currentStep };
+          willReply = routeUsable && !human && instantDecision.handled;
         }
         const earlyConsentReserved = shouldDispatchEarlyConsent({ messageType: message.type, application, routeUsable, human })
           && reserveEarlyConsentDispatch(application['Application ID']);
@@ -1847,14 +1973,31 @@ export default async function handler(req, res) {
         if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'AC');
         if (media?.id) {
           await ensureHeaders(token, 'Document_Log', ['Uploaded By', 'Reviewed By', 'Reviewed At']);
-          const inferredDocumentType = inferDocumentTypeFromFileName(message.document?.filename || '');
-          await appendObject(token, 'Document_Log', {
+          const inferredDocumentType = inferredInboundDocumentType;
+          const currentDocumentLog = {
           'Document ID': makeId('DOC'), 'Application ID': application['Application ID'] || '', 'Lead ID': lead['Lead ID'] || '',
           'Received At': new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString(), 'Message ID': message.id || '',
           'Document Type': inferredDocumentType, 'Media ID': media.id, 'Mime Type': media.mime_type || '', 'File Name': message.document?.filename || '', 'File URL': attachmentUrl,
           'Classification Status': inferredDocumentType === 'UNCLASSIFIED' ? 'AI_QUEUED' : 'FILENAME_CLASSIFIED_PENDING_AI', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Duplicate Status': 'NOT_CHECKED',
           'Manual Review Required': 'FALSE', Remarks: 'Received from WhatsApp and queued for automatic AI validation', 'Updated At': new Date().toISOString(), 'Uploaded By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Customer ID': lead['Customer ID'] || ''
-          });
+          };
+          await appendObject(token, 'Document_Log', currentDocumentLog);
+          if (clean(application['Application ID'])) {
+            const liveDocumentStatus = documentProgress([...leadDocuments, currentDocumentLog]);
+            const classificationPending = liveDocumentStatus.pendingTypes.includes('UNCLASSIFIED');
+            const documentStatus = liveDocumentStatus.failed ? 'AI_EXCEPTION' : classificationPending ? 'AI_CHECK_PENDING' : liveDocumentStatus.missingCodes.length ? 'COLLECTING' : liveDocumentStatus.verifiedComplete ? 'AI_VERIFIED_COMPLETE' : 'AI_CHECK_PENDING';
+            const applicationDocumentChanges = {
+              'Updated At': new Date().toISOString(),
+              'Document Status': documentStatus,
+              'Minimum Documents Complete': liveDocumentStatus.verifiedComplete ? 'TRUE' : 'FALSE',
+              'Missing Documents': classificationPending ? '' : liveDocumentStatus.missingCodes.join(', '),
+              'Verification Pending Documents': liveDocumentStatus.pendingTypes.join(', '),
+              'Updated By': 'META_WEBHOOK_DOCUMENT_RECEIVED'
+            };
+            await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
+            await updateObject(token, 'Applications', 'Application ID', application['Application ID'], applicationDocumentChanges, 'CZ');
+            Object.assign(application, applicationDocumentChanges);
+          }
         }
         if (message.id) existingMessageIds.add(clean(message.id));
       }

@@ -1,7 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAiFallbackRequest, buildAiIntentRequest, buildAutomaticApplication, buildDocumentProgressReply, buildEarlyConsentReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, CREDIT_CONSENT_TEMPLATE_URL, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseEarlyConsentDispatch, releaseInboundMessage, requestAiFallbackReply, requestAiIntent, reserveEarlyConsentDispatch, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldDispatchEarlyConsent, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import {
+  applicationDetailSideQuestion,
+  buildAiFallbackRequest,
+  buildAiIntentRequest,
+  buildApplicationDetailsTurn,
+  buildAutomaticApplication,
+  buildDocumentProgressReply,
+  buildEarlyConsentReply,
+  buildImmediateAcknowledgement,
+  buildInitialConversationState,
+  buildInstantSalesDecision,
+  buildMediaProxyUrl,
+  CREDIT_CONSENT_TEMPLATE_URL,
+  extractCustomerName,
+  guardConversationProgress,
+  hasRecentDocumentAcknowledgement,
+  inferDocumentTypeFromFileName,
+  instantChannelCredentials,
+  isApplicationDetailStep,
+  isDocumentStatusQuestion,
+  isExpiredInboundMessage,
+  isStaleInboundMessage,
+  matchInstantProduct,
+  releaseEarlyConsentDispatch,
+  releaseInboundMessage,
+  requestAiFallbackReply,
+  requestAiIntent,
+  reserveEarlyConsentDispatch,
+  reserveInboundMessage,
+  resolveCustomerLocation,
+  sanitizeAiFallbackReply,
+  shouldDispatchEarlyConsent,
+  shouldSendImmediateAcknowledgement,
+  shouldStartApplicationDetails
+} from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
@@ -58,6 +92,66 @@ test('the first application document immediately sends the consent PDF without w
   assert.match(source, /type: 'document'/);
   assert.match(source, /WEBHOOK_CONSENT_FIRST/);
   assert.match(source, /Credit Consent Status': 'SENT'/);
+});
+
+test('signed consent starts application information collection without waiting for every document', () => {
+  const application = {
+    'Application ID': 'APP-DETAILS-1',
+    'Credit Consent Status': 'SENT',
+    'Minimum Documents Complete': 'FALSE',
+    'Customer Name': 'Amin'
+  };
+  assert.equal(shouldStartApplicationDetails({ messageType: 'document', application, currentStep: 'STEP_04_DOCUMENTS' }), true);
+  assert.equal(shouldStartApplicationDetails({ messageType: 'image', application: { ...application, 'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION' } }), true);
+  assert.equal(shouldStartApplicationDetails({ messageType: 'text', application }), false);
+  assert.equal(shouldStartApplicationDetails({ messageType: 'document', application, human: true }), false);
+
+  const turn = buildApplicationDetailsTurn({ application, businessUnit: 'MOTOR', start: true });
+  assert.equal(turn.handled, true);
+  assert.equal(turn.nextStep, 'APP_DETAILS_IC_NUMBER');
+  assert.match(turn.text, /Sementara semakan dibuat/);
+  assert.match(turn.text, /nombor IC penuh/);
+  assert.ok(turn.missingFields.includes('Applicant IC Number'));
+});
+
+test('application information collection validates, saves and advances one field at a time', () => {
+  const invalid = buildApplicationDetailsTurn({ currentStep: 'APP_DETAILS_IC_NUMBER', text: '1234', application: {}, businessUnit: 'MOTOR' });
+  assert.equal(invalid.nextStep, 'APP_DETAILS_IC_NUMBER');
+  assert.deepEqual(invalid.changes, {});
+  assert.match(invalid.text, /12 digit/);
+
+  const valid = buildApplicationDetailsTurn({ currentStep: 'APP_DETAILS_IC_NUMBER', text: '900101-13-5555', application: {}, businessUnit: 'MOTOR' });
+  assert.equal(valid.nextStep, 'APP_DETAILS_EMAIL');
+  assert.equal(valid.changes['Applicant IC Number'], '900101135555');
+  assert.match(valid.text, /e-mel/);
+  assert.equal(isApplicationDetailStep(valid.nextStep), true);
+});
+
+test('application information flow skips saved fields and completes after the final missing answer', () => {
+  const completeExceptBank = {
+    'Applicant IC Number': '900101135555', Email: 'amin@example.com', 'Home Address': 'Jalan Example, Kuching',
+    'Employer Name': 'Example Sdn Bhd', 'Employer Address': 'Kuching, Sarawak', 'Employer Phone': '082123456',
+    'Reference 1 Name': 'Ali', 'Reference 1 Phone': '0123456789', 'Reference 1 Relationship': 'Brother',
+    'Reference 2 Name': 'Siti', 'Reference 2 Phone': '0198765432', 'Reference 2 Relationship': 'Friend',
+    'Product Brand': 'Yamaha', 'Product Model': 'Y16ZR', 'Loan Tenure Years': '5'
+  };
+  const start = buildApplicationDetailsTurn({ application: completeExceptBank, businessUnit: 'MOTOR', start: true });
+  assert.equal(start.nextStep, 'APP_DETAILS_BANK_ACCOUNT');
+
+  const final = buildApplicationDetailsTurn({ currentStep: start.nextStep, text: 'ada', application: completeExceptBank, businessUnit: 'MOTOR' });
+  assert.equal(final.nextStep, 'APPLICATION_DETAILS_COMPLETE');
+  assert.equal(final.changes['Bank Account Available'], 'YES');
+  assert.deepEqual(final.missingFields, []);
+  assert.match(final.text, /disediakan untuk LMS/);
+});
+
+test('customer questions are answered before the next application information question', () => {
+  assert.equal(applicationDetailSideQuestion('berapa lama proses loan kedai?'), true);
+  assert.equal(applicationDetailSideQuestion('apa document perlu'), true);
+  assert.equal(applicationDetailSideQuestion('900101135555'), false);
+  assert.match(source, /META_WEBHOOK_APPLICATION_DETAILS/);
+  assert.match(source, /SIGNED_PENDING_VERIFICATION/);
+  assert.match(source, /applicationDetails: true/);
 });
 
 test('inbound message reservation blocks concurrent duplicate delivery and permits retry after release', () => {
@@ -177,6 +271,19 @@ test('document progress lists only the missing requirement after verification', 
   ]);
   assert.match(reply, /slip gaji atau penyata EPF/i);
   assert.doesNotMatch(reply, /IC depan dan IC belakang/i);
+});
+
+test('received pending documents are never described as missing or requested again', () => {
+  const reply = buildDocumentProgressReply('MS', [
+    { 'Message ID': 'm1', 'Document Type': 'IDENTITY_DOCUMENT', 'Verification Status': 'PENDING_AI', 'Quality Status': 'PENDING_AI' },
+    { 'Message ID': 'm2', 'Document Type': 'PAYSLIP', 'Verification Status': 'PENDING_AI', 'Quality Status': 'PENDING_AI' }
+  ]);
+  assert.match(reply, /sudah terima 2 fail/i);
+  assert.match(reply, /sedang membuat semakan/i);
+  assert.match(reply, /tak perlu hantar semula/i);
+  assert.doesNotMatch(reply, /masih diperlukan/i);
+  assert.match(source, /Verification Pending Documents/);
+  assert.match(source, /META_WEBHOOK_DOCUMENT_RECEIVED/);
 });
 
 test('known customer document filenames get a safe preliminary classification', () => {

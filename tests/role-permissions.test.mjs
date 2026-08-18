@@ -64,6 +64,10 @@ const completeDocuments = [
   { 'Document Type': 'PAYSLIP', 'Verification Status': 'APPROVED', 'Quality Status': 'ACCEPTED', 'Manual Review Required': 'FALSE' }
 ];
 assert.deepEqual(deriveDocumentReadiness(completeDocuments), { complete: true, missing: [], exception: false }, 'AI-verified required documents are ready for LMS');
+assert.deepEqual(deriveDocumentReadiness([
+  { 'Document Type': 'IDENTITY_DOCUMENT', 'Verification Status': 'AI_VERIFIED', 'Quality Status': 'GOOD', 'Manual Review Required': 'FALSE' },
+  { 'Document Type': 'EPF_STATEMENT', 'Verification Status': 'AI_VERIFIED', 'Quality Status': 'GOOD', 'Manual Review Required': 'FALSE' }
+]), { complete: true, missing: [], exception: false }, 'One verified combined identity file satisfies both MyKad sides');
 assert.deepEqual(deriveDocumentReadiness(completeDocuments.slice(0, 2)), { complete: false, missing: ['INCOME_PROOF'], exception: false }, 'Missing required document remains in AI collection');
 assert.equal(deriveDocumentReadiness([...completeDocuments, { 'Document Type': 'OTHER', 'Verification Status': 'REJECTED', 'Quality Status': 'POOR', 'Manual Review Required': 'TRUE' }]).exception, true, 'Failed AI document check becomes an exception');
 
