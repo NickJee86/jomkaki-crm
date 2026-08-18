@@ -47,14 +47,14 @@ test('inbound message reservation blocks concurrent duplicate delivery and permi
 });
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
+  const chinese = buildImmediateAcknowledgement('请问 Y16ZR 月供多少？', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /å·²æ”¶åˆ°/);
+  assert.match(chinese, /已收到/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /received/);
   [chinese, malay, english].forEach(message => {
-    assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i);
+    assert.doesNotMatch(message, /RM|selling price|cash price|售价|价钱/i);
     assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
   });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
@@ -253,7 +253,7 @@ test('a pure greeting asks for the customer name before the location', () => {
   assert.match(welcome.text, /terima kasih|ansuran bulanan/i);
   assert.equal((welcome.text.match(/\?/g) || []).length, 1);
   assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
-  assert.doesNotMatch(welcome.text, /[ðŸ‘ðŸ˜ŠðŸ™‚ðŸ¤–]/u);
+  assert.doesNotMatch(welcome.text, /[👍😊🙂🤖]/u);
 
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
   assert.equal(name.customerName, 'Nick');
@@ -307,7 +307,348 @@ test('a customer location can never be mistaken for catalog search keywords', ()
   const motorCatalog = [
     { 'Catalog ID': 'MTR-SYM-HUSKY200', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky 200 husky200 scooter skuter east malaysia sabah sarawak' },
     { 'Catalog ID': 'MTR-MODA-MOCA110', Brand: 'MODA', Model: 'Moca 110', Active: 'TRUE', 'Search Keywords': 'moda moca moca 110 moca110 scooter skuter east malaysia sabah sarawak' }
-…6156 tokens truncated…h(decision.text, /semak dengan cawangan/i);
+  ];
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).product, null);
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).ambiguous, false);
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'nick', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'nick' },
+    text: 'kuching sarawak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', 'Branch ID': 'BR-SWK-KCH', 'Team ID': 'TEAM-MOTOR-EAST-STK', 'Branch Name': 'Kuching', City: 'Kuching', 'Direct Coverage Areas': 'Kuching|Sarawak' }],
+    motorCatalog
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.location.branchId, 'BR-SWK-KCH');
+  assert.match(decision.text, /model|motor atau telefon/i);
+  assert.doesNotMatch(decision.text, /Husky|Moca|pilih satu/i);
+});
+
+test('short or ambiguous customer messages default to Bahasa Melayu', () => {
+  const greeting = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
+  const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME', 'Last AI Message': 'May I know your name?' }, text: 'Jim', messageType: 'text' });
+  assert.match(greeting.text, /terima kasih|nama anda/i);
+  assert.match(name.text, /bandar|negeri/i);
+  assert.doesNotMatch(greeting.text, /May I know/i);
+  assert.doesNotMatch(name.text, /Which city|Nice to meet/i);
+});
+
+test('a casual available-motor question returns real options instead of repeating the model question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Mike', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'motor apa ada', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+    ]
+  });
+  assert.equal(decision.availableModelsIntent, true);
+  assert.match(decision.text, /Yamaha Y15ZR/);
+  assert.match(decision.text, /Yamaha NMAX/);
+  assert.match(decision.text, /Honda RS150R/);
+  assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('repeating only motor offers real options instead of repeating the same model prompt', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Last Customer Message': 'motor' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'motor', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'XMAX 250', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '602' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' }
+    ]
+  });
+  assert.match(decision.text, /XMAX 250|NMAX/);
+  assert.doesNotMatch(decision.text, /^Model motor atau telefon yang mana/i);
+});
+
+test('customer frustration triggers a useful recovery reply and never repeats the failed question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR', 'Last AI Message': 'Model motor atau telefon yang mana anda minat?' },
+    lead: { 'Customer Name': 'Mike', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'tak faham ke apa saya cakap', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
+  });
+  assert.equal(decision.serviceRecovery, true);
+  assert.match(decision.text, /Maaf/);
+  assert.match(decision.text, /Yamaha Y15ZR/);
+  assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
+});
+
+test('a promotion question is answered before the missing location question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Charles', 'Product Category': 'MOTOR', 'Last AI Message': 'Salam kenal, Charles. Anda tinggal di bandar atau negeri mana?' },
+    lead: { 'Customer Name': 'Charles' },
+    text: 'motor apa ada promosi skg', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA'
+  });
+  assert.equal(decision.promotionIntent, true);
+  assert.equal(decision.nextStep, 'STEP_02_LOCATION');
+  assert.match(decision.text, /Promosi motor semasa berbeza mengikut kawasan/i);
+  assert.match(decision.text, /bandar atau negeri/i);
+  assert.doesNotMatch(decision.text, /Model motor atau telefon|Which motorcycle/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a known-location promotion question lists only approved active regional promotions in Malay', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Charles', 'Product Category': 'MOTOR', 'Last AI Message': 'Terima kasih, lokasi Klang sudah dicatat.' },
+    lead: { 'Customer Name': 'Charles', Region: 'WEST_MALAYSIA', State: 'Selangor', 'City or Area': 'Klang' },
+    text: 'motor apa ada promosi skg', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE' },
+      { 'Catalog ID': 'M3', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Promotion Active': 'TRUE', 'Promotion Approval Status': 'APPROVED', 'Promotion Name': 'Merdeka Deal', 'Promotion Deposit (RM)': '500', 'Promotion Start': '2026-01-01', 'Promotion End': '2026-12-31' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Promotion Active': 'TRUE', 'Promotion Approval Status': 'DRAFT', 'Promotion Name': 'Unapproved', 'Promotion Deposit (RM)': '100' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Promotion Active': 'TRUE', 'Promotion Approval Status': 'APPROVED', 'Promotion Name': 'East Only', 'Promotion Deposit (RM)': '300' }
+    ]
+  });
+  assert.equal(decision.promotionIntent, true);
+  assert.match(decision.text, /Yamaha Y15ZR/);
+  assert.match(decision.text, /Merdeka Deal/);
+  assert.match(decision.text, /deposit RM500/i);
+  assert.doesNotMatch(decision.text, /RS150R|Husky|Unapproved|East Only|bandar atau negeri|Which model/i);
+  assert.match(decision.text, /Model mana satu/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('promotion and shorthand location in one message are understood together', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Mike', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Mike' },
+    text: 'promosi apa skg kch', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', 'Branch ID': 'BR-SWK-KCH', 'Team ID': 'TEAM-KCH', 'Branch Name': 'Kuching', City: 'Kuching', 'Direct Coverage Areas': 'Kuching|KCH' }],
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Promotion Active': 'TRUE', 'Promotion Approval Status': 'APPROVED', 'Promotion Name': 'Rider Deal', 'Promotion Deposit (RM)': '500', 'Promotion Start': '2026-01-01', 'Promotion End': '2026-12-31' }]
+  });
+  assert.equal(decision.location.city, 'Kuching');
+  assert.equal(decision.location.branchId, 'BR-SWK-KCH');
+  assert.match(decision.text, /Yamaha Y15ZR/);
+  assert.doesNotMatch(decision.text, /bandar atau negeri/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a Malay conversation does not switch to English because the customer uses the word i', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Charles', 'Product Category': 'MOTOR', 'Last AI Message': 'Model motor mana yang anda minat?' },
+    lead: { 'Customer Name': 'Charles', Region: 'WEST_MALAYSIA', 'City or Area': 'Klang' },
+    text: 'u ni tak faham apa i cakap ke', messageType: 'text', routeBusinessUnit: 'MOTOR'
+  });
+  assert.match(decision.text, /Model motor atau telefon|Boleh|saya/i);
+  assert.doesNotMatch(decision.text, /Which motorcycle|You can send/i);
+});
+
+test('a model question is answered before repeating missing profile questions', () => {
+  const decision = buildInstantSalesDecision({
+    state: {
+      'Current Step': 'STEP_01_NAME',
+      'Last AI Message': 'Hai, selamat datang ke JomKaki Rider. Boleh saya tahu nama anda?',
+      'Product Category': 'MOTOR'
+    },
+    lead: { 'Customer Name': 'WhatsApp Customer 2387', Region: 'EAST_MALAYSIA', 'Selected Branch ID': 'BR-SWK-BTU' },
+    text: 'Y15', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg', 'Search Keywords': 'yamaha y15 y15zr y15 zr' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.productIntent, true);
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /Y15ZR|RM327/);
+  assert.doesNotMatch(decision.text, /Maaf|supaya saya boleh teruskan|Boleh saya tahu nama anda/i);
+});
+
+test('a first-message model enquiry gets the answer and then one natural profile question', () => {
+  const decision = buildInstantSalesDecision({
+    state: {}, lead: {}, text: 'Y15', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg', 'Search Keywords': 'yamaha y15 y15zr y15 zr' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /RM327/);
+  assert.match(decision.text, /nama anda/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('instant motor reply sends approved deposit, image and only one monthly instalment', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'WEST_MALAYSIA', State: 'Selangor', 'City or Area': 'Petaling Jaya' }, text: 'I am looking for Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '394', 'Monthly 4 Years (RM)': '318', 'Monthly 5 Years (RM)': '273', 'Selling Price (RM)': '12000', 'Deposit (RM)': '1000' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y16zr.jpg');
+  assert.match(decision.text, /RM273/);
+  assert.match(decision.text, /deposit.*RM1000/i);
+  assert.doesNotMatch(decision.text, /394|318|12000|selling price/i);
+  assert.match(decision.text, /continue with the loan check/i);
+  assert.doesNotMatch(decision.text, /MyKad|payslip|EPF/i);
+  assert.doesNotMatch(decision.text, /satu per satu|one by one/i);
+});
+
+test('cash berapa answers the selected motor cash price without resending its image or loan script', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15 SE' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' }, text: 'cash berapa', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15SE', Brand: 'Yamaha', Model: 'Y15 SE', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15se.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15SE', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Deposit (RM)': '500', 'Product Price (RM)': '9500' }]
+  });
+  assert.equal(decision.cashPriceIntent, true);
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /harga tunai.*RM9500/i);
+  assert.doesNotMatch(decision.text, /RM340|deposit|IC|slip gaji|satu per satu/i);
+});
+
+test('a direct motor cash-price question answers once and never attaches the product image', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' }, lead: { Region: 'EAST_MALAYSIA' },
+    text: 'Y15 SE cash berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15SE', Brand: 'Yamaha', Model: 'Y15 SE', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15se.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15SE', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Selling Price (RM)': '9300' }]
+  });
+  assert.equal(decision.cashPriceIntent, true);
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /harga tunai.*RM9300/i);
+});
+
+test('a customer can ask the deposit for the already selected motor', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'deposit berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299', 'Deposit (RM)': '1500', 'Selling Price (RM)': '13000' }]
+  });
+  assert.equal(decision.productIntent, true);
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /deposit.*RM1500/i);
+  assert.doesNotMatch(decision.text, /RM299|13000|harga jualan/i);
+});
+
+test('a missing motor deposit is never guessed', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'depo berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.match(decision.text, /belum ada dalam sistem|semak dengan cawangan/i);
+  assert.doesNotMatch(decision.text, /RM\d/i);
+});
+
+test('known customer model reply survives a stale Make conversation step', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '420', 'Monthly 4 Years (RM)': '350', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /RM299/);
+  assert.match(decision.text, /ansuran|dokumen|IC/i);
+});
+
+test('customer model shorthand, spacing and small typo are recognised', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr y16 zr' },
+    { 'Catalog ID': 'MTR-HON-RSXW', Brand: 'Honda', Model: 'RS-X Winner', Active: 'TRUE', 'Search Keywords': 'honda rsx rs-x rs x winner' }
+  ];
+  assert.equal(matchInstantProduct('y16zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y 16 zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('saya cari y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('rsx', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak rs x', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak ansuran murah', catalog).product, null);
+});
+
+test('a customer can switch from Y15ZR to LC V8 using normal local shorthand', () => {
+  const motorCatalog = [{
+    'Catalog ID': 'MTR-YAM-LC135V8', Brand: 'Yamaha', Model: 'LC135 V8', Active: 'TRUE',
+    'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/lc135-v8.jpg',
+    'Search Keywords': 'yamaha lc135 v8 lc v8 lcv8 lc8 135lc'
+  }];
+  assert.equal(matchInstantProduct('Saya mau lc v8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('nak lcv8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('lc8 ada?', motorCatalog).product.Model, 'LC135 V8');
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Ali', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
+    lead: { 'Customer Name': 'Ali', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'Saya mau lc v8', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog,
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-LC135V8', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Deposit (RM)': 'RM 500', 'Monthly 3 Years (RM)': 'RM 425', 'Monthly 4 Years (RM)': 'RM 344', 'Monthly 5 Years (RM)': 'RM 295' }]
+  });
+  assert.equal(decision.product.Model, 'LC135 V8');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/lc135-v8.jpg');
+  assert.match(decision.text, /deposit.*RM500/i);
+  assert.match(decision.text, /RM295/);
+  assert.doesNotMatch(decision.text, /Anda mahu saya semak yang mana|Y15ZR/i);
+});
+
+test('the whole catalogue accepts natural customer shorthand instead of only selected examples', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-NVX', Brand: 'Yamaha', Model: 'NVX', Active: 'TRUE', 'Search Keywords': 'yamaha nvx scooter' },
+    { 'Catalog ID': 'MTR-HON-WAVE', Brand: 'Honda', Model: 'Wave Alpha', Active: 'TRUE', 'Search Keywords': 'honda wave alpha' },
+    { 'Catalog ID': 'MTR-HON-RS150R', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Search Keywords': 'honda rs150 rs150r' },
+    { 'Catalog ID': 'MTR-SYM-HUSKY', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky husky200' },
+    { 'Catalog ID': 'MTR-MODA-MOCA', Brand: 'MODA', Model: 'Moca', Active: 'TRUE', 'Search Keywords': 'moda moca' }
+  ];
+  assert.equal(matchInstantProduct('nak tengok nvx', catalog).product.Model, 'NVX');
+  assert.equal(matchInstantProduct('wave ada?', catalog).product.Model, 'Wave Alpha');
+  assert.equal(matchInstantProduct('rs150 berapa sebulan', catalog).product.Model, 'RS150R');
+  assert.equal(matchInstantProduct('husky ada stock ka', catalog).product.Model, 'Husky 200');
+  assert.equal(matchInstantProduct('saya minat moca', catalog).product.Model, 'Moca');
+});
+
+test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' },
+    text: 'motor nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax n max' },
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', Brand: 'Yamaha', Model: 'NMAX V3', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax-v3.jpg', 'Search Keywords': 'yamaha nmax v3' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '526', 'Monthly 4 Years (RM)': '425', 'Monthly 5 Years (RM)': '365' }
+    ]
+  });
+  assert.equal(decision.product.Model, 'NMAX V3');
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax-v3.jpg');
+  assert.match(decision.text, /NMAX V3/);
+  assert.match(decision.text, /RM365/);
+});
+
+test('a recognised model without approved regional pricing gets a useful reply instead of silence', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax' }],
+    motorPricing: []
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.match(decision.text, /NMAX/);
+  assert.match(decision.text, /semak dengan cawangan/i);
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
@@ -477,7 +818,7 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     assert.equal(body.model, 'gpt-4.1-mini');
     assert.equal(body.reasoning, undefined);
     assert.equal(body.store, false);
-    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? ðŸ˜Š Soalan kedua?' }] }] }) };
+    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? 😊 Soalan kedua?' }] }] }) };
   };
   const reply = await requestAiFallbackReply({
     text: 'boleh explain lagi?',
@@ -486,7 +827,7 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-4.1-mini' },
     fetchImpl
   });
-  assert.equal(reply.includes('ðŸ˜Š'), false);
+  assert.equal(reply.includes('😊'), false);
   assert.equal((reply.match(/\?/g) || []).length, 1);
   assert.equal(sanitizeAiFallbackReply('Harga ialah RM999. Berapa bajet anda?', 'MS'), '');
   assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
@@ -584,7 +925,7 @@ test('Loan Kedai processing time is answered from approved knowledge and never b
       aiIntent: { intent: 'FOLLOW_UP_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.9 }
     });
     assert.equal(decision.loanKedaiIntent, true);
-    assert.match(decision.text, /1[â€“-]3 hari bekerja/i);
+    assert.match(decision.text, /1[–-]3 hari bekerja/i);
     assert.match(decision.text, /loan kedai/i);
     assert.doesNotMatch(decision.text, /harga disahkan|maklum balas cawangan|harga tunai/i);
     assert.equal((decision.text.match(/\?/g) || []).length, 1);
@@ -626,4 +967,3 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
-
