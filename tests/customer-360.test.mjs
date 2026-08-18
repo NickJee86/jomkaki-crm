@@ -36,11 +36,21 @@ test('API returns the full permitted history and the UI protects sensitive data'
 });
 
 test('Customer 360 has a dedicated responsive brand design',()=>{
-  assert.match(html,/customer-360\.css\?v=20260810-multichannel-2/);
+  assert.match(html,/customer-360\.css\?v=20260818-timeout1/);
   assert.match(css,/\.customer-360-drawer/);
   assert.match(css,/\.customer-360-conversation/);
   assert.match(css,/\.customer-360-message\.outgoing/);
   assert.match(css,/@media\(max-width:620px\)/);
+});
+
+test('Customer 360 cannot remain on an endless loading screen',()=>{
+  assert.match(app,/timeoutMs:6000/);
+  assert.match(app,/const controller=new AbortController\(\)/);
+  assert.match(app,/Customer profile loaded/);
+  assert.match(app,/data-360-retry/);
+  assert.match(app,/The customer record could not be loaded/);
+  assert.match(css,/\.customer-360-load-warning/);
+  assert.match(html,/app-v2\.js\?v=20260818-customer360-timeout1/);
 });
 
 test('Production CRM does not inject preview customers',()=>{

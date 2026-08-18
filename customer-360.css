@@ -89,6 +89,11 @@
 .customer-360-empty strong{display:block;color:var(--c360-navy);font-size:10px}
 .customer-360-empty p{margin:6px 0 0;font-size:9px}
 .customer-360-loading{display:grid;place-items:center;min-height:220px;color:var(--c360-muted);font-size:10px}
+.customer-360-load-warning{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 12px;padding:12px 14px;border:1px solid #f2c397;border-radius:12px;background:#fff8ef;color:#71401f}
+.customer-360-load-warning strong,.customer-360-load-warning span{display:block}
+.customer-360-load-warning strong{font-size:10px}
+.customer-360-load-warning span{margin-top:3px;font-size:8px;line-height:1.45}
+.customer-360-load-warning button{flex:0 0 auto}
 .customer-360-security{margin:7px 0 0;padding:12px 15px;border-radius:11px;background:#eef3f4;color:var(--c360-muted);font-size:8px;line-height:1.5}
 .customer-search-drawer{width:min(720px,96vw)}
 .customer-search-results{display:grid;gap:9px}
