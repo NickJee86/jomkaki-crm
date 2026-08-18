@@ -465,7 +465,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -483,7 +483,7 @@ const instantCopy = (language, key, values = {}) => {
       AVAILABLE_MODELS: `Available options I can check include ${models}. Would you prefer a cub, scooter, or a model based on your monthly budget?`,
       SERVICE_RECOVERY: `Sorry, my earlier reply was not helpful. I understand you want a clear answer. ${models ? `Available options I can check include ${models}. ` : ''}What monthly budget would be comfortable for you?`,
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
-      APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send them one by one.',
+      APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Eligibility depends on the applicant details and supporting documents, and I can guide you through the check step by step.',
       SHOP_LOAN_MODEL: 'Which motorcycle model would you like to check?',
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
@@ -493,6 +493,9 @@ const instantCopy = (language, key, values = {}) => {
       TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
       DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation.`,
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} is not available in the system yet. I can check it with the branch for you.`,
+      CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
+      CASH_PRICE_UNAVAILABLE: `The approved cash price for ${brand} ${model} is not available in the system yet. I can check it with the branch for you.`,
+      HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
       PROMOTION_LOCATION: 'Current motorcycle promotions differ by area, so I will check the approved offers for your location first.',
       PROMOTION_LIST: `Current approved motorcycle promotions for your area include ${options}.`,
       PROMOTION_NONE: 'There is no approved active motorcycle promotion recorded for your area at the moment.',
@@ -501,7 +504,7 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE_ONLY: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation.`,
       NAME_AFTER_ANSWER: 'May I know your name?',
       LOCATION_AFTER_ANSWER: 'Which city or state are you currently staying in?',
-      QUOTE: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you can send them here one by one.`
+      QUOTE: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. For a shop-loan check, we need the front and back of your MyKad plus your latest payslip or EPF statement. If this suits you, you may send all the files together or in several uploads.`
     },
     MS: {
       NAME: 'Hi, terima kasih kerana menghubungi JomKaki Rider. Saya boleh bantu semak pilihan motor atau telefon serta ansuran bulanan yang sesuai. Boleh saya tahu nama anda?',
@@ -516,7 +519,7 @@ const instantCopy = (language, key, values = {}) => {
       AVAILABLE_MODELS: `Antara pilihan yang saya boleh semak sekarang ialah ${models}. Anda lebih suka kapcai, skuter atau ikut bajet bulanan?`,
       SERVICE_RECOVERY: `Maaf, jawapan tadi memang tak membantu. Saya faham anda mahu jawapan yang jelas. ${models ? `Antara pilihan yang saya boleh semak ialah ${models}. ` : ''}Bajet bulanan yang anda selesa sekitar berapa?`,
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
-      APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar satu per satu.',
+      APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
       SHOP_LOAN: 'Boleh, kami ada menyediakan permohonan loan kedai. Kelayakan bergantung pada maklumat pemohon dan dokumen sokongan, dan saya boleh bantu semak langkah demi langkah.',
       SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
@@ -526,6 +529,9 @@ const instantCopy = (language, key, values = {}) => {
       TENURE_UNAVAILABLE: `Ansuran ${localizedTenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
       DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan.`,
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} belum ada dalam sistem. Saya boleh semak dengan cawangan untuk anda.`,
+      CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
+      CASH_PRICE_UNAVAILABLE: `Harga tunai yang diluluskan untuk ${brand} ${model} belum ada dalam sistem. Saya boleh semak dengan cawangan untuk anda.`,
+      HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
       PROMOTION_LOCATION: 'Promosi motor semasa berbeza mengikut kawasan, jadi saya akan semak tawaran yang diluluskan untuk lokasi anda dahulu.',
       PROMOTION_LIST: `Antara promosi motor yang sedang aktif untuk kawasan anda ialah ${options}.`,
       PROMOTION_NONE: 'Buat masa ini, belum ada promosi motor aktif yang diluluskan untuk kawasan anda dalam sistem.',
@@ -534,7 +540,7 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE_ONLY: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       NAME_AFTER_ANSWER: 'Boleh saya tahu nama anda?',
       LOCATION_AFTER_ANSWER: 'Anda tinggal di bandar atau negeri mana?',
-      QUOTE: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar satu per satu di sini.`
+      QUOTE: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Untuk semakan loan kedai, kami perlukan IC depan dan belakang serta slip gaji terkini atau penyata EPF. Kalau sesuai, boleh hantar semua sekali atau dalam beberapa fail di sini.`
     },
     ZH: {
       NAME: '您好，感谢您联系 JomKaki Rider。我可以协助您查询合适的摩托车或手机型号及月供。请问该怎么称呼您？',
@@ -689,6 +695,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 }
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
+const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
 const asksForDocuments = text => /(dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
@@ -862,10 +869,14 @@ const instantRate = (product, pricingRows = [], unit = '', region = '', requeste
     .filter(([tenure]) => !requestedTenure || normalizedWords(tenure) === normalizedWords(requestedTenure))
     .map(([tenure, field]) => [tenure, row[field]]);
   const selected = rates.find(([, amount]) => customerAmount(amount));
-  const deposit = canonicalBusinessUnit(unit) === 'MOTOR'
+  const motorUnit = canonicalBusinessUnit(unit) === 'MOTOR';
+  const deposit = motorUnit
     ? customerAmount(row['Deposit (RM)'] || row.Deposit || row['Down Payment (RM)'])
     : '';
-  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]), deposit } : null;
+  const cashPrice = motorUnit
+    ? customerAmount(row['Cash Price (RM)'] || row['Product Price (RM)'] || row['Selling Price (RM)'] || row['OTR Cash Price (RM)'])
+    : '';
+  return selected ? { tenure: selected[0], amount: customerAmount(selected[1]), deposit, cashPrice } : null;
 };
 
 const activeMotorPromotions = (catalogRows = [], pricingRows = [], region = '', today = new Date().toISOString().slice(0, 10)) => {
@@ -958,17 +969,24 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
   const requestedTenure = requestedMonthlyTenure(text, fallbackUnit || routeBusinessUnit);
+  const cashPriceQuestion = asksForCashPrice(text);
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
-  if ((requestedTenure || asksForDeposit(text)) && selectedModel) {
+  if ((requestedTenure || asksForDeposit(text) || cashPriceQuestion) && selectedModel) {
     const selectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
     if (selectedProduct) {
       const selectedUnit = clean(selectedProduct.__businessUnit).toUpperCase() || fallbackUnit || routeBusinessUnit || 'MOTOR';
       const selectedPricing = selectedUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
       const requestedRate = instantRate(selectedProduct, selectedPricing, selectedUnit, lead.Region || routeRegion, requestedTenure);
       const depositQuestion = asksForDeposit(text);
-      const baseText = depositQuestion
+      const baseText = cashPriceQuestion
         ? instantCopy(language, selectedUnit === 'HANDPHONE'
+          ? 'HANDPHONE_CASH_POLICY'
+          : requestedRate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
+          brand: selectedProduct.Brand, model: selectedProduct.Model, cashPrice: requestedRate?.cashPrice
+        })
+        : depositQuestion
+          ? instantCopy(language, selectedUnit === 'HANDPHONE'
           ? 'HANDPHONE_DEPOSIT_POLICY'
           : requestedRate?.deposit ? 'DEPOSIT_QUOTE' : 'DEPOSIT_UNAVAILABLE', {
           brand: selectedProduct.Brand, model: selectedProduct.Model, deposit: requestedRate?.deposit
@@ -976,12 +994,15 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         : instantCopy(language, requestedRate ? 'TENURE_QUOTE' : 'TENURE_UNAVAILABLE', {
           brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure, amount: requestedRate?.amount
         });
-      const continuation = requestedRate
+      const continuation = cashPriceQuestion
+        ? { nextStep: step || 'STEP_04_DOCUMENTS', text: baseText }
+        : requestedRate
         ? profileContinuation({ language, state, lead, baseText, completeStep: step || 'STEP_03_PRODUCT' })
         : { nextStep: 'STEP_03_PRODUCT', text: baseText };
       return {
         handled: true,
         productIntent: true,
+        cashPriceIntent: cashPriceQuestion || undefined,
         nextStep: continuation.nextStep,
         productUnit: selectedUnit,
         product: selectedProduct,
@@ -1026,6 +1047,21 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
         rate = instantRate(product, pricing, unit, pricingRegion);
       }
+    }
+    if (cashPriceQuestion) {
+      return {
+        handled: true,
+        productIntent: true,
+        cashPriceIntent: true,
+        nextStep: step || 'STEP_03_PRODUCT',
+        productUnit: unit,
+        product,
+        text: instantCopy(language, unit === 'HANDPHONE'
+          ? 'HANDPHONE_CASH_POLICY'
+          : rate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
+          brand: product.Brand, model: product.Model, cashPrice: rate?.cashPrice
+        })
+      };
     }
     if (!rate) {
       const continuation = profileContinuation({
