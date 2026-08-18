@@ -5,6 +5,7 @@ import {
   applicationDetailSideQuestion,
   buildAiFallbackRequest,
   buildAiIntentRequest,
+  buildApplicationDetailsForm,
   buildApplicationDetailsTurn,
   buildAutomaticApplication,
   buildDocumentProgressReply,
@@ -20,10 +21,12 @@ import {
   inferDocumentTypeFromFileName,
   instantChannelCredentials,
   isApplicationDetailStep,
+  isApplicationDetailsFormResponse,
   isDocumentStatusQuestion,
   isExpiredInboundMessage,
   isStaleInboundMessage,
   matchInstantProduct,
+  parseApplicationDetailsForm,
   releaseEarlyConsentDispatch,
   releaseInboundMessage,
   requestAiFallbackReply,
@@ -69,6 +72,9 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentDispatchOnFirstApplicationDocument, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentCanProceedWithMissingDocuments, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsStartAfterConsentSigned, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsCollectionMode, 'SINGLE_WHATSAPP_FORM');
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsOneQuestionAtATime, false);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.inferBankAccountFromBankStatement, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.documentsAndConsentCollectedInParallel, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
@@ -94,7 +100,7 @@ test('the first application document immediately sends the consent PDF without w
   assert.match(source, /Credit Consent Status': 'SENT'/);
 });
 
-test('signed consent starts application information collection without waiting for every document', () => {
+test('signed consent sends one complete WhatsApp form without asking fields one by one', () => {
   const application = {
     'Application ID': 'APP-DETAILS-1',
     'Credit Consent Status': 'SENT',
@@ -108,50 +114,75 @@ test('signed consent starts application information collection without waiting f
 
   const turn = buildApplicationDetailsTurn({ application, businessUnit: 'MOTOR', start: true });
   assert.equal(turn.handled, true);
-  assert.equal(turn.nextStep, 'APP_DETAILS_IC_NUMBER');
+  assert.equal(turn.nextStep, 'APPLICATION_FORM_PENDING');
   assert.match(turn.text, /Sementara semakan dibuat/);
-  assert.match(turn.text, /nombor IC penuh/);
+  assert.match(turn.text, /hantar semula dalam satu mesej/);
+  assert.match(turn.text, /TOLONG ISI MAKLUMAT DI BAWAH/);
+  assert.match(turn.text, /Nama pemohon/);
+  assert.match(turn.text, /IC pemohon/);
+  assert.match(turn.text, /Berapa lama sudah berkhidmat/);
+  assert.match(turn.text, /Nama & Tel rujukan 2/);
+  assert.match(turn.text, /Loan Berapa tahun/);
+  assert.doesNotMatch(turn.text, /Sila berikan nombor IC penuh anda/);
   assert.ok(turn.missingFields.includes('Applicant IC Number'));
 });
 
-test('application information collection validates, saves and advances one field at a time', () => {
-  const invalid = buildApplicationDetailsTurn({ currentStep: 'APP_DETAILS_IC_NUMBER', text: '1234', application: {}, businessUnit: 'MOTOR' });
-  assert.equal(invalid.nextStep, 'APP_DETAILS_IC_NUMBER');
-  assert.deepEqual(invalid.changes, {});
-  assert.match(invalid.text, /12 digit/);
+test('a completed WhatsApp form is parsed and saved in one turn', () => {
+  const reply = `TOLONG ISI MAKLUMAT DI BAWAH :
+Nama pemohon:\n➡️ Amin Rahman
+IC pemohon:\n➡️ 900101-13-5555
+1. Alamat Rumah\n➡️ 12 Jalan Example, Kuching
+2. Nombor tel pemohon\n➡️ 0123456789
+3. Nama Syarikat/ Tempat Kerja\n➡️ Example Sdn Bhd
+4. Alamat tempat kerja\n➡️ Pending Industrial Park, Kuching
+5. Nombor tel tempat kerja\n➡️ 082123456
+6. Berapa lama sudah berkhidmat\n➡️ 2 tahun
+7. Jawatan\n➡️ Penyelia
+8. Email\n➡️ amin@example.com
+9. Nama & Tel rujukan 1 (mesti ahli keluarga terdekat)\n➡️ Nama : Ali Rahman\n➡️ Hp : 0121112222\n➡️ Hubungan : Abang
+10. Nama & Tel rujukan 2 (mesti ahli keluarga terdekat)\n➡️ Nama : Siti Rahman\n➡️ Hp : 0193334444\n➡️ Hubungan : Isteri
+11. Motosikal\n➡️ Jenama: Yamaha\n➡️ Model: Y16ZR\n➡️ Loan Berapa tahun: 5`;
+  const parsed = parseApplicationDetailsForm(reply, 'MOTOR');
+  assert.equal(parsed.isFormResponse, true);
+  assert.deepEqual(parsed.invalidFields, []);
+  assert.equal(parsed.changes['Applicant Name'], 'Amin Rahman');
+  assert.equal(parsed.changes['Applicant IC Number'], '900101135555');
+  assert.equal(parsed.changes['Phone Number'], '60123456789');
+  assert.equal(parsed.changes['Employment Duration Months'], '24');
+  assert.equal(parsed.changes['Reference 2 Relationship'], 'Isteri');
+  assert.equal(parsed.changes['Loan Tenure Years'], '5');
+  assert.equal(isApplicationDetailsFormResponse(reply), true);
 
-  const valid = buildApplicationDetailsTurn({ currentStep: 'APP_DETAILS_IC_NUMBER', text: '900101-13-5555', application: {}, businessUnit: 'MOTOR' });
-  assert.equal(valid.nextStep, 'APP_DETAILS_EMAIL');
-  assert.equal(valid.changes['Applicant IC Number'], '900101135555');
-  assert.match(valid.text, /e-mel/);
-  assert.equal(isApplicationDetailStep(valid.nextStep), true);
+  const turn = buildApplicationDetailsTurn({ currentStep: 'APPLICATION_FORM_PENDING', text: reply, application: {}, businessUnit: 'MOTOR' });
+  assert.equal(turn.nextStep, 'APPLICATION_DETAILS_COMPLETE');
+  assert.equal(turn.changes['Product Model'], 'Y16ZR');
+  assert.deepEqual(turn.missingFields, []);
+  assert.match(turn.text, /Semua maklumat permohonan sudah diterima/);
 });
 
-test('application information flow skips saved fields and completes after the final missing answer', () => {
-  const completeExceptBank = {
-    'Applicant IC Number': '900101135555', Email: 'amin@example.com', 'Home Address': 'Jalan Example, Kuching',
-    'Employer Name': 'Example Sdn Bhd', 'Employer Address': 'Kuching, Sarawak', 'Employer Phone': '082123456',
-    'Reference 1 Name': 'Ali', 'Reference 1 Phone': '0123456789', 'Reference 1 Relationship': 'Brother',
-    'Reference 2 Name': 'Siti', 'Reference 2 Phone': '0198765432', 'Reference 2 Relationship': 'Friend',
-    'Product Brand': 'Yamaha', 'Product Model': 'Y16ZR', 'Loan Tenure Years': '5'
-  };
-  const start = buildApplicationDetailsTurn({ application: completeExceptBank, businessUnit: 'MOTOR', start: true });
-  assert.equal(start.nextStep, 'APP_DETAILS_BANK_ACCOUNT');
-
-  const final = buildApplicationDetailsTurn({ currentStep: start.nextStep, text: 'ada', application: completeExceptBank, businessUnit: 'MOTOR' });
-  assert.equal(final.nextStep, 'APPLICATION_DETAILS_COMPLETE');
-  assert.equal(final.changes['Bank Account Available'], 'YES');
-  assert.deepEqual(final.missingFields, []);
-  assert.match(final.text, /disediakan untuk LMS/);
+test('legacy one-question states migrate to the same prefilled form', () => {
+  const saved = { 'Applicant IC Number': '900101135555', 'Phone Number': '60123456789', 'Product Brand': 'Yamaha', 'Product Model': 'Y16ZR' };
+  const turn = buildApplicationDetailsTurn({ currentStep: 'APP_DETAILS_EMAIL', text: 'amin@example.com', application: saved, businessUnit: 'MOTOR' });
+  assert.equal(turn.nextStep, 'APPLICATION_FORM_PENDING');
+  assert.deepEqual(turn.changes, {});
+  assert.match(turn.text, /Untuk elak banyak soalan berasingan/);
+  assert.match(turn.text, /900101135555/);
+  assert.match(turn.text, /60123456789/);
+  assert.match(turn.text, /Y16ZR/);
+  assert.doesNotMatch(turn.text, /Apakah alamat rumah/);
+  assert.equal(isApplicationDetailStep(turn.nextStep), true);
 });
 
 test('customer questions are answered before the next application information question', () => {
   assert.equal(applicationDetailSideQuestion('berapa lama proses loan kedai?'), true);
   assert.equal(applicationDetailSideQuestion('apa document perlu'), true);
   assert.equal(applicationDetailSideQuestion('900101135555'), false);
+  assert.equal(isApplicationDetailsFormResponse(buildApplicationDetailsForm({}, 'MOTOR')), true);
   assert.match(source, /META_WEBHOOK_APPLICATION_DETAILS/);
   assert.match(source, /SIGNED_PENDING_VERIFICATION/);
   assert.match(source, /applicationDetails: true/);
+  assert.match(source, /inferredDocumentType === 'BANK_STATEMENT'/);
+  assert.match(source, /'Bank Account Available': 'YES'/);
 });
 
 test('inbound message reservation blocks concurrent duplicate delivery and permits retry after release', () => {

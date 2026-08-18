@@ -66,23 +66,36 @@ export function buildEarlyConsentReply(language = 'MS') {
   return `Dokumen ini sudah diterima. Sementara saya semak, sila lengkapkan dan tandatangani Borang Kebenaran CTOS/CCRIS ini, kemudian hantar semula PDF atau gambar yang jelas dalam WhatsApp ini: ${CREDIT_CONSENT_TEMPLATE_URL}. Tak perlu tunggu semua dokumen lengkap; dokumen yang masih kurang boleh dihantar kemudian.`;
 }
 
+const normalizePhoneField = value => clean(value).replace(/\D/g, '');
+const normalizeEmploymentDuration = value => {
+  const number = Number((clean(value).match(/\d+/) || [])[0] || 0);
+  if (!number) return '';
+  return /(?:tahun|year)/i.test(clean(value)) ? String(number * 12) : String(number);
+};
+const normalizeLoanTenure = (value, unit) => {
+  const years = Number((clean(value).match(/[1-5]/) || [])[0] || 0);
+  return unit === 'HANDPHONE' ? String(years * 12) : String(years);
+};
 const APPLICATION_DETAIL_FIELDS = [
-  { step: 'APP_DETAILS_IC_NUMBER', header: 'Applicant IC Number', valid: value => /^\d{12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Sila berikan nombor IC penuh anda (12 digit).', invalid: 'Nombor IC perlu mempunyai 12 digit. Sila semak dan hantar semula.' },
-  { step: 'APP_DETAILS_EMAIL', header: 'Email', valid: value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(value)), normalize: value => clean(value).toLowerCase(), prompt: 'Apakah alamat e-mel anda?', invalid: 'Alamat e-mel itu nampaknya belum lengkap. Sila hantar dalam format seperti nama@email.com.' },
-  { step: 'APP_DETAILS_HOME_ADDRESS', header: 'Home Address', valid: value => clean(value).length >= 8, normalize: clean, prompt: 'Apakah alamat rumah penuh anda?', invalid: 'Sila berikan alamat rumah yang lebih lengkap.' },
-  { step: 'APP_DETAILS_EMPLOYER_NAME', header: 'Employer Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah nama majikan atau syarikat tempat anda bekerja?', invalid: 'Sila berikan nama majikan atau syarikat anda.' },
-  { step: 'APP_DETAILS_EMPLOYER_ADDRESS', header: 'Employer Address', valid: value => clean(value).length >= 5, normalize: clean, prompt: 'Apakah alamat majikan anda?', invalid: 'Sila berikan alamat majikan yang lebih lengkap.' },
-  { step: 'APP_DETAILS_EMPLOYER_PHONE', header: 'Employer Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon majikan anda?', invalid: 'Nombor telefon majikan perlu mempunyai 9 hingga 12 digit.' },
-  { step: 'APP_DETAILS_REFERENCE_1_NAME', header: 'Reference 1 Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Sekarang maklumat rujukan pertama. Apakah nama penuhnya?', invalid: 'Sila berikan nama rujukan pertama.' },
-  { step: 'APP_DETAILS_REFERENCE_1_PHONE', header: 'Reference 1 Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon rujukan pertama?', invalid: 'Nombor telefon rujukan perlu mempunyai 9 hingga 12 digit.' },
-  { step: 'APP_DETAILS_REFERENCE_1_RELATIONSHIP', header: 'Reference 1 Relationship', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah hubungan rujukan pertama dengan anda?', invalid: 'Sila nyatakan hubungan rujukan pertama dengan anda.' },
-  { step: 'APP_DETAILS_REFERENCE_2_NAME', header: 'Reference 2 Name', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah nama penuh rujukan kedua?', invalid: 'Sila berikan nama rujukan kedua.' },
-  { step: 'APP_DETAILS_REFERENCE_2_PHONE', header: 'Reference 2 Phone', valid: value => /^\d{9,12}$/.test(clean(value).replace(/\D/g, '')), normalize: value => clean(value).replace(/\D/g, ''), prompt: 'Apakah nombor telefon rujukan kedua?', invalid: 'Nombor telefon rujukan perlu mempunyai 9 hingga 12 digit.' },
-  { step: 'APP_DETAILS_REFERENCE_2_RELATIONSHIP', header: 'Reference 2 Relationship', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah hubungan rujukan kedua dengan anda?', invalid: 'Sila nyatakan hubungan rujukan kedua dengan anda.' },
-  { step: 'APP_DETAILS_PRODUCT_BRAND', header: 'Product Brand', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah jenama motor atau telefon yang anda pilih?', invalid: 'Sila berikan jenama produk yang anda pilih.' },
-  { step: 'APP_DETAILS_PRODUCT_MODEL', header: 'Product Model', valid: value => clean(value).length >= 2, normalize: clean, prompt: 'Apakah model motor atau telefon yang anda pilih?', invalid: 'Sila berikan model produk yang anda pilih.' },
-  { step: 'APP_DETAILS_LOAN_TENURE', header: 'LOAN_TENURE', valid: (value, unit) => unit === 'HANDPHONE' ? /^[1-5]$/.test((clean(value).match(/[1-5]/) || [])[0] || '') : /^[3-5]$/.test((clean(value).match(/[3-5]/) || [])[0] || ''), normalize: (value, unit) => { const years = (clean(value).match(/[1-5]/) || [])[0] || ''; return unit === 'HANDPHONE' ? String(Number(years) * 12) : years; }, prompt: 'Berapa tahun tempoh ansuran yang anda mahu?', invalid: 'Untuk motor, pilih 3 hingga 5 tahun. Untuk telefon, pilih 1 hingga 5 tahun.' },
-  { step: 'APP_DETAILS_BANK_ACCOUNT', header: 'Bank Account Available', valid: value => /^(?:ya|yes|ada|tidak|tak|tiada|no)$/i.test(clean(value)), normalize: value => /^(?:ya|yes|ada)$/i.test(clean(value)) ? 'YES' : 'NO', prompt: 'Adakah anda mempunyai akaun bank peribadi? Jawab Ya atau Tidak.', invalid: 'Sila jawab Ya atau Tidak untuk akaun bank peribadi.' }
+  { header: 'Applicant Name', label: 'Nama pemohon', valid: value => clean(value).length >= 2 && !/^WhatsApp Customer\b/i.test(clean(value)), normalize: clean },
+  { header: 'Applicant IC Number', label: 'IC pemohon', valid: value => /^\d{12}$/.test(normalizePhoneField(value)), normalize: normalizePhoneField },
+  { header: 'Home Address', label: 'Alamat rumah', valid: value => clean(value).length >= 8, normalize: clean },
+  { header: 'Phone Number', label: 'Nombor tel pemohon', valid: value => /^\d{9,12}$/.test(normalizePhoneField(value)), normalize: value => digits(value) },
+  { header: 'Employer Name', label: 'Nama syarikat / tempat kerja', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Employer Address', label: 'Alamat tempat kerja', valid: value => clean(value).length >= 5, normalize: clean },
+  { header: 'Employer Phone', label: 'Nombor tel tempat kerja', valid: value => /^\d{9,12}$/.test(normalizePhoneField(value)), normalize: normalizePhoneField },
+  { header: 'Employment Duration Months', label: 'Tempoh berkhidmat', valid: value => !!normalizeEmploymentDuration(value), normalize: normalizeEmploymentDuration },
+  { header: 'Job Position', label: 'Jawatan', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Email', label: 'Email', valid: value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean(value)), normalize: value => clean(value).toLowerCase() },
+  { header: 'Reference 1 Name', label: 'Nama rujukan 1', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Reference 1 Phone', label: 'Nombor tel rujukan 1', valid: value => /^\d{9,12}$/.test(normalizePhoneField(value)), normalize: normalizePhoneField },
+  { header: 'Reference 1 Relationship', label: 'Hubungan rujukan 1', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Reference 2 Name', label: 'Nama rujukan 2', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Reference 2 Phone', label: 'Nombor tel rujukan 2', valid: value => /^\d{9,12}$/.test(normalizePhoneField(value)), normalize: normalizePhoneField },
+  { header: 'Reference 2 Relationship', label: 'Hubungan rujukan 2', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Product Brand', label: 'Jenama', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'Product Model', label: 'Model', valid: value => clean(value).length >= 2, normalize: clean },
+  { header: 'LOAN_TENURE', label: 'Tempoh loan', valid: (value, unit) => { const years = Number((clean(value).match(/[1-5]/) || [])[0] || 0); return unit === 'HANDPHONE' ? years >= 1 && years <= 5 : years >= 3 && years <= 5; }, normalize: normalizeLoanTenure }
 ];
 
 const applicationDetailHeader = (field, unit) => field.header === 'LOAN_TENURE' ? (unit === 'HANDPHONE' ? 'Loan Tenure Months' : 'Loan Tenure Years') : field.header;
@@ -95,14 +108,15 @@ const APPLICATION_DETAIL_APPLICATION_HEADERS = [...new Set([
   'Missing Documents',
   'Missing Application Fields',
   'Verification Pending Documents',
-  'Credit Consent Signed At'
+  'Credit Consent Signed At',
+  'Bank Account Available'
 ])];
-const applicationDetailField = step => APPLICATION_DETAIL_FIELDS.find(field => field.step === (clean(step).toUpperCase() === 'APPLICATION_DETAILS_PENDING' ? 'APP_DETAILS_IC_NUMBER' : clean(step).toUpperCase()));
-const applicationDetailMissing = (application, unit) => APPLICATION_DETAIL_FIELDS.filter(field => !clean(application[applicationDetailHeader(field, unit)]));
+const applicationDetailValuePresent = (application, field, unit) => field.valid(application[applicationDetailHeader(field, unit)], unit);
+const applicationDetailMissing = (application, unit) => APPLICATION_DETAIL_FIELDS.filter(field => !applicationDetailValuePresent(application, field, unit));
 
 export function isApplicationDetailStep(step = '') {
   const value = clean(step).toUpperCase();
-  return value === 'APPLICATION_DETAILS_PENDING' || value.startsWith('APP_DETAILS_');
+  return value === 'APPLICATION_DETAILS_PENDING' || value === 'APPLICATION_FORM_PENDING' || value.startsWith('APP_DETAILS_');
 }
 
 export function shouldStartApplicationDetails({ messageType = '', application = {}, currentStep = '', routeUsable = true, human = false } = {}) {
@@ -116,22 +130,162 @@ export function applicationDetailSideQuestion(value = '') {
   return /\b(apa|berapa|bila|mana|kenapa|macam mana|how|what|when|where|why|cash|deposit|dokumen|document|promo|promosi|harga|ansuran|model)\b/.test(text) || /[?？]/.test(clean(value));
 }
 
+const applicationFormValue = (application, header) => clean(application[header]);
+const formAnswer = value => applicationFormValue(value.application, value.header) ? `➡️ ${applicationFormValue(value.application, value.header)}` : '➡️';
+
+export function buildApplicationDetailsForm(application = {}, businessUnit = 'MOTOR') {
+  const unit = clean(businessUnit).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
+  const tenureHeader = applicationDetailHeader(APPLICATION_DETAIL_FIELDS.at(-1), unit);
+  const productTitle = unit === 'HANDPHONE' ? 'Telefon' : 'Motosikal';
+  const current = header => formAnswer({ application, header });
+  const duration = applicationFormValue(application, 'Employment Duration Months');
+  const durationAnswer = duration ? `➡️ ${duration} bulan` : '➡️';
+  const tenure = applicationFormValue(application, tenureHeader);
+  const tenureAnswer = tenure ? `➡️ ${unit === 'HANDPHONE' ? Number(tenure) / 12 : tenure} tahun` : '➡️';
+  return `TOLONG ISI MAKLUMAT DI BAWAH :
+•••••••••••••••••••••••••••••••••••••
+
+Nama pemohon:
+${current('Applicant Name')}
+IC pemohon:
+${current('Applicant IC Number')}
+
+1. Alamat Rumah
+${current('Home Address')}
+
+2. Nombor tel pemohon
+${current('Phone Number')}
+
+3. Nama Syarikat/ Tempat Kerja
+${current('Employer Name')}
+
+4. Alamat tempat kerja
+${current('Employer Address')}
+
+5. Nombor tel tempat kerja
+${current('Employer Phone')}
+
+6. Berapa lama sudah berkhidmat
+${durationAnswer}
+
+7. Jawatan
+${current('Job Position')}
+
+8. Email
+${current('Email')}
+
+9. Nama & Tel rujukan 1 (mesti ahli keluarga terdekat contoh ibu bapa, adik beradik, suami isteri, anak)
+➡️ Nama : ${applicationFormValue(application, 'Reference 1 Name')}
+➡️ Hp : ${applicationFormValue(application, 'Reference 1 Phone')}
+➡️ Hubungan : ${applicationFormValue(application, 'Reference 1 Relationship')}
+
+10. Nama & Tel rujukan 2 (mesti ahli keluarga terdekat contoh ibu bapa, adik beradik, suami isteri, anak)
+➡️ Nama : ${applicationFormValue(application, 'Reference 2 Name')}
+➡️ Hp : ${applicationFormValue(application, 'Reference 2 Phone')}
+➡️ Hubungan : ${applicationFormValue(application, 'Reference 2 Relationship')}
+
+11. ${productTitle}
+➡️ Jenama: ${applicationFormValue(application, 'Product Brand')}
+➡️ Model: ${applicationFormValue(application, 'Product Model')}
+➡️ Loan Berapa tahun: ${tenureAnswer.replace(/^➡️\s*/, '')}`;
+}
+
+const applicationFormLabel = line => {
+  const value = clean(line).replace(/^\d+\.\s*/, '').replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
+  if (/^nama pemohon\b/i.test(value)) return { header: 'Applicant Name', inline: value.replace(/^nama pemohon\s*:?\s*/i, '') };
+  if (/^ic pemohon\b/i.test(value)) return { header: 'Applicant IC Number', inline: value.replace(/^ic pemohon\s*:?\s*/i, '') };
+  if (/^alamat rumah\b/i.test(value)) return { header: 'Home Address', inline: value.replace(/^alamat rumah\s*:?\s*/i, '') };
+  if (/^nombor tel pemohon\b/i.test(value)) return { header: 'Phone Number', inline: value.replace(/^nombor tel pemohon\s*:?\s*/i, '') };
+  if (/^nama syarikat\s*\/?.*tempat kerja\b/i.test(value)) return { header: 'Employer Name', inline: value.replace(/^nama syarikat\s*\/?\s*tempat kerja\s*:?\s*/i, '') };
+  if (/^alamat tempat kerja\b/i.test(value)) return { header: 'Employer Address', inline: value.replace(/^alamat tempat kerja\s*:?\s*/i, '') };
+  if (/^nombor tel tempat kerja\b/i.test(value)) return { header: 'Employer Phone', inline: value.replace(/^nombor tel tempat kerja\s*:?\s*/i, '') };
+  if (/^berapa lama sudah berkhidmat\b/i.test(value)) return { header: 'Employment Duration Months', inline: value.replace(/^berapa lama sudah berkhidmat\s*:?\s*/i, '') };
+  if (/^jawatan\b/i.test(value)) return { header: 'Job Position', inline: value.replace(/^jawatan\s*:?\s*/i, '') };
+  if (/^(?:e-?mail)\b/i.test(value)) return { header: 'Email', inline: value.replace(/^e-?mail\s*:?\s*/i, '') };
+  if (/^jenama\b/i.test(value)) return { header: 'Product Brand', inline: value.replace(/^jenama\s*:?\s*/i, '') };
+  if (/^model\b/i.test(value)) return { header: 'Product Model', inline: value.replace(/^model\s*:?\s*/i, '') };
+  if (/^loan berapa tahun\b/i.test(value)) return { header: 'LOAN_TENURE', inline: value.replace(/^loan berapa tahun\s*:?\s*/i, '') };
+  return null;
+};
+
+export function parseApplicationDetailsForm(text = '', businessUnit = 'MOTOR') {
+  const unit = clean(businessUnit).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
+  const lines = String(text || '').replace(/\r/g, '').split('\n');
+  const raw = {};
+  let pendingHeader = '', reference = 0, recognized = 0;
+  const save = (header, value) => {
+    const answer = clean(value).replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
+    if (!answer) return false;
+    raw[header] = answer;
+    pendingHeader = '';
+    return true;
+  };
+  for (const original of lines) {
+    const line = clean(original);
+    if (!line || /^TOLONG ISI MAKLUMAT/i.test(line) || /^[•.]{8,}$/.test(line)) continue;
+    if (/^9\.\s*Nama\s*&\s*Tel rujukan 1\b/i.test(line)) { reference = 1; pendingHeader = ''; recognized += 1; continue; }
+    if (/^10\.\s*Nama\s*&\s*Tel rujukan 2\b/i.test(line)) { reference = 2; pendingHeader = ''; recognized += 1; continue; }
+    if (/^11\.\s*(?:Motosikal|Telefon)\b/i.test(line)) { reference = 0; pendingHeader = ''; recognized += 1; continue; }
+    const stripped = line.replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
+    if (reference && /^(?:nama|hp|hubungan)\s*:/i.test(stripped)) {
+      const part = stripped.match(/^(nama|hp|hubungan)\s*:\s*(.*)$/i);
+      const suffix = part[1].toLowerCase() === 'nama' ? 'Name' : part[1].toLowerCase() === 'hp' ? 'Phone' : 'Relationship';
+      const header = `Reference ${reference} ${suffix}`;
+      recognized += 1;
+      pendingHeader = header;
+      save(header, part[2]);
+      continue;
+    }
+    const label = applicationFormLabel(line);
+    if (label) {
+      reference = 0;
+      recognized += 1;
+      pendingHeader = label.header;
+      save(label.header, label.inline);
+      continue;
+    }
+    if (pendingHeader && !/^[➡➜→]\ufe0f?$/.test(line)) save(pendingHeader, line);
+  }
+  const changes = {}, invalidFields = [];
+  for (const field of APPLICATION_DETAIL_FIELDS) {
+    if (!(field.header in raw)) continue;
+    if (!field.valid(raw[field.header], unit)) invalidFields.push(field.label);
+    else changes[applicationDetailHeader(field, unit)] = field.normalize(raw[field.header], unit);
+  }
+  return { changes, invalidFields, recognizedFields: recognized, isFormResponse: recognized >= 4 || (/TOLONG ISI MAKLUMAT/i.test(clean(text)) && recognized >= 1) };
+}
+
+export function isApplicationDetailsFormResponse(text = '', businessUnit = 'MOTOR') {
+  return parseApplicationDetailsForm(text, businessUnit).isFormResponse;
+}
+
 export function buildApplicationDetailsTurn({ currentStep = '', text = '', application = {}, businessUnit = 'MOTOR', start = false } = {}) {
   const unit = clean(businessUnit).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
-  if (start) {
-    const first = applicationDetailMissing(application, unit)[0];
-    return first
-      ? { handled: true, nextStep: first.step, text: `Dokumen sudah diterima. Sementara semakan dibuat, kita boleh terus lengkapkan maklumat permohonan. ${first.prompt}`, changes: {}, missingFields: applicationDetailMissing(application, unit).map(field => applicationDetailHeader(field, unit)) }
-      : { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Maklumat permohonan anda sudah lengkap. Dokumen yang masih kurang boleh dihantar kemudian di sini.', changes: {}, missingFields: [] };
+  const missing = applicationDetailMissing(application, unit);
+  if (!missing.length) return { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Maklumat permohonan anda sudah lengkap. Dokumen yang masih kurang boleh dihantar kemudian di sini.', changes: {}, missingFields: [] };
+  const parsed = start ? null : parseApplicationDetailsForm(text, unit);
+  if (start || !parsed?.isFormResponse) {
+    return {
+      handled: true,
+      nextStep: 'APPLICATION_FORM_PENDING',
+      text: `${start ? 'Dokumen sudah diterima. Sementara semakan dibuat, sila salin borang di bawah, isi semua maklumat dan hantar semula dalam satu mesej.' : 'Untuk elak banyak soalan berasingan, sila salin borang di bawah, lengkapkan semua ruang dan hantar semula dalam satu mesej.'}\n\n${buildApplicationDetailsForm(application, unit)}`,
+      changes: {},
+      missingFields: missing.map(field => applicationDetailHeader(field, unit))
+    };
   }
-  const field = applicationDetailField(currentStep);
-  if (!field) return { handled: false };
-  if (!field.valid(text, unit)) return { handled: true, nextStep: field.step, text: field.invalid, changes: {}, missingFields: applicationDetailMissing(application, unit).map(item => applicationDetailHeader(item, unit)) };
-  const header = applicationDetailHeader(field, unit), changes = { [header]: field.normalize(text, unit) }, projected = { ...application, ...changes };
-  const next = applicationDetailMissing(projected, unit)[0];
-  return next
-    ? { handled: true, nextStep: next.step, text: `Baik, sudah dicatat. ${next.prompt}`, changes, missingFields: applicationDetailMissing(projected, unit).map(item => applicationDetailHeader(item, unit)) }
-    : { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Maklumat permohonan anda sudah lengkap. Dokumen yang masih kurang boleh dihantar kemudian di sini. Selepas dokumen dan borang kebenaran disahkan, permohonan akan disediakan untuk LMS.', changes, missingFields: [] };
+  const projected = { ...application, ...parsed.changes };
+  const nextMissing = applicationDetailMissing(projected, unit);
+  if (nextMissing.length || parsed.invalidFields.length) {
+    const invalid = parsed.invalidFields.length ? ` Maklumat yang perlu disemak: ${parsed.invalidFields.join(', ')}.` : '';
+    return {
+      handled: true,
+      nextStep: 'APPLICATION_FORM_PENDING',
+      text: `Terima kasih, maklumat yang telah diisi sudah disimpan.${invalid} Sila lengkapkan ruang yang masih kosong dalam borang yang sama dan hantar semula sekali sahaja.\n\n${buildApplicationDetailsForm(projected, unit)}`,
+      changes: parsed.changes,
+      missingFields: nextMissing.map(field => applicationDetailHeader(field, unit))
+    };
+  }
+  return { handled: true, nextStep: 'APPLICATION_DETAILS_COMPLETE', text: 'Terima kasih. Semua maklumat permohonan sudah diterima dan disimpan. Dokumen yang masih kurang boleh dihantar kemudian di sini. Selepas dokumen dan borang kebenaran disahkan, permohonan akan disediakan untuk LMS.', changes: parsed.changes, missingFields: [] };
 }
 
 function sheetCacheTtl(range) {
@@ -1811,7 +1965,7 @@ export default async function handler(req, res) {
           });
         }
         const activeApplicationDetailStep = isApplicationDetailStep(currentStep);
-        const detailSideQuestion = activeApplicationDetailStep && conversationalText && applicationDetailSideQuestion(text);
+        const detailSideQuestion = activeApplicationDetailStep && conversationalText && !isApplicationDetailsFormResponse(text, routeBusinessUnit) && applicationDetailSideQuestion(text);
         let applicationDetailTurn = null;
         if (routeUsable && !human && activeApplicationDetailStep && conversationalText && !detailSideQuestion) {
           applicationDetailTurn = buildApplicationDetailsTurn({ currentStep, text, application, businessUnit: routeBusinessUnit });
@@ -1992,6 +2146,7 @@ export default async function handler(req, res) {
               'Minimum Documents Complete': liveDocumentStatus.verifiedComplete ? 'TRUE' : 'FALSE',
               'Missing Documents': classificationPending ? '' : liveDocumentStatus.missingCodes.join(', '),
               'Verification Pending Documents': liveDocumentStatus.pendingTypes.join(', '),
+              ...(inferredDocumentType === 'BANK_STATEMENT' ? { 'Bank Account Available': 'YES' } : {}),
               'Updated By': 'META_WEBHOOK_DOCUMENT_RECEIVED'
             };
             await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);

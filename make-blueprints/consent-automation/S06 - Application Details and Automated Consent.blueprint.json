@@ -1,5 +1,5 @@
 {
-  "name": "S06 - Application Details Collection After Signed Consent",
+  "name": "S06 - Retired One-by-One Details (Webhook Single Form Owns Flow)",
   "flow": [
     {
       "id": 2,
@@ -111,7 +111,7 @@
         "__IMTCONN__": 7930616
       },
       "filter": {
-        "name": "Only new application-detail text replies",
+        "name": "Disabled — Vercel webhook owns the single WhatsApp form",
         "conditions": [
           [
             {
@@ -121,7 +121,7 @@
             },
             {
               "a": "{{2.`11`}}",
-              "b": "NEW",
+              "b": "DISABLED_SINGLE_WHATSAPP_FORM",
               "o": "text:equal:ci"
             },
             {
