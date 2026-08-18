@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAiFallbackRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAiFallbackRequest, buildAiIntentRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, requestAiIntent, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
@@ -20,8 +20,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.answerCustomerIntentBeforeProfileQuestions, true);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.profileCollectionIsNonBlocking, true);
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-4.1-mini');
-  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, '');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.model, 'gpt-5.6-terra');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.reasoningEffort, 'low');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.aiFallback.noSilenceFallback, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeCashPrice, false);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeMotorCashPrice, true);
@@ -243,10 +243,10 @@ test('customer area resolves to the correct active business branch', () => {
   assert.equal(resolveCustomerLocation('hello', 'MOTOR', branches), null);
 });
 
-test('instant sales flow asks name, then location, then product', () => {
+test('instant sales flow opens naturally, then captures name and location without blocking questions', () => {
   const welcome = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   assert.equal(welcome.nextStep, 'STEP_01_NAME');
-  assert.match(welcome.text, /nama/i);
+  assert.match(welcome.text, /mahu semak/i);
   assert.match(welcome.text, /terima kasih|ansuran bulanan/i);
   assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
   assert.doesNotMatch(welcome.text, /[👍😊🙂🤖]/u);
@@ -310,7 +310,7 @@ test('a customer location can never be mistaken for catalog search keywords', ()
 test('short or ambiguous customer messages default to Bahasa Melayu', () => {
   const greeting = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME', 'Last AI Message': 'May I know your name?' }, text: 'Jim', messageType: 'text' });
-  assert.match(greeting.text, /selamat datang|nama anda/i);
+  assert.match(greeting.text, /terima kasih|mahu semak/i);
   assert.match(name.text, /bandar|negeri/i);
   assert.doesNotMatch(greeting.text, /May I know/i);
   assert.doesNotMatch(name.text, /Which city|Nice to meet/i);
@@ -464,7 +464,8 @@ test('instant motor reply sends approved deposit, image and only one monthly ins
   assert.match(decision.text, /RM273/);
   assert.match(decision.text, /deposit.*RM1000/i);
   assert.doesNotMatch(decision.text, /394|318|12000|selling price/i);
-  assert.match(decision.text, /MyKad|payslip|EPF/i);
+  assert.match(decision.text, /continue with the loan check/i);
+  assert.doesNotMatch(decision.text, /MyKad|payslip|EPF/i);
   assert.doesNotMatch(decision.text, /satu per satu|one by one/i);
 });
 
@@ -743,8 +744,8 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
     routeBusinessUnit: 'MOTOR',
     phone: '60123456789'
   });
-  assert.equal(request.model, 'gpt-4.1-mini');
-  assert.equal(request.reasoning, undefined);
+  assert.equal(request.model, 'gpt-5.6-terra');
+  assert.equal(request.reasoning.effort, 'low');
   assert.equal(request.store, false);
   assert.equal(request.safety_identifier.length, 64);
   assert.equal(request.input.includes('60123456789'), false);
@@ -768,6 +769,103 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
   assert.equal((reply.match(/\?/g) || []).length, 1);
   assert.equal(sanitizeAiFallbackReply('Harga ialah RM999. Berapa bajet anda?', 'MS'), '');
   assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
+});
+
+test('AI intent understanding uses a strict grounded schema and never receives the raw phone number', async () => {
+  const catalog = [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard', Active: 'TRUE', 'Search Keywords': 'nmax n max yamaha' }];
+  const request = buildAiIntentRequest({
+    text: 'nma berapa sebulan bah',
+    state: { 'Current Step': 'STEP_01_NAME', 'Last AI Message': 'Boleh saya tahu nama anda?' },
+    lead: { Region: 'EAST_MALAYSIA' },
+    routeBusinessUnit: 'MOTOR',
+    phone: '60123456789',
+    motorCatalog: catalog
+  });
+  assert.equal(request.model, 'gpt-5.6-terra');
+  assert.equal(request.reasoning.effort, 'low');
+  assert.equal(request.reasoning.context, 'current_turn');
+  assert.equal(request.text.format.type, 'json_schema');
+  assert.equal(request.text.format.strict, true);
+  assert.equal(request.input.includes('60123456789'), false);
+  assert.match(request.input, /MTR-YAM-NMAX/);
+
+  const interpreted = await requestAiIntent({
+    text: 'nma berapa sebulan bah',
+    state: { 'Current Step': 'STEP_01_NAME' },
+    routeBusinessUnit: 'MOTOR',
+    phone: '60123456789',
+    motorCatalog: catalog,
+    env: { OPENAI_API_KEY: 'sk-test', OPENAI_INTENT_MODEL: 'gpt-5.6-terra' },
+    fetchImpl: async (_url, options) => {
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, 'gpt-5.6-terra');
+      assert.equal(body.text.format.name, 'jomkaki_customer_intent');
+      return {
+        ok: true,
+        json: async () => ({ output_text: JSON.stringify({
+          intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', catalogId: 'MTR-YAM-NMAX', normalizedModel: 'Yamaha NMAX', tenureYears: 0,
+          locationQuery: '', customerName: '', followUpSubject: 'MONTHLY', needsHuman: false, answerCustomerQuestionFirst: true, suggestedReply: '', confidence: 0.96
+        }) })
+      };
+    }
+  });
+  assert.equal(interpreted.intent, 'MODEL_SELECTION');
+  assert.equal(interpreted.catalogId, 'MTR-YAM-NMAX');
+  assert.equal(interpreted.answerCustomerQuestionFirst, true);
+});
+
+test('AI-selected typo answers the product question before profile collection and sends one approved image', () => {
+  const product = { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://example.com/nmax.jpg' };
+  const pricing = [{ 'Catalog ID': 'MTR-YAM-NMAX', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365', 'Deposit (RM)': '500' }];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME' }, lead: { Region: 'EAST_MALAYSIA' }, text: 'nma', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [product], motorPricing: pricing,
+    aiIntent: { intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', catalogId: 'MTR-YAM-NMAX', confidence: 0.96 }
+  });
+  assert.equal(decision.product.Model, 'NMAX');
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.equal(decision.imageUrl, 'https://example.com/nmax.jpg');
+  assert.match(decision.text, /RM365/);
+  assert.match(decision.text, /nama anda/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('AI follow-up intent cannot be misread as another model and repeated model replies do not resend the image', () => {
+  const catalog = [
+    { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://example.com/y15.jpg', 'Search Keywords': 'y15 y15zr' },
+    { 'Catalog ID': 'M2', Brand: 'Honda', Model: 'Dash 125 FI', Active: 'TRUE', 'Search Keywords': 'dash 125 fi' }
+  ];
+  const pricing = [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Deposit (RM)': '500' }];
+  const state = { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR', 'Last AI Message': 'Harga tunai belum ada. Saya sudah masukkan permintaan untuk pengesahan cawangan.' };
+  const timing = buildInstantSalesDecision({
+    state, lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'pastu berapa lama boleh tau', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing,
+    aiIntent: { intent: 'FOLLOW_UP_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.98 }
+  });
+  assert.match(timing.text, /maklum balas cawangan/i);
+  assert.equal(timing.product, undefined);
+  assert.doesNotMatch(timing.text, /Dash 125/i);
+
+  const repeated = buildInstantSalesDecision({
+    state, lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'Y15ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing,
+    aiIntent: { intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', catalogId: 'M1', confidence: 0.99 }
+  });
+  assert.equal(repeated.imageUrl, '');
+  assert.match(repeated.text, /RM340/);
+  assert.doesNotMatch(repeated.text, /IC depan|penyata EPF/i);
+});
+
+test('missing approved motor cash price creates a branch handover instead of guessing or repeating a model', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'cash berapa', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340' }],
+    aiIntent: { intent: 'CASH_PRICE', language: 'MS', businessUnit: 'MOTOR', confidence: 0.99 }
+  });
+  assert.equal(decision.humanFollowUpRequired, true);
+  assert.match(decision.text, /pengesahan cawangan/i);
+  assert.doesNotMatch(decision.text, /RM\d+/i);
+  assert.equal(decision.imageUrl, undefined);
 });
 
 test('other-model request suggests a small approved regional list and asks one question', () => {
