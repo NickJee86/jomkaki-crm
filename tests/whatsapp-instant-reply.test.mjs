@@ -28,6 +28,9 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeHandphoneCashPrice, false);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeMotorDeposit, true);
   assert.equal(JOMKAKI_KNOWLEDGE.pricing.exposeHandphoneDeposit, false);
+  assert.deepEqual(JOMKAKI_KNOWLEDGE.loanKedai.normalProcessingWorkingDays, [1, 3]);
+  assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.primarySalesPath, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.proactivelyPromoteCashPurchase, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
@@ -841,7 +844,8 @@ test('AI follow-up intent cannot be misread as another model and repeated model 
     state, lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'pastu berapa lama boleh tau', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing,
     aiIntent: { intent: 'FOLLOW_UP_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.98 }
   });
-  assert.match(timing.text, /maklum balas cawangan/i);
+  assert.match(timing.text, /cawangan/i);
+  assert.match(timing.text, /loan kedai/i);
   assert.equal(timing.product, undefined);
   assert.doesNotMatch(timing.text, /Dash 125/i);
 
@@ -854,6 +858,21 @@ test('AI follow-up intent cannot be misread as another model and repeated model 
   assert.doesNotMatch(repeated.text, /IC depan|penyata EPF/i);
 });
 
+test('Loan Kedai processing time is answered from approved knowledge and never becomes cash-price confirmation', () => {
+  const state = { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15 SE', 'Last AI Message': 'Harga tunai perlu pengesahan cawangan.' };
+  for (const text of ['biasa process berapa lama', 'loan kedai berapa hari', 'berapa lama proses permohonan']) {
+    const decision = buildInstantSalesDecision({
+      state, lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' }, text, messageType: 'text', routeBusinessUnit: 'MOTOR',
+      aiIntent: { intent: 'FOLLOW_UP_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.9 }
+    });
+    assert.equal(decision.loanKedaiIntent, true);
+    assert.match(decision.text, /1[–-]3 hari bekerja/i);
+    assert.match(decision.text, /loan kedai/i);
+    assert.doesNotMatch(decision.text, /harga disahkan|maklum balas cawangan|harga tunai/i);
+    assert.equal((decision.text.match(/\?/g) || []).length, 1);
+  }
+});
+
 test('missing approved motor cash price creates a branch handover instead of guessing or repeating a model', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
@@ -864,6 +883,7 @@ test('missing approved motor cash price creates a branch handover instead of gue
   });
   assert.equal(decision.humanFollowUpRequired, true);
   assert.match(decision.text, /pengesahan cawangan/i);
+  assert.match(decision.text, /loan kedai/i);
   assert.doesNotMatch(decision.text, /RM\d+/i);
   assert.equal(decision.imageUrl, undefined);
 });
