@@ -298,7 +298,7 @@ export function extractCustomerName(value = '') {
 }
 
 const stateAliases = [
-  ['EAST_MALAYSIA', 'Sarawak', ['sarawak', 'kuching', 'batu kawa', 'satok', 'samarahan', 'kota samarahan', 'bintulu', 'miri', 'sibu', 'serian', 'sri aman']],
+  ['EAST_MALAYSIA', 'Sarawak', ['sarawak', 'kuching', 'kch', 'batu kawa', 'satok', 'samarahan', 'kota samarahan', 'bintulu', 'miri', 'sibu', 'serian', 'sri aman']],
   ['EAST_MALAYSIA', 'Sabah', ['sabah', 'kota kinabalu', 'kk', 'sandakan', 'tawau', 'lahad datu']],
   ['EAST_MALAYSIA', 'Labuan', ['labuan']],
   ['WEST_MALAYSIA', 'Selangor', ['selangor', 'petaling jaya', 'pj', 'shah alam', 'klang', 'klang valley']],
@@ -327,12 +327,13 @@ export function resolveCustomerLocation(value = '', businessUnit = '', branches 
   const locationMatches = stateAliases.flatMap(([region, state, aliases]) => aliases.map(alias => {
     const normalizedAlias = normalizedWords(alias), compactAlias = normalizedAlias.replace(/\s+/g, '');
     const exact = includesTerm(text, alias);
-    const typo = !exact && compactAlias.length >= 5 && [...candidates].some(candidate => candidate.length >= 4 && editDistanceWithin(candidate, compactAlias, compactAlias.length >= 9 ? 2 : 1));
+    const typo = !exact && compactAlias.length >= 5 && [...candidates].some(candidate => candidate.length >= 4 && editDistanceWithin(candidate, compactAlias, compactAlias.length >= 6 ? 2 : 1));
     return { region, state, alias, exact, typo, score: exact ? 1000 + compactAlias.length : typo ? 500 + compactAlias.length : 0 };
   })).filter(match => match.score > 0).sort((a, b) => b.score - a.score);
   const locationMatch = locationMatches[0];
   if (!locationMatch) return null;
-  const { region, state, alias: area } = locationMatch;
+  const { region, state, alias } = locationMatch;
+  const area = ({ kch: 'kuching', kk: 'kota kinabalu', kl: 'kuala lumpur', pj: 'petaling jaya', jb: 'johor bahru' })[normalizedWords(alias)] || alias;
   const resolvedAreaText = normalizedWords(area);
   const active = branches.filter(branch => truth(branch.Active) && canonicalBusinessUnit(branch['Business Unit']) === unit);
   const directMatches = active.map(branch => {
@@ -450,17 +451,17 @@ export function buildMediaProxyUrl({ mediaId = '', channelId = '', credentialKey
   return `${clean(baseUrl).replace(/\/$/, '')}/api/whatsapp-media?${query.toString()}`;
 }
 
-const instantLanguage = (text, state = {}) => {
-  const value = clean(text);
-  if (/[\u3400-\u9fff]/u.test(value)) return 'ZH';
-  if (/\b(hai|saya|sy|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari|ada|apa|tak|tidak|faham|cakap|kat|dekat|sekarang|skg|berapa|tolong|sudah|dah|kalau|kenapa)\b/i.test(value)) return 'MS';
-  if (/\b(i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply|please|can you|do you)\b/i.test(value)) return 'EN';
-  const lastReply = clean(state['Last AI Message']);
-  if (/[\u3400-\u9fff]/u.test(lastReply)) return 'ZH';
-  if (/\b(?:anda|boleh|saya|motor|telefon|ansuran|dokumen|negeri|bandar|terima kasih)\b/i.test(lastReply)) return 'MS';
-  if (/\b(?:you|your|which|monthly|motorcycle|phone|documents?|thank you)\b/i.test(lastReply)) return 'EN';
-  return JOMKAKI_KNOWLEDGE.conversation.defaultLanguage;
+const customerLanguageSignal = value => {
+  const text = clean(value);
+  if (/[\u3400-\u9fff]/u.test(text)) return 'ZH';
+  if (/\b(hai|saya|sy|nak|mahu|boleh|cari|motor|telefon|harga|ansuran|pinjaman|dokumen|dari|ada|apa|tak|tidak|faham|cakap|kat|dekat|sekarang|skg|berapa|tolong|sudah|dah|kalau|kenapa|bodoh|bajet|murah|mahal)\b/i.test(text)) return 'MS';
+  if (/\b(i'm|my|we|our|looking|want|need|interested|how|what|where|which|monthly|payment|price|apply|please|can you|do you|years?|months?|promotion)\b/i.test(text)) return 'EN';
+  return '';
 };
+
+const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
+  || customerLanguageSignal(state['Last Customer Message'])
+  || JOMKAKI_KNOWLEDGE.conversation.defaultLanguage;
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
@@ -479,6 +480,8 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. The approved monthly instalment is not available in the system yet, but I can check it with the branch for you.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
+      AVAILABLE_MODELS: `Available options I can check include ${models}. Would you prefer a cub, scooter, or a model based on your monthly budget?`,
+      SERVICE_RECOVERY: `Sorry, my earlier reply was not helpful. I understand you want a clear answer. ${models ? `Available options I can check include ${models}. ` : ''}What monthly budget would be comfortable for you?`,
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send them one by one.',
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Eligibility depends on the applicant details and supporting documents, and I can guide you through the check step by step.',
@@ -510,6 +513,8 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Kadar ansuran yang diluluskan belum ada dalam sistem sekarang, tetapi saya boleh semak dengan cawangan untuk anda.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
+      AVAILABLE_MODELS: `Antara pilihan yang saya boleh semak sekarang ialah ${models}. Anda lebih suka kapcai, skuter atau ikut bajet bulanan?`,
+      SERVICE_RECOVERY: `Maaf, jawapan tadi memang tak membantu. Saya faham anda mahu jawapan yang jelas. ${models ? `Antara pilihan yang saya boleh semak ialah ${models}. ` : ''}Bajet bulanan yang anda selesa sekitar berapa?`,
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar satu per satu.',
       SHOP_LOAN: 'Boleh, kami ada menyediakan permohonan loan kedai. Kelayakan bergantung pada maklumat pemohon dan dokumen sokongan, dan saya boleh bantu semak langkah demi langkah.',
@@ -540,6 +545,8 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
+      AVAILABLE_MODELS: `目前可以查询的选择包括 ${models}。你想找 kapcai、scooter，还是按月供预算选择？`,
+      SERVICE_RECOVERY: `抱歉，刚才的回复没有解决你的问题。${models ? `目前可以查询的选择包括 ${models}。` : ''}请问你希望每月供款大约多少？`,
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
       SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
@@ -688,6 +695,8 @@ const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|terusk
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
 const asksForOtherModels = text => /(model lain|motor lain|phone lain|telefon lain|apa model.*(?:ada|lain)|other models?|what else.*(?:available|have)|其他型号|别的型号)/i.test(clean(text));
+const asksForAvailableModels = text => /(?:\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b)/i.test(clean(text));
+const customerIsFrustrated = text => /(?:\b(?:tak|tidak|x)\s*faham\b|\b(?:bodoh|stupid|useless|pukimak|puki\s*mak|bangang|bengap)\b|\bwhat\s+are\s+you\s+talking\s+about\b|不明白|很笨|没用)/i.test(clean(text));
 const saysThanks = text => /^(?:terima kasih|thanks?(?: you)?|tq|thank you|谢谢|多谢)[.! ]*$/i.test(clean(text));
 
 const modelAliasStopWords = new Set([
@@ -891,6 +900,15 @@ const promotionOptionText = ({ row = {}, product = {} } = {}) => {
   return [model, name ? `(${name})` : '', deposit ? `deposit RM${deposit}` : ''].filter(Boolean).join(' ');
 };
 
+const availableModelSuggestions = (catalogRows = [], pricingRows = [], unit = '', region = '', limit = 3) => catalogRows
+  .filter(row => {
+    const rowUnit = clean(row.__businessUnit).toUpperCase() || canonicalBusinessUnit(unit);
+    return rowUnit === canonicalBusinessUnit(unit) && instantRate(row, pricingRows, rowUnit, region);
+  })
+  .filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
+  .slice(0, limit)
+  .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim());
+
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], suppressDocumentAcknowledgement = false } = {}) {
   const language = instantLanguage(text, state), step = clean(state['Current Step']).toUpperCase();
   if (['image', 'document'].includes(clean(messageType).toLowerCase())) return suppressDocumentAcknowledgement
@@ -904,8 +922,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
   if (asksForPromotion(text)) {
-    const hasLocation = !!clean(lead['City or Area'] || lead.State);
-    const promotions = hasLocation ? activeMotorPromotions(motorCatalog, motorPricing, lead.Region || routeRegion) : [];
+    const inlineLocation = resolveCustomerLocation(text, 'MOTOR', branches);
+    const hasStoredLocation = !!clean(lead['City or Area'] || lead.State);
+    const hasLocation = hasStoredLocation || !!inlineLocation;
+    const promotionRegion = inlineLocation?.region || lead.Region || routeRegion;
+    const promotions = hasLocation ? activeMotorPromotions(motorCatalog, motorPricing, promotionRegion) : [];
     const promotionAnswer = hasLocation
       ? instantCopy(language, promotions.length ? 'PROMOTION_LIST' : 'PROMOTION_NONE', { options: promotions.slice(0, 3).map(promotionOptionText).join('; ') })
       : instantCopy(language, 'PROMOTION_LOCATION');
@@ -913,13 +934,15 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       promotionAnswer,
       !hasLocation && usableCustomerName(state['Customer Name'] || lead['Customer Name']) ? instantCopy(language, 'LOCATION_AFTER_ANSWER') : ''
     ].filter(Boolean).join(' ');
-    const continuation = profileContinuation({ language, state, lead, baseText, completeStep: step || 'STEP_03_PRODUCT' });
+    const continuationLead = inlineLocation ? { ...lead, Region: inlineLocation.region, State: inlineLocation.state, 'City or Area': inlineLocation.city } : lead;
+    const continuation = profileContinuation({ language, state, lead: continuationLead, baseText, completeStep: step || 'STEP_03_PRODUCT' });
     const needsModelQuestion = hasLocation && continuation.nextStep === (step || 'STEP_03_PRODUCT');
     return {
       handled: true,
       promotionIntent: true,
       nextStep: continuation.nextStep,
       productUnit: 'MOTOR',
+      location: inlineLocation || undefined,
       text: [continuation.text, needsModelQuestion ? instantCopy(language, 'PROMOTION_MODEL') : ''].filter(Boolean).join(' ')
     };
   }
@@ -1055,15 +1078,20 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     return { handled: true, nextStep: continuation.nextStep, productUnit: unit, text: continuation.text };
   }
   if (raisesBudgetConcern(text)) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'BUDGET') };
-  if (asksForOtherModels(text)) {
-    const pricingRegion = lead.Region || routeRegion;
-    const suggestions = catalogPool.filter(row => {
-      const rowUnit = clean(row.__businessUnit).toUpperCase() || unit;
-      const rowPricing = rowUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-      return rowUnit === unit && instantRate(row, rowPricing, rowUnit, pricingRegion);
-    }).filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
-      .slice(0, 3).map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim());
-    if (suggestions.length) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'OTHER_MODELS', { models: suggestions.join(language === 'ZH' ? '、' : ', ') }) };
+  const suggestionPricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
+  const suggestions = availableModelSuggestions(catalogPool, suggestionPricing, unit, lead.Region || routeRegion);
+  const suggestionText = suggestions.join(language === 'ZH' ? '、' : ', ');
+  if (customerIsFrustrated(text)) {
+    return { handled: true, serviceRecovery: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'SERVICE_RECOVERY', { models: suggestionText }) };
+  }
+  if (asksForOtherModels(text) || asksForAvailableModels(text)) {
+    if (suggestions.length) return {
+      handled: true,
+      availableModelsIntent: true,
+      nextStep: 'STEP_03_PRODUCT',
+      productUnit: unit,
+      text: instantCopy(language, asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS', { models: suggestionText })
+    };
   }
   if (saysThanks(text)) return { handled: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'THANKS') };
   if (step === 'STEP_01_NAME' || !step || step === 'STEP_01_WELCOME') {
@@ -1328,7 +1356,8 @@ export default async function handler(req, res) {
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
-          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': existingCustomer?.['Customer Name'] || profileName || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: routeRegion, 'Business Unit': routeBusinessUnit, 'Team ID': teamId, 'Selected Branch ID': branchId, 'Assigned SA ID': '' };
+          const initialLocation = instantDecision.location || {};
+          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': existingCustomer?.['Customer Name'] || profileName || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: clean(initialLocation.region || routeRegion), State: clean(initialLocation.state), 'City or Area': clean(initialLocation.city), 'Business Unit': routeBusinessUnit, 'Team ID': clean(initialLocation.teamId || teamId), 'Selected Branch ID': clean(initialLocation.branchId || branchId), 'Assigned SA ID': '' };
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
           await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', 'Source Channel': 'WHATSAPP_CLOUD', 'Primary WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK', 'Updated By': 'META_WEBHOOK' });
           leads.push(lead);
@@ -1369,22 +1398,20 @@ export default async function handler(req, res) {
               leadIdentity['Customer Name'] = customerName;
             }
           }
-          if (step === 'STEP_02_LOCATION') {
-            const location = resolveCustomerLocation(text, routeBusinessUnit, branches);
-            if (location) {
-              leadIdentity.Region = location.region;
-              leadIdentity.State = location.state;
-              leadIdentity['City or Area'] = location.city;
-              if (location.branchId) {
-                leadIdentity['Selected Branch ID'] = location.branchId;
-                identityState['Selected Branch ID'] = location.branchId;
+          const resolvedLocation = instantDecision.location || (step === 'STEP_02_LOCATION' ? resolveCustomerLocation(text, routeBusinessUnit, branches) : null);
+          if (resolvedLocation) {
+              leadIdentity.Region = resolvedLocation.region;
+              leadIdentity.State = resolvedLocation.state;
+              leadIdentity['City or Area'] = resolvedLocation.city;
+              if (resolvedLocation.branchId) {
+                leadIdentity['Selected Branch ID'] = resolvedLocation.branchId;
+                identityState['Selected Branch ID'] = resolvedLocation.branchId;
               }
-              if (location.teamId) {
-                teamId = location.teamId;
-                leadIdentity['Team ID'] = location.teamId;
-                identityState['Team ID'] = location.teamId;
+              if (resolvedLocation.teamId) {
+                teamId = resolvedLocation.teamId;
+                leadIdentity['Team ID'] = resolvedLocation.teamId;
+                identityState['Team ID'] = resolvedLocation.teamId;
               }
-            }
           }
           if (Object.keys(leadIdentity).length) {
             leadIdentity['Updated At'] = receivedAt;
