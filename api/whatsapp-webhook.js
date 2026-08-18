@@ -484,7 +484,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY: `Sorry, my earlier reply was not helpful. I understand you want a clear answer. ${models ? `Available options I can check include ${models}. ` : ''}What monthly budget would be comfortable for you?`,
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
-      SHOP_LOAN: 'Yes, we offer shop-loan applications. Eligibility depends on the applicant details and supporting documents, and I can guide you through the check step by step.',
+      SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
       SHOP_LOAN_MODEL: 'Which motorcycle model would you like to check?',
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
       HELP: 'Certainly. I can help with models, monthly instalments, required documents, or application status. What would you like me to check?',
@@ -494,8 +494,9 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation.`,
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} is not available in the system yet. I can check it with the branch for you.`,
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
-      CASH_PRICE_UNAVAILABLE: `The approved cash price for ${brand} ${model} is not available in the system yet. I have queued this for branch confirmation and we will reply here once it is confirmed.`,
-      FOLLOW_UP_TIME: 'The timing depends on the branch response, so I do not want to give you an inaccurate estimate. This check is already queued and we will reply here once the price is confirmed.',
+      CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
+      FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
+      LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. Would you like me to help start the check now?',
       HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
       PROMOTION_LOCATION: 'Current motorcycle promotions differ by area, so I will check the approved offers for your location first.',
       PROMOTION_LIST: `Current approved motorcycle promotions for your area include ${options}.`,
@@ -521,7 +522,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY: `Maaf, jawapan tadi memang tak membantu. Saya faham anda mahu jawapan yang jelas. ${models ? `Antara pilihan yang saya boleh semak ialah ${models}. ` : ''}Bajet bulanan yang anda selesa sekitar berapa?`,
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
-      SHOP_LOAN: 'Boleh, kami ada menyediakan permohonan loan kedai. Kelayakan bergantung pada maklumat pemohon dan dokumen sokongan, dan saya boleh bantu semak langkah demi langkah.',
+      SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
       SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
       HELP: 'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
@@ -531,8 +532,9 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan.`,
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} belum ada dalam sistem. Saya boleh semak dengan cawangan untuk anda.`,
       CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
-      CASH_PRICE_UNAVAILABLE: `Harga tunai yang diluluskan untuk ${brand} ${model} belum ada dalam sistem. Saya sudah masukkan permintaan ini untuk pengesahan cawangan dan kami akan balas di sini selepas disahkan.`,
-      FOLLOW_UP_TIME: 'Tempohnya bergantung pada maklum balas cawangan, jadi saya tak mahu beri anggaran yang salah. Semakan ini sudah dimasukkan dan kami akan balas di sini selepas harga disahkan.',
+      CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
+      FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
+      LOAN_PROCESSING_TIME: 'Biasanya proses loan kedai mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Mahu saya bantu mulakan semakan sekarang?',
       HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
       PROMOTION_LOCATION: 'Promosi motor semasa berbeza mengikut kawasan, jadi saya akan semak tawaran yang diluluskan untuk lokasi anda dahulu.',
       PROMOTION_LIST: `Antara promosi motor yang sedang aktif untuk kawasan anda ialah ${options}.`,
@@ -675,7 +677,7 @@ const responseOutputText = result => {
 const AI_INTENTS = Object.freeze([
   'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'PROMOTION', 'MODEL_SELECTION',
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE',
-  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'FOLLOW_UP_TIME',
+  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
 
@@ -726,6 +728,11 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     lastAssistantMessage: clean(state['Last AI Message']).slice(0, 500),
     previousCustomerMessage: clean(state['Last Customer Message']).slice(0, 400),
     currentCustomerMessage: clean(text).slice(0, 700),
+    approvedOperationalFacts: {
+      primarySalesPath: 'LOAN_KEDAI',
+      loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
+      cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.'
+    },
     catalogChoices
   };
   const instructions = [
@@ -734,6 +741,8 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'Use the conversation context. Do not restart onboarding when the customer is asking a question. The customer question always takes priority over collecting name or location.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'For short follow-ups such as cash berapa, berapa lama, 3 tahun, apa lagi perlu, or ada model lain, resolve the intent against the selected product and last assistant message.',
+    'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
+    'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
     'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
     'Default to MS unless the customer clearly prefers English or Chinese. Profanity or obvious anger is FRUSTRATED, not a model name.',
     'suggestedReply is only for a natural clarification or general non-price reply. It must be concise, have no emoji, ask at most one question, never mention AI/automation/internal systems, and never invent prices, deposits, stock, promotions, approval, document status, or timelines.',
@@ -827,6 +836,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
+const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
@@ -1070,7 +1080,10 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ];
-  if (interpretedIntent === 'FOLLOW_UP_TIME' || (asksHowLongForAnswer(text) && followsPendingBranchCheck(state))) {
+  if (interpretedIntent === 'PROCESSING_TIME' || asksForLoanProcessingTime(text)) {
+    return { handled: true, aiUnderstood: !!interpretedIntent, loanKedaiIntent: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'LOAN_PROCESSING_TIME') };
+  }
+  if ((interpretedIntent === 'FOLLOW_UP_TIME' || asksHowLongForAnswer(text)) && followsPendingBranchCheck(state)) {
     return { handled: true, aiUnderstood: !!interpretedIntent, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'FOLLOW_UP_TIME') };
   }
   if (interpretedIntent === 'PROMOTION' || asksForPromotion(text)) {
