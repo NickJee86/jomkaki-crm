@@ -117,12 +117,14 @@ test('signed consent sends one complete WhatsApp form without asking fields one 
   assert.equal(turn.nextStep, 'APPLICATION_FORM_PENDING');
   assert.match(turn.text, /Sementara semakan dibuat/);
   assert.match(turn.text, /hantar semula dalam satu mesej/);
-  assert.match(turn.text, /TOLONG ISI MAKLUMAT DI BAWAH/);
+  assert.match(turn.text, /BORANG MAKLUMAT PERMOHONAN/);
   assert.match(turn.text, /Nama pemohon/);
   assert.match(turn.text, /IC pemohon/);
   assert.match(turn.text, /Berapa lama sudah berkhidmat/);
-  assert.match(turn.text, /Nama & Tel rujukan 2/);
-  assert.match(turn.text, /Loan Berapa tahun/);
+  assert.match(turn.text, /C\. RUJUKAN KELUARGA TERDEKAT/);
+  assert.match(turn.text, /12\. Rujukan 2/);
+  assert.match(turn.text, /Loan berapa tahun/);
+  assert.match(turn.text, /Semak semua maklumat sebelum hantar/);
   assert.doesNotMatch(turn.text, /Sila berikan nombor IC penuh anda/);
   assert.ok(turn.missingFields.includes('Applicant IC Number'));
 });
@@ -158,6 +160,39 @@ IC pemohon:\n➡️ 900101-13-5555
   assert.equal(turn.changes['Product Model'], 'Y16ZR');
   assert.deepEqual(turn.missingFields, []);
   assert.match(turn.text, /Semua maklumat permohonan sudah diterima/);
+});
+
+test('the polished WhatsApp form can be copied, filled and parsed without losing any section', () => {
+  const completed = {
+    'Applicant Name': 'Amin Rahman',
+    'Applicant IC Number': '900101135555',
+    'Home Address': '12 Jalan Example, Kuching',
+    'Phone Number': '60123456789',
+    'Email': 'amin@example.com',
+    'Employer Name': 'Example Sdn Bhd',
+    'Employer Address': 'Pending Industrial Park, Kuching',
+    'Employer Phone': '082123456',
+    'Employment Duration Months': '24',
+    'Job Position': 'Penyelia',
+    'Reference 1 Name': 'Ali Rahman',
+    'Reference 1 Phone': '60121112222',
+    'Reference 1 Relationship': 'Abang',
+    'Reference 2 Name': 'Siti Rahman',
+    'Reference 2 Phone': '60193334444',
+    'Reference 2 Relationship': 'Isteri',
+    'Product Brand': 'Yamaha',
+    'Product Model': 'Y16ZR',
+    'Loan Tenure Years': '5'
+  };
+  const form = buildApplicationDetailsForm(completed, 'MOTOR');
+  const parsed = parseApplicationDetailsForm(form, 'MOTOR');
+  assert.equal(parsed.isFormResponse, true);
+  assert.deepEqual(parsed.invalidFields, []);
+  assert.deepEqual(parsed.changes, completed);
+  assert.match(form, /\*A\. MAKLUMAT PEMOHON\*/);
+  assert.match(form, /\*B\. MAKLUMAT PEKERJAAN\*/);
+  assert.match(form, /\*C\. RUJUKAN KELUARGA TERDEKAT\*/);
+  assert.match(form, /\*D\. PILIHAN MOTOSIKAL\*/);
 });
 
 test('legacy one-question states migrate to the same prefilled form', () => {

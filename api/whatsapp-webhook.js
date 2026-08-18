@@ -142,56 +142,66 @@ export function buildApplicationDetailsForm(application = {}, businessUnit = 'MO
   const durationAnswer = duration ? `➡️ ${duration} bulan` : '➡️';
   const tenure = applicationFormValue(application, tenureHeader);
   const tenureAnswer = tenure ? `➡️ ${unit === 'HANDPHONE' ? Number(tenure) / 12 : tenure} tahun` : '➡️';
-  return `TOLONG ISI MAKLUMAT DI BAWAH :
-•••••••••••••••••••••••••••••••••••••
+  return `━━━━━━━━━━━━━━━━━━━━
+*BORANG MAKLUMAT PERMOHONAN*
+*JomKaki Rider*
+━━━━━━━━━━━━━━━━━━━━
 
-Nama pemohon:
+_Sila salin borang ini, isi selepas tanda ➡️ dan hantar semula dalam satu mesej._
+
+*A. MAKLUMAT PEMOHON*
+
+1. Nama pemohon:
 ${current('Applicant Name')}
-IC pemohon:
+2. IC pemohon:
 ${current('Applicant IC Number')}
-
-1. Alamat Rumah
+3. Alamat Rumah:
 ${current('Home Address')}
-
-2. Nombor tel pemohon
+4. Nombor tel pemohon:
 ${current('Phone Number')}
-
-3. Nama Syarikat/ Tempat Kerja
-${current('Employer Name')}
-
-4. Alamat tempat kerja
-${current('Employer Address')}
-
-5. Nombor tel tempat kerja
-${current('Employer Phone')}
-
-6. Berapa lama sudah berkhidmat
-${durationAnswer}
-
-7. Jawatan
-${current('Job Position')}
-
-8. Email
+5. Email:
 ${current('Email')}
 
-9. Nama & Tel rujukan 1 (mesti ahli keluarga terdekat contoh ibu bapa, adik beradik, suami isteri, anak)
+*B. MAKLUMAT PEKERJAAN*
+
+6. Nama Syarikat / Tempat Kerja:
+${current('Employer Name')}
+7. Alamat tempat kerja:
+${current('Employer Address')}
+8. Nombor tel tempat kerja:
+${current('Employer Phone')}
+9. Berapa lama sudah berkhidmat:
+${durationAnswer}
+10. Jawatan:
+${current('Job Position')}
+
+*C. RUJUKAN KELUARGA TERDEKAT*
+
+_Rujukan mestilah ibu bapa, adik-beradik, suami/isteri atau anak._
+
+11. Rujukan 1
 ➡️ Nama : ${applicationFormValue(application, 'Reference 1 Name')}
 ➡️ Hp : ${applicationFormValue(application, 'Reference 1 Phone')}
 ➡️ Hubungan : ${applicationFormValue(application, 'Reference 1 Relationship')}
 
-10. Nama & Tel rujukan 2 (mesti ahli keluarga terdekat contoh ibu bapa, adik beradik, suami isteri, anak)
+12. Rujukan 2
 ➡️ Nama : ${applicationFormValue(application, 'Reference 2 Name')}
 ➡️ Hp : ${applicationFormValue(application, 'Reference 2 Phone')}
 ➡️ Hubungan : ${applicationFormValue(application, 'Reference 2 Relationship')}
 
-11. ${productTitle}
+*D. PILIHAN ${unit === 'HANDPHONE' ? 'TELEFON' : 'MOTOSIKAL'}*
+
+13. ${productTitle}
 ➡️ Jenama: ${applicationFormValue(application, 'Product Brand')}
 ➡️ Model: ${applicationFormValue(application, 'Product Model')}
-➡️ Loan Berapa tahun: ${tenureAnswer.replace(/^➡️\s*/, '')}`;
+➡️ Loan berapa tahun: ${tenureAnswer.replace(/^➡️\s*/, '')}
+
+━━━━━━━━━━━━━━━━━━━━
+_Semak semua maklumat sebelum hantar._`;
 }
 
 const applicationFormLabel = line => {
-  const value = clean(line).replace(/^\d+\.\s*/, '').replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
+  const value = clean(line).replace(/^[*_]+|[*_]+$/g, '').replace(/^\d+\.\s*/, '').replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
   if (/^nama pemohon\b/i.test(value)) return { header: 'Applicant Name', inline: value.replace(/^nama pemohon\s*:?\s*/i, '') };
   if (/^ic pemohon\b/i.test(value)) return { header: 'Applicant IC Number', inline: value.replace(/^ic pemohon\s*:?\s*/i, '') };
   if (/^alamat rumah\b/i.test(value)) return { header: 'Home Address', inline: value.replace(/^alamat rumah\s*:?\s*/i, '') };
@@ -222,10 +232,11 @@ export function parseApplicationDetailsForm(text = '', businessUnit = 'MOTOR') {
   };
   for (const original of lines) {
     const line = clean(original);
-    if (!line || /^TOLONG ISI MAKLUMAT/i.test(line) || /^[•.]{8,}$/.test(line)) continue;
-    if (/^9\.\s*Nama\s*&\s*Tel rujukan 1\b/i.test(line)) { reference = 1; pendingHeader = ''; recognized += 1; continue; }
-    if (/^10\.\s*Nama\s*&\s*Tel rujukan 2\b/i.test(line)) { reference = 2; pendingHeader = ''; recognized += 1; continue; }
-    if (/^11\.\s*(?:Motosikal|Telefon)\b/i.test(line)) { reference = 0; pendingHeader = ''; recognized += 1; continue; }
+    if (!line || /^TOLONG ISI MAKLUMAT/i.test(line) || /^[•.━─-]{8,}$/.test(line) || /^\*?[A-D]\.\s+.*\*?$/i.test(line) || /^_.*_$/i.test(line) || /^\*?BORANG MAKLUMAT PERMOHONAN\*?$/i.test(line) || /^\*?JomKaki Rider\*?$/i.test(line)) continue;
+    const structuralLine = line.replace(/^[*_]+|[*_]+$/g, '').trim();
+    if (/^\d+\.\s*(?:Nama\s*&\s*Tel\s+)?rujukan 1\b/i.test(structuralLine)) { reference = 1; pendingHeader = ''; recognized += 1; continue; }
+    if (/^\d+\.\s*(?:Nama\s*&\s*Tel\s+)?rujukan 2\b/i.test(structuralLine)) { reference = 2; pendingHeader = ''; recognized += 1; continue; }
+    if (/^\d+\.\s*(?:Motosikal|Telefon)\b/i.test(structuralLine)) { reference = 0; pendingHeader = ''; recognized += 1; continue; }
     const stripped = line.replace(/^[➡➜→]\ufe0f?\s*/, '').trim();
     if (reference && /^(?:nama|hp|hubungan)\s*:/i.test(stripped)) {
       const part = stripped.match(/^(nama|hp|hubungan)\s*:\s*(.*)$/i);
@@ -252,7 +263,7 @@ export function parseApplicationDetailsForm(text = '', businessUnit = 'MOTOR') {
     if (!field.valid(raw[field.header], unit)) invalidFields.push(field.label);
     else changes[applicationDetailHeader(field, unit)] = field.normalize(raw[field.header], unit);
   }
-  return { changes, invalidFields, recognizedFields: recognized, isFormResponse: recognized >= 4 || (/TOLONG ISI MAKLUMAT/i.test(clean(text)) && recognized >= 1) };
+  return { changes, invalidFields, recognizedFields: recognized, isFormResponse: recognized >= 4 || (/(?:TOLONG ISI MAKLUMAT|BORANG MAKLUMAT PERMOHONAN)/i.test(clean(text)) && recognized >= 1) };
 }
 
 export function isApplicationDetailsFormResponse(text = '', businessUnit = 'MOTOR') {

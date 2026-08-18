@@ -21,10 +21,12 @@ test('S04 sends the complete WhatsApp information form after signed consent is v
   assert.equal(conversationStep.mapper.sheetId, 'Conversation_State');
   assert.equal(conversationStep.mapper.cell, 'E{{12.`__ROW_NUMBER__`}}');
   assert.match(conversationStep.mapper.value, /APPLICATION_FORM_PENDING/);
-  assert.match(reply.mapper.values['Message Text'], /TOLONG ISI MAKLUMAT DI BAWAH/);
+  assert.match(reply.mapper.values['Message Text'], /BORANG MAKLUMAT PERMOHONAN/);
   assert.match(reply.mapper.values['Message Text'], /Berapa lama sudah berkhidmat/);
-  assert.match(reply.mapper.values['Message Text'], /Nama & Tel rujukan 2/);
-  assert.match(reply.mapper.values['Message Text'], /Loan Berapa tahun/);
+  assert.match(reply.mapper.values['Message Text'], /C\. RUJUKAN KELUARGA TERDEKAT/);
+  assert.match(reply.mapper.values['Message Text'], /12\. Rujukan 2/);
+  assert.match(reply.mapper.values['Message Text'], /Loan berapa tahun/);
+  assert.match(reply.mapper.values['Message Text'], /Semak semua maklumat sebelum hantar/);
   assert.match(reply.mapper.values['Message Text'], /hantar semula dalam satu mesej/);
   assert.doesNotMatch(reply.mapper.values['Message Text'], /sila berikan nombor IC penuh anda/i);
   assert.doesNotMatch(reply.mapper.values['Message Text'], /persediaan LMS/);
