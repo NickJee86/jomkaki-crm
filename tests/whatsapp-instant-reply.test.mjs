@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildAiFallbackRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
+import { buildAiFallbackRequest, buildAutomaticApplication, buildDocumentProgressReply, buildImmediateAcknowledgement, buildInitialConversationState, buildInstantSalesDecision, buildMediaProxyUrl, extractCustomerName, guardConversationProgress, hasRecentDocumentAcknowledgement, inferDocumentTypeFromFileName, instantChannelCredentials, isDocumentStatusQuestion, isExpiredInboundMessage, isStaleInboundMessage, matchInstantProduct, releaseInboundMessage, requestAiFallbackReply, reserveInboundMessage, resolveCustomerLocation, sanitizeAiFallbackReply, shouldSendImmediateAcknowledgement } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
@@ -42,14 +42,14 @@ test('inbound message reservation blocks concurrent duplicate delivery and permi
 });
 
 test('instant acknowledgement follows the customer language without quoting prices', () => {
-  const chinese = buildImmediateAcknowledgement('è¯·é—® Y16ZR æœˆä¾›å¤šå°‘ï¼Ÿ', 'text');
+  const chinese = buildImmediateAcknowledgement('Ã¨Â¯Â·Ã©â€”Â® Y16ZR Ã¦Å“Ë†Ã¤Â¾â€ºÃ¥Â¤Å¡Ã¥Â°â€˜Ã¯Â¼Å¸', 'text');
   const malay = buildImmediateAcknowledgement('Hai, nak tanya ansuran motor', 'text');
   const english = buildImmediateAcknowledgement('How much is the monthly payment?', 'text');
-  assert.match(chinese, /å·²æ”¶åˆ°/);
+  assert.match(chinese, /Ã¥Â·Â²Ã¦â€Â¶Ã¥Ë†Â°/);
   assert.match(malay, /telah menerima/);
   assert.match(english, /received/);
   [chinese, malay, english].forEach(message => {
-    assert.doesNotMatch(message, /RM|selling price|cash price|å”®ä»·|ä»·é’±/i);
+    assert.doesNotMatch(message, /RM|selling price|cash price|Ã¥â€Â®Ã¤Â»Â·|Ã¤Â»Â·Ã©â€™Â±/i);
     assert.doesNotMatch(message, /\b(?:AI|bot|chatbot|automated)\b/i);
   });
   assert.equal(buildImmediateAcknowledgement('[document]', 'document'), '');
@@ -77,8 +77,11 @@ test('an older Meta delivery can be recorded but must never receive a reply', ()
   assert.equal(isStaleInboundMessage('2026-08-15T00:58:51.000Z', '2026-08-15T02:14:16.000Z'), true);
   assert.equal(isStaleInboundMessage('2026-08-15T02:14:16.000Z', '2026-08-15T02:14:16.000Z'), false);
   assert.equal(isStaleInboundMessage('2026-08-15T02:15:00.000Z', '2026-08-15T02:14:16.000Z'), false);
+  assert.equal(isExpiredInboundMessage('2026-08-17T01:50:27.000Z', Date.parse('2026-08-17T13:24:07.000Z')), true);
+  assert.equal(isExpiredInboundMessage('2026-08-17T13:20:00.000Z', Date.parse('2026-08-17T13:24:07.000Z')), false);
   assert.match(source, /IGNORED_STALE_OR_REDELIVERED/);
   assert.match(source, /if \(staleInbound\)[\s\S]*?continue;/);
+  assert.match(source, /WHATSAPP_MAX_INBOUND_AGE_MS/);
 });
 
 test('a rapid document batch receives one acknowledgement while every file stays queued', () => {
@@ -116,6 +119,27 @@ test('document follow-up questions receive a useful reply instead of silence', (
   assert.match(decision.text, /dokumen minimum ialah IC depan dan belakang/i);
   assert.match(decision.text, /tak perlu hantar semula/i);
   assert.match(decision.text, /CTOS\/CCRIS/i);
+});
+
+test('document-stage conversations can never restart at the name or location questions', () => {
+  const documents = [
+    { 'Message ID': 'm1', 'Document Type': 'IDENTITY_DOCUMENT', 'Verification Status': 'PENDING_AI' },
+    { 'Message ID': 'm2', 'Document Type': 'PAYSLIP', 'Verification Status': 'PENDING_AI' }
+  ];
+  const guarded = guardConversationProgress({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS' },
+    documents,
+    text: 'apa document perlu?',
+    decision: {
+      handled: true,
+      nextStep: 'STEP_01_NAME',
+      text: 'Untuk mula semakan loan kedai, boleh hantar dokumen di sini. Boleh saya tahu nama anda?'
+    }
+  });
+  assert.equal(guarded.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(guarded.conversationProgressGuarded, true);
+  assert.doesNotMatch(guarded.text, /nama anda|bandar atau negeri/i);
+  assert.match(guarded.text, /sudah terima 2 fail|sedang membuat semakan/i);
 });
 
 test('document progress lists only the missing requirement after verification', () => {
@@ -221,4 +245,360 @@ test('instant sales flow asks name, then location, then product', () => {
   assert.match(welcome.text, /nama/i);
   assert.match(welcome.text, /terima kasih|ansuran bulanan/i);
   assert.doesNotMatch(welcome.text, /age|\bAI\b/i);
-  assert.doesNotMatch(welcome.text, /[ã_u¶‰žËkºwµçA…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹ÁÉ½‘ÕÐ¹5½‘•°°€1ÄÌÔXàœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¥µ…•UÉ°°€¡ÑÑÁÌè¼½‘¸¹•á…µÁ±”¹Ñ•ÍÐ½±ŒÄÌÔµØà¹©Áœœ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½‘•Á½Í¥Ð¸©I4ÔÀÀ½¤¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I4ÈäÔ¼¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½¹‘„µ…¡ÔÍ…å„Í•µ…¬å…¹œµ…¹…ñdÄÕiH½¤¤ì)ô¤ì()Ñ•ÍÐ Ñ¡”Ý¡½±”…Ñ…±½Õ”…•ÁÑÌ¹…ÑÕÉ…°ÕÍÑ½µ•ÈÍ¡½ÉÑ¡…¹¥¹ÍÑ•…½˜½¹±äÍ•±•Ñ••á…µÁ±•Ìœ°€ ¤€ôøì(€½¹ÍÐ…Ñ…±½œ€ôl(€€€ì€…Ñ…±½œ%œè€5QHµe4µ9Y`œ°	É…¹è€e…µ…¡„œ°5½‘•°è€9Y`œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„¹ÙàÍ½½Ñ•Èœô°(€€€ì€…Ñ…±½œ%œè€5QHµ!=8µ]Yœ°	É…¹è€!½¹‘„œ°5½‘•°è€]…Ù”±Á¡„œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€¡½¹‘„Ý…Ù”…±Á¡„œô°(€€€ì€…Ñ…±½œ%œè€5QHµ!=8µILÄÔÁHœ°	É…¹è€!½¹‘„œ°5½‘•°è€ILÄÔÁHœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€¡½¹‘„ÉÌÄÔÀÉÌÄÔÁÈœô°(€€€ì€…Ñ…±½œ%œè€5QHµMe4µ!UM-dœ°	É…¹è€Me4œ°5½‘•°è€!ÕÍ­ä€ÈÀÀœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€Íå´¡ÕÍ­ä¡ÕÍ­äÈÀÀœô°(€€€ì€…Ñ…±½œ%œè€5QHµ5=µ5=œ°	É…¹è€5=œ°5½‘•°è€5½„œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€µ½‘„µ½„œô(€tì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¹…¬Ñ•¹½¬¹Ùàœ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€9Y`œ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ Ý…Ù”…‘„üœ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€]…Ù”±Á¡„œ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ÉÌÄÔÀ‰•É…Á„Í•‰Õ±…¸œ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€ILÄÔÁHœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¡ÕÍ­ä…‘„ÍÑ½¬­„œ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€!ÕÍ­ä€ÈÀÀœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ Í…å„µ¥¹…Ðµ½„œ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€5½„œ¤ì)ô¤ì()Ñ•ÍÐ …¸Õ¹ÁÉ¥•‰…Í”µ½‘•°™…±±Ì‰…¬Ñ¼¥ÑÌ…ÁÁÉ½Ù•ÁÉ¥•Ù…É¥…¹Ð¥¹ÍÑ•…½˜½¥¹œÍ¥±•¹Ðœ°€ ¤€ôøì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€ÕÍÑ½µ•È9…µ”œè€-…µ¥Ìœ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€-…µ¥Ìœ°I•¥½¸è€MQ}51eM%œ°MÑ…Ñ”è€M…É…Ý…¬œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€Ñ•áÐè€µ½Ñ½È¹µ…àœ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°É½ÕÑ•I•¥½¸è€]MQ}51eM%œ°(€€€µ½Ñ½É…Ñ…±½œèl(€€€€€ì€…Ñ…±½œ%œè€5QHµe4µ95`œ°	É…¹è€e…µ…¡„œ°5½‘•°è€95`œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„¹µ…à¸µ…àœô°(€€€€€ì€…Ñ…±½œ%œè€5QHµe4µ95aXÌœ°	É…¹è€e…µ…¡„œ°5½‘•°è€95`XÌœ°Ñ¥Ù”è€QIUœ°€%µ…”ÁÁÉ½Ù•œè€QIUœ°€%µ…”UI0œè€¡ÑÑÁÌè¼½‘¸¹•á…µÁ±”¹Ñ•ÍÐ½¹µ…àµØÌ¹©Áœœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„¹µ…àØÌœô(€€€t°(€€€µ½Ñ½ÉAÉ¥¥¹œèl(€€€€€ì€…Ñ…±½œ%œè€5QHµe4µ95aXÌœ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ìe•…ÉÌ€¡I4¤œè€œÔÈØœ°€5½¹Ñ¡±ä€Ðe•…ÉÌ€¡I4¤œè€œÐÈÔœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÌØÔœô(€€€t(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹ÁÉ½‘ÕÐ¹5½‘•°°€95`XÌœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¹•áÑMÑ•À°€MQA|ÀÑ}=U59QLœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¥µ…•UÉ°°€¡ÑÑÁÌè¼½‘¸¹•á…µÁ±”¹Ñ•ÍÐ½¹µ…àµØÌ¹©Áœœ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½95`XÌ¼¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I4ÌØÔ¼¤ì)ô¤ì()Ñ•ÍÐ „É•½¹¥Í•µ½‘•°Ý¥Ñ¡½ÕÐ…ÁÁÉ½Ù•É•¥½¹…°ÁÉ¥¥¹œ•ÑÌ„ÕÍ•™Õ°É•Á±ä¥¹ÍÑ•…½˜Í¥±•¹”œ°€ ¤€ôøì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€-…µ¥Ìœ°I•¥½¸è€MQ}51eM%œ°MÑ…Ñ”è€M…É…Ý…¬œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°Ñ•áÐè€¹…¬¹µ…àœ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°(€€€µ½Ñ½É…Ñ…±½œèmì€…Ñ…±½œ%œè€5QHµe4µ95`œ°	É…¹è€e…µ…¡„œ°5½‘•°è€95`œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„¹µ…àœõt°(€€€µ½Ñ½ÉAÉ¥¥¹œèmt(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¡…¹‘±•°ÑÉÕ”¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¹•áÑMÑ•À°€MQA|ÀÍ}AI=UPœ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½95`¼¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½Í•µ…¬‘•¹…¸…Ý…¹…¸½¤¤ì)ô¤ì()Ñ•ÍÐ …µ‰¥Õ½ÕÌÍ¡½ÉÑ¡…¹…Í­Ì½¹”¹…ÑÕÉ…°±…É¥™¥…Ñ¥½¸¥¹ÍÑ•…½˜Õ•ÍÍ¥¹œœ°€ ¤€ôøì(€½¹ÍÐ…Ñ…±½œ€ôl(€€€ì€…Ñ…±½œ%œè€5QHµe4µdÄÙiHœ°	É…¹è€e…µ…¡„œ°5½‘•°è€dÄÙiHœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„äÄØäÄÙéÈäÄØéÈœô°(€€€ì€…Ñ…±½œ%œè€5QHµe4µdÄÙ	Lœ°	É…¹è€e…µ…¡„œ°5½‘•°è€dÄØ	Lœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„äÄØ…‰Ìœô(€tì(€½¹ÍÐµ…Ñ €ôµ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ äÄØœ°…Ñ…±½œ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ ¹…µ‰¥Õ½ÕÌ°ÑÉÕ”¤ì(€…ÍÍ•ÉÐ¹‘••ÁÅÕ…°¡µ…Ñ ¹½ÁÑ¥½¹Ì°le…µ…¡„dÄØ	Lœ°€e…µ…¡„dÄÙiHt¤ì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€)¥´œ°I•¥½¸è€MQ}51eM%œô°Ñ•áÐè€äÄØœ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°µ½Ñ½É…Ñ…±½œè…Ñ…±½œ(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¹•áÑMÑ•À°€MQA|ÀÍ}AI=UPœ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½5…­ÍÕ…¹‘„e…µ…¡„dÄØ	L…Ñ…Ôe…µ…¡„dÄÙiH¼¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I5q¼¤ì)ô¤ì()Ñ•ÍÐ ‰É…¹µ½¹±äÅÕ•ÍÑ¥½¹Ì‘¼¹½Ð¥¹Ù•¹Ð…¸…É‰¥ÑÉ…Éäµ½‘•°Í¡½ÉÑ±¥ÍÐœ°€ ¤€ôøì(€½¹ÍÐ…Ñ…±½œ€ôl(€€€ì€…Ñ…±½œ%œè€5QHµe4µ=œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼Ù…¹Ñ¥èœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„•¼…Ù…¹Ñ¥èœô°(€€€ì€…Ñ…±½œ%œè€5QHµe4µ=œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼•…Èœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„•¼•…Èœô°(€€€ì€…Ñ…±½œ%œè€5QHµe4µdÄØœ°	É…¹è€e…µ…¡„œ°5½‘•°è€dÄÙiHœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„äÄØäÄÙéÈœô(€tì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¹…¬Ñ…¹å„µ½Ñ½Èå…µ…¡„œ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ°¹Õ±°¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¹…¬Ñ…¹å„µ½Ñ½Èå…µ…¡„œ°…Ñ…±½œ¤¹…µ‰¥Õ½ÕÌ°™…±Í”¤ì)ô¤ì()Ñ•ÍÐ Í¡½ÉÐ±…É¥™¥…Ñ¥½¸…¹ÍÝ•ÉÌ…É”½µ‰¥¹•Ý¥Ñ Ñ¡”ÁÉ•Ù¥½ÕÌÕÍÑ½µ•Èµ½‘•°Ý½É‘Ìœ°€ ¤€ôøì(€½¹ÍÐ…Ñ…±½œ€ôl(€€€ì€…Ñ…±½œ%œè€5QHµe4µ=œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼Ù…¹Ñ¥èœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„•¼…Ù…¹Ñ¥èœô°(€€€ì€…Ñ…±½œ%œè€5QHµe4µ=œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼•…Èœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„•¼•…Èœô°(€€€ì€…Ñ…±½œ%œè€5QHµe4µ= œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼•…È!å‰É¥œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€å…µ…¡„•¼•…È¡å‰É¥œô(€tì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœ°€1…ÍÐÕÍÑ½µ•È5•ÍÍ…”œè€•¼œô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€-…µ¥Ìœ°I•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€Ñ•áÐè€•…Èœ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°É½ÕÑ•I•¥½¸è€MQ}51eM%œ°(€€€µ½Ñ½É…Ñ…±½œè…Ñ…±½œ°(€€€µ½Ñ½ÉAÉ¥¥¹œèmì€…Ñ…±½œ%œè€5QHµe4µ=œ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÈÔÀœõt(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹ÁÉ½‘ÕÐ¹5½‘•°°€¼•…Èœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¹•áÑMÑ•À°€MQA|ÀÑ}=U59QLœ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½¼•…È¼¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½•…È!å‰É¥‘ñA¥±¥ Í…ÑÔ½¤¤ì)ô¤ì()Ñ•ÍÐ „Ñ•¹ÕÉ”™½±±½ÜµÕÀ…¹ÍÝ•ÉÌ½¹±äÑ¡”É•ÅÕ•ÍÑ•µ½¹Ñ¡±äÉ…Ñ”Ý¥Ñ¡½ÕÐÉ•Í•¹‘¥¹œÑ¡”ÁÉ½‘ÕÐ¥µ…”œ°€ ¤€ôøì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÑ}=U59QLœ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœ°€M•±•Ñ•AÉ½‘ÕÐ	É…¹œè€e…µ…¡„œ°€M•±•Ñ•AÉ½‘ÕÐ5½‘•°œè€¼•…Èœ°€1…ÍÐÕÍÑ½µ•È5•ÍÍ…”œè€•¼•…Èœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€-…µ¥Ìœ°I•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€Ñ•áÐè€‰•É…Á„‰Õ±…¹…¸­…±…Ô€ÌÑ…¡Õ¸œ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°É½ÕÑ•I•¥½¸è€MQ}51eM%œ°(€€€µ½Ñ½É…Ñ…±½œèmì€…Ñ…±½œ%œè€5QHµe4µ=œ°	É…¹è€e…µ…¡„œ°5½‘•°è€¼•…Èœ°Ñ¥Ù”è€QIUœ°€%µ…”ÁÁÉ½Ù•œè€QIUœ°€%µ…”UI0œè€¡ÑÑÁÌè¼½‘¸¹•á…µÁ±”¹Ñ•ÍÐ½•¼µ•…È¹©Áœœõt°(€€€µ½Ñ½ÉAÉ¥¥¹œèmì€…Ñ…±½œ%œè€5QHµe4µ=œ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ìe•…ÉÌ€¡I4¤œè€œÌÄÀœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÈÈÔœõt(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¹•áÑMÑ•À°€MQA|ÀÑ}=U59QLœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¥µ…•UÉ°°Õ¹‘•™¥¹•¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€¼ÌÑ…¡Õ¸¼¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I4ÌÄÀ¼¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I4ÈÈÕñ%‘•Á…¹ñÍ±¥À…©¤½¤¤ì)ô¤ì()Ñ•ÍÐ Á¡½¹”Í¡½ÉÑ¡…¹É½ÕÁÌ½±½ÕÈÉ½ÝÌ…¹¥‘•¹Ñ¥™¥•ÌÑ¡”É•ÅÕ•ÍÑ•µ½‘•°™…µ¥±äœ°€ ¤€ôøì(€½¹ÍÐ…Ñ…±½œ€ôl(€€€ì€…Ñ…±½œ%œè€!@´ÄÝA4´ÈÔØµ	1,œ°	É…¹è€ÁÁ±”œ°5½‘•°è€¥A¡½¹”€ÄÜAÉ¼5…àœ°Y…É¥…¹Ðè€œÈÔÙ	±…¬œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€…ÁÁ±”¥Á¡½¹”€ÄÜÁÉ¼µ…à€ÈÔÙˆ‰±…¬½™™¥¥…°œô°(€€€ì€…Ñ…±½œ%œè€!@´ÄÝA4´ÔÄÈµ	1Tœ°	É…¹è€ÁÁ±”œ°5½‘•°è€¥A¡½¹”€ÄÜAÉ¼5…àœ°Y…É¥…¹Ðè€œÔÄÉ	±Õ”œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€…ÁÁ±”¥Á¡½¹”€ÄÜÁÉ¼µ…à€ÔÄÉˆ‰±Õ”½™™¥¥…°œô°(€€€ì€…Ñ…±½œ%œè€!@´ÄÝ@´ÈÔØµ	1,œ°	É…¹è€ÁÁ±”œ°5½‘•°è€¥A¡½¹”€ÄÜAÉ¼œ°Y…É¥…¹Ðè€œÈÔÙ	±…¬œ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€…ÁÁ±”¥Á¡½¹”€ÄÜÁÉ¼€ÈÔÙˆ‰±…¬½™™¥¥…°œô(€tì(€½¹ÍÐµ…Ñ €ôµ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ œÄÝÁ´œ°…Ñ…±½œ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ ¹…µ‰¥Õ½ÕÌ°™…±Í”¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ ¹ÁÉ½‘ÕÐ¹5½‘•°°€¥A¡½¹”€ÄÜAÉ¼5…àœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¹…¬¥ÀÄÝÁ´œ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€¥A¡½¹”€ÄÜAÉ¼5…àœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡µ…Ñ¡%¹ÍÑ…¹ÑAÉ½‘ÕÐ ¥Á¡½¹”€ÄÜÁÉ½µà…‘„üœ°…Ñ…±½œ¤¹ÁÉ½‘ÕÐ¹5½‘•°°€¥A¡½¹”€ÄÜAÉ¼5…àœ¤ì)ô¤ì()Ñ•ÍÐ Á¡½¹”Í¡½ÉÑ¡…¹…¸½Ù•ÉÉ¥‘”„ÍÑ…±”µ½Ñ½È…Ñ•½ÉäÝ¥Ñ¡½ÕÐ…Í­¥¹œÑ¡”ÕÍÑ½µ•ÈÑ¼É•ÍÑ…ÉÐœ°€ ¤€ôøì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°I•¥½¸è€MQ}51eM%œô°Ñ•áÐè€¹…¬€ÄÝÁ´œ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°(€€€¡…¹‘Á¡½¹•…Ñ…±½œèmì€…Ñ…±½œ%œè€!@´ÄÝA4œ°	É…¹è€ÁÁ±”œ°5½‘•°è€¥A¡½¹”€ÄÜAÉ¼5…àœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€¥Á¡½¹”€ÄÜÁÉ¼µ…àœõt°(€€€¡…¹‘Á¡½¹•AÉ¥¥¹œèmì€…Ñ…±½œ%œè€!@´ÄÝA4œ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€ØÀ5½¹Ñ¡Ì€¡I4¤œè€œÄääœõt(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹ÁÉ½‘ÕÑU¹¥Ð°€!9A!=9œ¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½I4Äää¼¤ì)ô¤ì()Ñ•ÍÐ ¡…¹‘Á¡½¹”ÅÕ½Ñ•ÌÉ•µ…¥¸µ½¹Ñ¡±äµ½¹±ä•Ù•¸Ý¡•¸Í½ÕÉ”É½ÝÌ½¹Ñ…¥¸‘•Á½Í¥Ð…¹Í•±±¥¹œÁÉ¥”œ°€ ¤€ôøì(€½¹ÍÐ‰…Í”€ôì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÍ}AI=UPœ°€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°€AÉ½‘ÕÐ…Ñ•½Éäœè€!9A!=9œô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°I•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€!9A!=9œ°É½ÕÑ•I•¥½¸è€MQ}51eM%œ°(€€€¡…¹‘Á¡½¹•…Ñ…±½œèmì€…Ñ…±½œ%œè€!@´ÄÝA4œ°	É…¹è€ÁÁ±”œ°5½‘•°è€¥A¡½¹”€ÄÜAÉ¼5…àœ°Ñ¥Ù”è€QIUœ°€M•…É -•åÝ½É‘Ìœè€¥Á¡½¹”€ÄÜÁÉ¼µ…àœõt°(€€€¡…¹‘Á¡½¹•AÉ¥¥¹œèmì€…Ñ…±½œ%œè€!@´ÄÝA4œ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€ØÀ5½¹Ñ¡Ì€¡I4¤œè€œÄääœ°€•Á½Í¥Ð€¡I4¤œè€œàààœ°€M•±±¥¹œAÉ¥”€¡I4¤œè€œÔäääœõt(€ôì(€½¹ÍÐÅÕ½Ñ”€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì€¸¸¹‰…Í”°Ñ•áÐè€¹…¬¥Á¡½¹”€ÄÜÁÉ¼µ…àœô¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡ÅÕ½Ñ”¹Ñ•áÐ°€½I4Äää¼¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡ÅÕ½Ñ”¹Ñ•áÐ°€½‘•Á½Í¥ÑñI4ààáðÔääåñ¡…É„©Õ…±…¹ñÍ•±±¥¹œÁÉ¥”½¤¤ì((€½¹ÍÐ‘•Á½Í¥ÑEÕ•ÍÑ¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€€¸¸¹‰…Í”°(€€€ÍÑ…Ñ”èì€¸¸¹‰…Í”¹ÍÑ…Ñ”°€M•±•Ñ•AÉ½‘ÕÐ	É…¹œè€ÁÁ±”œ°€M•±•Ñ•AÉ½‘ÕÐ5½‘•°œè€¥A¡½¹”€ÄÜAÉ¼5…àœô°(€€€Ñ•áÐè€‘•Á½Í¥Ð‰•É…Á„üœ(€ô¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•Á½Í¥ÑEÕ•ÍÑ¥½¸¹Ñ•áÐ°€½¡…¹å„¸©…¹ÍÕÉ…¸‰Õ±…¹…¸½¤¤ì(€…ÍÍ•ÉÐ¹‘½•Í9½Ñ5…Ñ ¡‘•Á½Í¥ÑEÕ•ÍÑ¥½¸¹Ñ•áÐ°€½I4ààáðÔäää½¤¤ì)ô¤ì()Ñ•ÍÐ Á½ÍÐµÅÕ½Ñ”Í…±•ÌÅÕ•ÍÑ¥½¹ÌÉ••¥Ù”…¸¥µµ•‘¥…Ñ”¹…ÑÕÉ…°5…±…ä…¹ÍÝ•È¥¹ÍÑ•…½˜Í¥±•¹”œ°€ ¤€ôøì(€½¹ÍÐ‰…Í”€ôì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÑ}=U59QLœ°€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°I•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°É½ÕÑ•I•¥½¸è€MQ}51eM%œ(€ôì(€½¹ÍÐ‘½Õµ•¹ÑÌ€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì€¸¸¹‰…Í”°Ñ•áÐè€‘½­Õµ•¸…Á„Á•É±ÔÕ¹ÑÕ¬…ÁÁ±äüœô¤ì(€½¹ÍÐ‰Õ‘•Ð€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì€¸¸¹‰…Í”°Ñ•áÐè€µ…¡…°±… °…‘„µÕÉ… Í¥­¥Ðüœô¤ì(€½¹ÍÐÕ¹­¹½Ý¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì€¸¸¹‰…Í”°Ñ•áÐè€‰½±• •áÁ±…¥¸±…¤üœô¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘½Õµ•¹ÑÌ¹Ñ•áÐ°€½%‘•Á…¸‘…¸‰•±…­…¹œ¼¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‰Õ‘•Ð¹Ñ•áÐ°€½	…©•Ð‰Õ±…¹…¸¼¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡Õ¹­¹½Ý¸¹Ñ•áÐ°€½µ½‘•°°…¹ÍÕÉ…¸‰Õ±…¹…¸°‘½­Õµ•¸¼¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡Õ¹­¹½Ý¸¹…¥…±±‰…¬°ÑÉÕ”¤ì(€m‘½Õµ•¹ÑÌ°‰Õ‘•Ð°Õ¹­¹½Ý¹t¹™½É… ¡É•ÍÕ±Ð€ôø…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÍÕ±Ð¹¡…¹‘±•°ÑÉÕ”¤¤ì)ô¤ì()Ñ•ÍÐ ­¹½Ý±•‘”$™…±±‰…¬É•ÅÕ•ÍÐ¥ÌÁÉ¥Ù…äµÁÉ•Í•ÉÙ¥¹œ°™…ÍÐ…¹…¹¹½Ð•áÁ½Í”…¸Õ¹ÍÕÁÁ½ÉÑ•…µ½Õ¹Ðœ°…Íå¹Œ€ ¤€ôøì(€½¹ÍÐÉ•ÅÕ•ÍÐ€ô‰Õ¥±‘¥…±±‰…­I•ÅÕ•ÍÐ¡ì(€€€Ñ•áÐè€‰½±• •áÁ±…¥¸±…¤üœ°(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÑ}=U59QLœ°€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°€M•±•Ñ•AÉ½‘ÕÐ5½‘•°œè€dÄÙiHœô°(€€€±•…èìI•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°(€€€Á¡½¹”è€œØÀÄÈÌÐÔØÜàäœ(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹µ½‘•°°€ÁÐ´Ð¸Äµµ¥¹¤œ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹É•…Í½¹¥¹œ°Õ¹‘•™¥¹•¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹ÍÑ½É”°™…±Í”¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹Í…™•Ñå}¥‘•¹Ñ¥™¥•È¹±•¹Ñ °€ØÐ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹¥¹ÁÕÐ¹¥¹±Õ‘•Ì œØÀÄÈÌÐÔØÜàäœ¤°™…±Í”¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•ÅÕ•ÍÐ¹µ…á}½ÕÑÁÕÑ}Ñ½­•¹Ì°€ÄàÀ¤ì((€½¹ÍÐ™•Ñ¡%µÁ°€ô…Íå¹Œ€¡}ÕÉ°°½ÁÑ¥½¹Ì¤€ôøì(€€€½¹ÍÐ‰½‘ä€ô)M=8¹Á…ÉÍ”¡½ÁÑ¥½¹Ì¹‰½‘ä¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡‰½‘ä¹µ½‘•°°€ÁÐ´Ð¸Äµµ¥¹¤œ¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡‰½‘ä¹É•…Í½¹¥¹œ°Õ¹‘•™¥¹•¤ì(€€€…ÍÍ•ÉÐ¹•ÅÕ…°¡‰½‘ä¹ÍÑ½É”°™…±Í”¤ì(€€€É•ÑÕÉ¸ì½¬èÑÉÕ”°©Í½¸è…Íå¹Œ€ ¤€ôø€¡ì½ÕÑÁÕÐèmì½¹Ñ•¹ÐèmìÑ•áÐè€	½±• °‰…¡…¥…¸µ…¹„å…¹œ…¹‘„µ…¡ÔÍ…å„Ñ•É…¹­…¸‘•¹…¸±•‰¥ ©•±…ÌüƒÂ~b(M½…±…¸­•‘Õ„üœõtõtô¤ôì(€ôì(€½¹ÍÐÉ•Á±ä€ô…Ý…¥ÐÉ•ÅÕ•ÍÑ¥…±±‰…­I•Á±ä¡ì(€€€Ñ•áÐè€‰½±• •áÁ±…¥¸±…¤üœ°(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÑ}=U59QLœô°(€€€Á¡½¹”è€œØÀÄÈÌÐÔØÜàäœ°(€€€•¹Øèì=A9%}A%}-dè€Í¬µÑ•ÍÐœ°=A9%}5=0è€ÁÐ´Ð¸Äµµ¥¹¤œô°(€€€™•Ñ¡%µÁ°(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡É•Á±ä¹¥¹±Õ‘•Ì ŸÂ~b(œ¤°™…±Í”¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…° ¡É•Á±ä¹µ…Ñ  ½pü½œ¤ñðmt¤¹±•¹Ñ °€Ä¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡Í…¹¥Ñ¥é•¥…±±‰…­I•Á±ä !…É„¥…±… I4äää¸	•É…Á„‰…©•Ð…¹‘„üœ°€5Lœ¤°€œœ¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡Í…¹¥Ñ¥é•¥…±±‰…­I•Á±ä M…å„…‘…±… $å…¹œµ•µ‰…¹ÑÔ…¹‘„¸œ°€5Lœ¤°€œœ¤ì)ô¤ì()Ñ•ÍÐ ½Ñ¡•Èµµ½‘•°É•ÅÕ•ÍÐÍÕ•ÍÑÌ„Íµ…±°…ÁÁÉ½Ù•É•¥½¹…°±¥ÍÐ…¹…Í­Ì½¹”ÅÕ•ÍÑ¥½¸œ°€ ¤€ôøì(€½¹ÍÐ‘•¥Í¥½¸€ô‰Õ¥±‘%¹ÍÑ…¹ÑM…±•Í•¥Í¥½¸¡ì(€€€ÍÑ…Ñ”èì€ÕÉÉ•¹ÐMÑ•Àœè€MQA|ÀÑ}=U59QLœ°€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°€AÉ½‘ÕÐ…Ñ•½Éäœè€5=Q=Hœô°(€€€±•…èì€ÕÍÑ½µ•È9…µ”œè€µ¥¸œ°I•¥½¸è€MQ}51eM%œ°€¥Ñä½ÈÉ•„œè€	¥¹ÑÕ±Ôœô°(€€€Ñ•áÐè€…‘„µ½Ñ½È…Á„µ½‘•°±…¥¸üœ°µ•ÍÍ…•QåÁ”è€Ñ•áÐœ°É½ÕÑ•	ÕÍ¥¹•ÍÍU¹¥Ðè€5=Q=Hœ°É½ÕÑ•I•¥½¸è€MQ}51eM%œ°(€€€µ½Ñ½É…Ñ…±½œèl(€€€€€ì€…Ñ…±½œ%œè€4Äœ°	É…¹è€e…µ…¡„œ°5½‘•°è€95`œ°Ñ¥Ù”è€QIUœô°(€€€€€ì€…Ñ…±½œ%œè€4Èœ°	É…¹è€e…µ…¡„œ°5½‘•°è€dÄÙiHœ°Ñ¥Ù”è€QIUœô°(€€€€€ì€…Ñ…±½œ%œè€4Ìœ°	É…¹è€!½¹‘„œ°5½‘•°è€ILÄÔÁHœ°Ñ¥Ù”è€QIUœô(€€€t°(€€€µ½Ñ½ÉAÉ¥¥¹œèl(€€€€€ì€…Ñ…±½œ%œè€4Äœ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÌØÔœô°(€€€€€ì€…Ñ…±½œ%œè€4Èœ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÌÈÜœô°(€€€€€ì€…Ñ…±½œ%œè€4Ìœ°€AÉ¥”i½¹”œè€MQ}51eM%œ°Ñ¥Ù”è€QIUœ°€EÕ½Ñ”ÁÁÉ½Ù…°MÑ…ÑÕÌœè€AAI=Yœ°€5½¹Ñ¡±ä€Ôe•…ÉÌ€¡I4¤œè€œÈääœô(€€€t(€ô¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…°¡‘•¥Í¥½¸¹¡…¹‘±•°ÑÉÕ”¤ì(€…ÍÍ•ÉÐ¹µ…Ñ ¡‘•¥Í¥½¸¹Ñ•áÐ°€½e…µ…¡„95`¼¤ì(€…ÍÍ•ÉÐ¹•ÅÕ…° ¡‘•¥Í¥½¸¹Ñ•áÐ¹µ…Ñ  ½pü½œ¤ñðmt¤¹±•¹Ñ °€Ä¤ì)ô¤ì(
+  assert.doesNotMatch(welcome.text, /[Ã°Å¸â€˜ÂÃ°Å¸ËœÅ Ã°Å¸â„¢â€šÃ°Å¸Â¤â€“]/u);
+
+  const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Nick', messageType: 'text' });
+  assert.equal(name.customerName, 'Nick');
+  assert.equal(name.nextStep, 'STEP_02_LOCATION');
+  assert.match(name.text, /bandar|negeri/i);
+
+  const location = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION' }, text: 'Kuala Lumpur', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'WEST_MALAYSIA', 'Branch ID': 'BR-WM-PJ', 'Team ID': 'TEAM-WEST', 'Branch Name': 'Petaling Jaya', City: 'Petaling Jaya', 'Direct Coverage Areas': 'Kuala Lumpur|KL|Selangor' }]
+  });
+  assert.equal(location.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(location.location.branchId, 'BR-WM-PJ');
+  assert.match(location.text, /motor atau telefon/i);
+});
+
+test('a shop-loan question is answered before requesting missing profile details', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_WELCOME', 'Product Category': 'MOTOR' },
+    lead: {},
+    text: 'kalau sy mahu beli motor under kedai dpt tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    motorCatalog: [
+      { 'Catalog ID': 'MTR-SYM-HUSKY200', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky 200 scooter east malaysia sabah sarawak' },
+      { 'Catalog ID': 'MTR-MODA-MOCA110', Brand: 'MODA', Model: 'Moca 110', Active: 'TRUE', 'Search Keywords': 'moda moca 110 scooter east malaysia sabah sarawak' }
+    ]
+  });
+  assert.equal(decision.shopLoanIntent, true);
+  assert.equal(decision.nextStep, 'STEP_01_NAME');
+  assert.match(decision.text, /loan kedai/i);
+  assert.match(decision.text, /nama anda/i);
+  assert.doesNotMatch(decision.text, /Husky|Moca|pilih satu/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a customer location can never be mistaken for catalog search keywords', () => {
+  const motorCatalog = [
+    { 'Catalog ID': 'MTR-SYM-HUSKY200', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky 200 husky200 scooter skuter east malaysia sabah sarawak' },
+    { 'Catalog ID': 'MTR-MODA-MOCA110', Brand: 'MODA', Model: 'Moca 110', Active: 'TRUE', 'Search Keywords': 'moda moca moca 110 moca110 scooter skuter east malaysia sabah sarawak' }
+  ];
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).product, null);
+  assert.equal(matchInstantProduct('kuching sarawak', motorCatalog).ambiguous, false);
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'nick', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'nick' },
+    text: 'kuching sarawak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', 'Branch ID': 'BR-SWK-KCH', 'Team ID': 'TEAM-MOTOR-EAST-STK', 'Branch Name': 'Kuching', City: 'Kuching', 'Direct Coverage Areas': 'Kuching|Sarawak' }],
+    motorCatalog
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.location.branchId, 'BR-SWK-KCH');
+  assert.match(decision.text, /model|motor atau telefon/i);
+  assert.doesNotMatch(decision.text, /Husky|Moca|pilih satu/i);
+});
+
+test('short or ambiguous customer messages default to Bahasa Melayu', () => {
+  const greeting = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
+  const name = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_NAME' }, text: 'Jim', messageType: 'text' });
+  assert.match(greeting.texâ€¦975 tokens truncatedâ€¦ Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'deposit berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299', 'Deposit (RM)': '1500', 'Selling Price (RM)': '13000' }]
+  });
+  assert.equal(decision.productIntent, true);
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /deposit.*RM1500/i);
+  assert.doesNotMatch(decision.text, /RM299|13000|harga jualan/i);
+});
+
+test('a missing motor deposit is never guessed', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'depo berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.match(decision.text, /belum ada dalam sistem|semak dengan cawangan/i);
+  assert.doesNotMatch(decision.text, /RM\d/i);
+});
+
+test('known customer model reply survives a stale Make conversation step', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME', 'Customer Name': 'Jim', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'Yamaha Y16ZR', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y16zr.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '420', 'Monthly 4 Years (RM)': '350', 'Monthly 5 Years (RM)': '299' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /RM299/);
+  assert.match(decision.text, /ansuran|dokumen|IC/i);
+});
+
+test('customer model shorthand, spacing and small typo are recognised', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr y16 zr' },
+    { 'Catalog ID': 'MTR-HON-RSXW', Brand: 'Honda', Model: 'RS-X Winner', Active: 'TRUE', 'Search Keywords': 'honda rsx rs-x rs x winner' }
+  ];
+  assert.equal(matchInstantProduct('y16zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y 16 zr', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('saya cari y16z', catalog).product.Model, 'Y16ZR');
+  assert.equal(matchInstantProduct('rsx', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak rs x', catalog).product.Model, 'RS-X Winner');
+  assert.equal(matchInstantProduct('nak ansuran murah', catalog).product, null);
+});
+
+test('a customer can switch from Y15ZR to LC V8 using normal local shorthand', () => {
+  const motorCatalog = [{
+    'Catalog ID': 'MTR-YAM-LC135V8', Brand: 'Yamaha', Model: 'LC135 V8', Active: 'TRUE',
+    'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/lc135-v8.jpg',
+    'Search Keywords': 'yamaha lc135 v8 lc v8 lcv8 lc8 135lc'
+  }];
+  assert.equal(matchInstantProduct('Saya mau lc v8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('nak lcv8', motorCatalog).product.Model, 'LC135 V8');
+  assert.equal(matchInstantProduct('lc8 ada?', motorCatalog).product.Model, 'LC135 V8');
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Ali', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
+    lead: { 'Customer Name': 'Ali', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'Saya mau lc v8', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog,
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-LC135V8', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Deposit (RM)': 'RM 500', 'Monthly 3 Years (RM)': 'RM 425', 'Monthly 4 Years (RM)': 'RM 344', 'Monthly 5 Years (RM)': 'RM 295' }]
+  });
+  assert.equal(decision.product.Model, 'LC135 V8');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/lc135-v8.jpg');
+  assert.match(decision.text, /deposit.*RM500/i);
+  assert.match(decision.text, /RM295/);
+  assert.doesNotMatch(decision.text, /Anda mahu saya semak yang mana|Y15ZR/i);
+});
+
+test('the whole catalogue accepts natural customer shorthand instead of only selected examples', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-NVX', Brand: 'Yamaha', Model: 'NVX', Active: 'TRUE', 'Search Keywords': 'yamaha nvx scooter' },
+    { 'Catalog ID': 'MTR-HON-WAVE', Brand: 'Honda', Model: 'Wave Alpha', Active: 'TRUE', 'Search Keywords': 'honda wave alpha' },
+    { 'Catalog ID': 'MTR-HON-RS150R', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Search Keywords': 'honda rs150 rs150r' },
+    { 'Catalog ID': 'MTR-SYM-HUSKY', Brand: 'SYM', Model: 'Husky 200', Active: 'TRUE', 'Search Keywords': 'sym husky husky200' },
+    { 'Catalog ID': 'MTR-MODA-MOCA', Brand: 'MODA', Model: 'Moca', Active: 'TRUE', 'Search Keywords': 'moda moca' }
+  ];
+  assert.equal(matchInstantProduct('nak tengok nvx', catalog).product.Model, 'NVX');
+  assert.equal(matchInstantProduct('wave ada?', catalog).product.Model, 'Wave Alpha');
+  assert.equal(matchInstantProduct('rs150 berapa sebulan', catalog).product.Model, 'RS150R');
+  assert.equal(matchInstantProduct('husky ada stock ka', catalog).product.Model, 'Husky 200');
+  assert.equal(matchInstantProduct('saya minat moca', catalog).product.Model, 'Moca');
+});
+
+test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' },
+    text: 'motor nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax n max' },
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', Brand: 'Yamaha', Model: 'NMAX V3', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax-v3.jpg', 'Search Keywords': 'yamaha nmax v3' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'MTR-YAM-NMAXV3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '526', 'Monthly 4 Years (RM)': '425', 'Monthly 5 Years (RM)': '365' }
+    ]
+  });
+  assert.equal(decision.product.Model, 'NMAX V3');
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax-v3.jpg');
+  assert.match(decision.text, /NMAX V3/);
+  assert.match(decision.text, /RM365/);
+});
+
+test('a recognised model without approved regional pricing gets a useful reply instead of silence', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax' }],
+    motorPricing: []
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.match(decision.text, /NMAX/);
+  assert.match(decision.text, /semak dengan cawangan/i);
+});
+
+test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr y16 zr' },
+    { 'Catalog ID': 'MTR-YAM-Y16ABS', Brand: 'Yamaha', Model: 'Y16 ABS', Active: 'TRUE', 'Search Keywords': 'yamaha y16 abs' }
+  ];
+  const match = matchInstantProduct('y16', catalog);
+  assert.equal(match.ambiguous, true);
+  assert.deepEqual(match.options, ['Yamaha Y16 ABS', 'Yamaha Y16ZR']);
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Jim', Region: 'EAST_MALAYSIA' }, text: 'y16', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.match(decision.text, /Maksud anda Yamaha Y16 ABS atau Yamaha Y16ZR/);
+  assert.doesNotMatch(decision.text, /RM\d/);
+});
+
+test('brand-only questions do not invent an arbitrary model shortlist', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-EGOA', Brand: 'Yamaha', Model: 'Ego Avantiz', Active: 'TRUE', 'Search Keywords': 'yamaha ego avantiz' },
+    { 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear' },
+    { 'Catalog ID': 'MTR-YAM-Y16', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE', 'Search Keywords': 'yamaha y16 y16zr' }
+  ];
+  assert.equal(matchInstantProduct('nak tanya motor yamaha', catalog).product, null);
+  assert.equal(matchInstantProduct('nak tanya motor yamaha', catalog).ambiguous, false);
+});
+
+test('short clarification answers are combined with the previous customer model words', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-EGOA', Brand: 'Yamaha', Model: 'Ego Avantiz', Active: 'TRUE', 'Search Keywords': 'yamaha ego avantiz' },
+    { 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear' },
+    { 'Catalog ID': 'MTR-YAM-EGOGH', Brand: 'Yamaha', Model: 'Ego Gear Hybrid', Active: 'TRUE', 'Search Keywords': 'yamaha ego gear hybrid' }
+  ];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Last Customer Message': 'ego' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'gear', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: catalog,
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-EGOG', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '250' }]
+  });
+  assert.equal(decision.product.Model, 'Ego Gear');
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.match(decision.text, /Ego Gear/);
+  assert.doesNotMatch(decision.text, /Gear Hybrid|Pilih satu/i);
+});
+
+test('a tenure follow-up answers only the requested monthly rate without resending the product image', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Ego Gear', 'Last Customer Message': 'ego gear' },
+    lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'berapa bulanan kalau 3 tahun', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/ego-gear.jpg' }],
+    motorPricing: [{ 'Catalog ID': 'MTR-YAM-EGOG', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '310', 'Monthly 5 Years (RM)': '225' }]
+  });
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /3 tahun/);
+  assert.match(decision.text, /RM310/);
+  assert.doesNotMatch(decision.text, /RM225|IC depan|slip gaji/i);
+});
+
+test('phone shorthand groups colour rows and identifies the requested model family', () => {
+  const catalog = [
+    { 'Catalog ID': 'HP-17PM-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 256gb black official' },
+    { 'Catalog ID': 'HP-17PM-512-BLU', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '512GB Blue', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro max 512gb blue official' },
+    { 'Catalog ID': 'HP-17P-256-BLK', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB Black', Active: 'TRUE', 'Search Keywords': 'apple iphone 17 pro 256gb black official' }
+  ];
+  const match = matchInstantProduct('17pm', catalog);
+  assert.equal(match.ambiguous, false);
+  assert.equal(match.product.Model, 'iPhone 17 Pro Max');
+  assert.equal(matchInstantProduct('nak ip17pm', catalog).product.Model, 'iPhone 17 Pro Max');
+  assert.equal(matchInstantProduct('iphone 17 promx ada?', catalog).product.Model, 'iPhone 17 Pro Max');
+});
+
+test('phone shorthand can override a stale motor category without asking the customer to restart', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA' }, text: 'nak 17pm', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    handphoneCatalog: [{ 'Catalog ID': 'HP-17PM', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Active: 'TRUE', 'Search Keywords': 'iphone 17 pro max' }],
+    handphonePricing: [{ 'Catalog ID': 'HP-17PM', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 60 Months (RM)': '199' }]
+  });
+  assert.equal(decision.productUnit, 'HANDPHONE');
+  assert.match(decision.text, /RM199/);
+});
+
+test('handphone quotes remain monthly-only even when source rows contain deposit and selling price', () => {
+  const base = {
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'HANDPHONE' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, messageType: 'text', routeBusinessUnit: 'HANDPHONE', routeRegion: 'EAST_MALAYSIA',
+    handphoneCatalog: [{ 'Catalog ID': 'HP-17PM', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Active: 'TRUE', 'Search Keywords': 'iphone 17 pro max' }],
+    handphonePricing: [{ 'Catalog ID': 'HP-17PM', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 60 Months (RM)': '199', 'Deposit (RM)': '888', 'Selling Price (RM)': '5999' }]
+  };
+  const quote = buildInstantSalesDecision({ ...base, text: 'nak iphone 17 pro max' });
+  assert.match(quote.text, /RM199/);
+  assert.doesNotMatch(quote.text, /deposit|RM888|5999|harga jualan|selling price/i);
+
+  const depositQuestion = buildInstantSalesDecision({
+    ...base,
+    state: { ...base.state, 'Selected Product Brand': 'Apple', 'Selected Product Model': 'iPhone 17 Pro Max' },
+    text: 'deposit berapa?'
+  });
+  assert.match(depositQuestion.text, /hanya.*ansuran bulanan/i);
+  assert.doesNotMatch(depositQuestion.text, /RM888|5999/i);
+});
+
+test('post-quote sales questions receive an immediate natural Malay answer instead of silence', () => {
+  const base = {
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA'
+  };
+  const documents = buildInstantSalesDecision({ ...base, text: 'dokumen apa perlu untuk apply?' });
+  const budget = buildInstantSalesDecision({ ...base, text: 'mahal lah, ada murah sikit?' });
+  const unknown = buildInstantSalesDecision({ ...base, text: 'boleh explain lagi?' });
+  assert.match(documents.text, /IC depan dan belakang/);
+  assert.match(budget.text, /Bajet bulanan/);
+  assert.match(unknown.text, /model, ansuran bulanan, dokumen/);
+  assert.equal(unknown.aiFallback, true);
+  [documents, budget, unknown].forEach(result => assert.equal(result.handled, true));
+});
+
+test('knowledge AI fallback request is privacy-preserving, fast and cannot expose an unsupported amount', async () => {
+  const request = buildAiFallbackRequest({
+    text: 'boleh explain lagi?',
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Selected Product Model': 'Y16ZR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    routeBusinessUnit: 'MOTOR',
+    phone: '60123456789'
+  });
+  assert.equal(request.model, 'gpt-4.1-mini');
+  assert.equal(request.reasoning, undefined);
+  assert.equal(request.store, false);
+  assert.equal(request.safety_identifier.length, 64);
+  assert.equal(request.input.includes('60123456789'), false);
+  assert.equal(request.max_output_tokens, 180);
+
+  const fetchImpl = async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.model, 'gpt-4.1-mini');
+    assert.equal(body.reasoning, undefined);
+    assert.equal(body.store, false);
+    return { ok: true, json: async () => ({ output: [{ content: [{ text: 'Boleh, bahagian mana yang anda mahu saya terangkan dengan lebih jelas? Ã°Å¸ËœÅ  Soalan kedua?' }] }] }) };
+  };
+  const reply = await requestAiFallbackReply({
+    text: 'boleh explain lagi?',
+    state: { 'Current Step': 'STEP_04_DOCUMENTS' },
+    phone: '60123456789',
+    env: { OPENAI_API_KEY: 'sk-test', OPENAI_MODEL: 'gpt-4.1-mini' },
+    fetchImpl
+  });
+  assert.equal(reply.includes('Ã°Å¸ËœÅ '), false);
+  assert.equal((reply.match(/\?/g) || []).length, 1);
+  assert.equal(sanitizeAiFallbackReply('Harga ialah RM999. Berapa bajet anda?', 'MS'), '');
+  assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
+});
+
+test('other-model request suggests a small approved regional list and asks one question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'ada motor apa model lain?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+    ]
+  });
+  assert.equal(decision.handled, true);
+  assert.match(decision.text, /Yamaha NMAX/);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
