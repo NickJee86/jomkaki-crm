@@ -1,209 +1,706 @@
 {
-    "name":  "S06 - Application Details Collection and Automated Consent",
-    "flow":  [
-                 {
-                     "id":  2,
-                     "module":  "google-sheets:watchRows",
-                     "version":  2,
-                     "parameters":  {
-                                        "from":  "drive",
-                                        "mode":  "select",
-                                        "limit":  1,
-                                        "sheetId":  "Customer_Inbox",
-                                        "__IMTCONN__":  7930616,
-                                        "spreadsheetId":  "/10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
-                                        "tableFirstRow":  "A1:N1",
-                                        "includesHeaders":  true,
-                                        "valueRenderOption":  "FORMATTED_VALUE",
-                                        "dateTimeRenderOption":  "FORMATTED_STRING"
-                                    },
-                     "mapper":  {
-
-                                },
-                     "metadata":  {
-                                      "designer":  {
-                                                       "x":  0,
-                                                       "y":  0,
-                                                       "name":  "Trigger ‚Äî Watch Application Detail Replies"
-                                                   },
-                                      "interface":  [
-                                                        {
-                                                            "name":  "__ROW_NUMBER__",
-                                                            "type":  "number",
-                                                            "label":  "Row number"
-                                                        },
-                                                        {
-                                                            "name":  "0",
-                                                            "type":  "text",
-                                                            "label":  "Received At"
-                                                        },
-                                                        {
-                                                            "name":  "1",
-                                                            "type":  "text",
-                                                            "label":  "Phone Number"
-                                                        },
-                                                        {
-                                                            "name":  "2",
-                                                            "type":  "text",
-                                                            "label":  "Customer Message"
-                                                        },
-                                                        {
-                                                            "name":  "3",
-                                                            "type":  "text",
-                                                            "label":  "Attachment URL"
-                                                        },
-                                                        {
-                                                            "name":  "4",
-                                                            "type":  "text",
-                                                            "label":  "Attachment Type"
-                                                        },
-                                                        {
-                                                            "name":  "5",
-                                                            "type":  "text",
-                                                            "label":  "Message ID"
-                                                        },
-                                                        {
-                                                            "name":  "6",
-                                                            "type":  "text",
-                                                            "label":  "Channel"
-                                                        },
-                                                        {
-                                                            "name":  "7",
-                                                            "type":  "text",
-                                                            "label":  "Source"
-                                                        },
-                                                        {
-                                                            "name":  "8",
-                                                            "type":  "text",
-                                                            "label":  "Lead ID"
-                                                        },
-                                                        {
-                                                            "name":  "9",
-                                                            "type":  "text",
-                                                            "label":  "Application ID"
-                                                        },
-                                                        {
-                                                            "name":  "10",
-                                                            "type":  "text",
-                                                            "label":  "Message Type"
-                                                        },
-                                                        {
-                                                            "name":  "11",
-                                                            "type":  "text",
-                                                            "label":  "Process Status"
-                                                        },
-                                                        {
-                                                            "name":  "12",
-                                                            "type":  "text",
-                                                            "label":  "AI Processed"
-                                                        },
-                                                        {
-                                                            "name":  "13",
-                                                            "type":  "text",
-                                                            "label":  "AI Processed At"
-                                                        }
-                                                    ]
-                                  }
-                 },
-                 {
-                     "id":  3,
-                     "module":  "google-sheets:filterRows",
-                     "version":  2,
-                     "parameters":  {
-                                        "__IMTCONN__":  7930616
-                                    },
-                     "filter":  {
-                                    "name":  "Only new application-detail text replies",
-                                    "conditions":  [
-                                                       [
-                                                           {
-                                                               "a":  "{{2.`10`}}",
-                                                               "b":  "TEXT",
-                                                               "o":  "text:equal:ci"
-                                                           },
-                                                           {
-                                                               "a":  "{{2.`11`}}",
-                                                               "b":  "NEW",
-                                                               "o":  "text:equal:ci"
-                                                           },
-                                                           {
-                                                               "a":  "{{2.`12`}}",
-                                                               "b":  "FALSE",
-                                                               "o":  "text:equal:ci"
-                                                           }
-                                                       ]
-                                                   ]
-                                },
-                     "mapper":  {
-                                    "from":  "drive",
-                                    "limit":  "1",
-                                    "filter":  [
-                                                   [
-                                                       {
-                                                           "a":  "A",
-                                                           "b":  "{{2.`9`}}",
-                                                           "o":  "text:equal"
-                                                       }
-                                                   ]
-                                               ],
-                                    "sheetId":  "Applications",
-                                    "sortOrder":  "asc",
-                                    "spreadsheetId":  "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
-                                    "tableFirstRow":  "A1:CZ1",
-                                    "includesHeaders":  true,
-                                    "valueRenderOption":  "FORMATTED_VALUE",
-                                    "dateTimeRenderOption":  "FORMATTED_STRING"
-                                },
-                     "metadata":  {
-                                      "designer":  {
-                                                       "x":  300,
-                                                       "y":  0,
-                                                       "name":  "Application ‚Äî Find by Application ID"
-                                                   }
-                                  }
-                 },
-                 {
-                     "id":  4,
-                     "module":  "google-sheets:filterRows",
-                     "version":  2,
-                     "parameters":  {
-                                        "__IMTCONN__":  7930616
-                                    },
-                     "mapper":  {
-                                    "from":  "drive",
-                                    "limit":  "1",
-                                    "filter":  [
-                                                   [
-                                                       {
-                                                           "a":  "B",
-                                                           "b":  "{{2.`8`}}",
-                                                           "o":  "text:equal"
-                                                       }
-                                                   ]
-                                               ],
-                                    "sheetId":  "Conversation_State",
-                                    "sortOrder":  "asc",
-                                    "spreadsheetId":  "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
-                                    "tableFirstRow":  "A1:CZ1",
-                                    "includesHeaders":  true,
-                                    "valueRenderOption":  "FORMATTED_VALUE",
-                                    "dateTimeRenderOption":  "FORMATTED_STRING"
-                                },
-                     "metadata":  {
-                                      "designer":  {
-                                                       "x":  600,
-                                                       "y":  0,
-                                                       "name":  "State ‚Äî Find by Lead ID"
-                                                   }
-                                  }
-                 },
-                 {
-                     "id":  5,
-                     "module":  "google-sheets:updateCell",
-                     "version":  2,
-                     "parameters":  {
-                                        "__IMTCONN__":  7930616
-                                    },
-                     "mapper":  {
-                                    "cell":  "{{if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"M\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"L\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"O\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"P\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"Q\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"R\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"AC\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"AD\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"AE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"AF\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"AG\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"AH\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"AJ\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"AK\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"AL\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"AN\"; \"\"))))))))))))))))}}{{3.`__ROW_NUMBER__`}}",
-                                    "value":  "\u0027{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9;◊m∏⁄⁄$z{-ÆÈ‹j◊ù≤ñbÜ∆VÊwFÇá&W∆6Rá&W∆6RÉ"Ê&≤¬"’¬#≤V◊Gó7G&ñÊrì≤¬"¬#≤V◊Gó7G&ñÊríí“#≤G'VS≤f«6Ríííì≤ñbÉBÊF“¬$ÙDUDî≈5ÙƒÙÂıDTÂU$U¬#≤ñbáG&ñ“É"Ê&í“¬#%¬#≤G'VS≤ñbáG&ñ“É"Ê&í“¬#5¬#≤G'VS≤ñbáG&ñ“É"Ê&í“¬#E¬#≤G'VS≤ñbáG&ñ“É"Ê&í“¬#U¬#≤G'VS≤f«6Ríííì≤ñbÉBÊF“¬$ÙDUDî≈5Ù$‰µÙ44ıTÂE¬#≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'ñ¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'ñW5¬#≤G'VS≤ñbÜ6ˆÁFñÁ2Ü∆˜vW"É"Ê&ì≤¬&F∂VÂ¬"ì≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'FñFµ¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬&Êı¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'Fµ¬#≤G'VS≤ñbÜ6ˆÁFñÁ2Ü∆˜vW"É"Ê&ì≤¬'FñF¬"ì≤G'VS≤f«6Rííííííì≤ñbÜ∆VÊwFÇáG&ñ“É"Ê&íí“≤f«6S≤G'VRíííííííì≤ñbÉBÊF“¬$ƒî4DîÙÂÙDUDî≈5ıT‰Dî‰u¬#≤¬$§¥’ı3eÙ4µÙî5¬#≤ñbÉBÊF“¬$ÙDUDî≈5Ùî5ÙÂT‘$U%¬#≤¬$§¥’ı3eÙ4µÙT‘î≈¬#≤ñbÉBÊF“¬$ÙDUDî≈5ÙT‘î≈¬#≤¬$§¥’ı3eÙ4µÙT’ƒıîU%Ù‰‘U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ÙT’ƒıîU%Ù‰‘U¬#≤¬$§¥’ı3eÙ4µÙT’ƒıîU%ÙDE$U55¬#≤ñbÉBÊF“¬$ÙDUDî≈5ÙT’ƒıîU%ÙDE$U55¬#≤¬$§¥’ı3eÙ4µÙT’ƒıîU%ıÑÙ‰U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ÙT’ƒıîU%ıÑÙ‰U¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛÙ‰‘U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛÙ‰‘U¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛıÑÙ‰U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛıÑÙ‰U¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛı$TƒDîÙÂ4Ñï¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛı$TƒDîÙÂ4Ñï¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛ%Ù‰‘U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛ%Ù‰‘U¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛ%ıÑÙ‰U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛ%ıÑÙ‰U¬#≤¬$§¥’ı3eÙ4µı$TdU$T‰4UÛ%ı$TƒDîÙÂ4Ñï¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$TdU$T‰4UÛ%ı$TƒDîÙÂ4Ñï¬#≤¬$§¥’ı3eÙ4µı$ÙET5EÙ%$‰E¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$ÙET5EÙ%$‰E¬#≤¬$§¥’ı3eÙ4µı$ÙET5EÙ‘ÙDT≈¬#≤ñbÉBÊF“¬$ÙDUDî≈5ı$ÙET5EÙ‘ÙDT≈¬#≤¬$§¥’ı3eÙ4µÙƒÙÂıDTÂU$U¬#≤ñbÉBÊF“¬$ÙDUDî≈5ÙƒÙÂıDTÂU$U¬#≤¬$§¥’ı3eÙ4µÙ$‰µÙ44ıTÂE¬#≤ñbÉBÊF“¬$ÙDUDî≈5Ù$‰µÙ44ıTÂE¬#≤¬$§¥’Ù5$TDïEÙ4ÙÂ4TÂEı$UTU5E¬#≤¬%¬"íííííííííííííííì≤¬$§¥’ı3eÙîÂdƒîEÙDUDî≈¬"ó◊“"¿–¢$∆ñ6Fñˆ‚îB#¢'∑≥2Ê◊“"¿–¢%vÜG4ÁV÷&W"îB#¢'∑≥"Êf◊“"¿–¢%t$îB#¢'∑≥"ÊÜ◊“"¿–¢$ñÁFW&Ê¬6ÜÊÊV¬îB#¢'∑≥"Ê#V◊“"¿–¢%&W«íFÚ÷W76vRîB#¢'∑≥"ÊV◊“"¿–¢%6VÊB&˜WFñÊr7FGW2#¢$UDıÙïÙ4ÙÂdU%4DîÙ‚"¿–¢$'W6ñÊW72VÊóB#¢'∑≥"Ê#f◊“"¿–¢$7W7Fˆ÷W"îB#¢'∑≥"Ê#v◊“"¿–¢%FV“îB#¢'∑≥"Ê#Ü◊“ –¢“¿–¢'6ÜVWDñB#¢$÷W76vUÙ˜WF&˜Ç"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢&ñÊ6«VFW4ÜVFW'2#¢G'VR¿–¢&ñÁ6W'DFF˜Fñˆ‚#¢$îÂ4U%Eı$ıu2"¿–¢'W6T6ˆ«V÷‰ÜVFW'2#¢G'VR¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB"¿–¢&ñÁ6W'EVÊf˜&÷GFVB#¢f«6P–¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢C#¿–¢'í#¢¿–¢&Ê÷R#¢$÷W76vR(	B6≤ÊWáBFWFñ¬˜"6ˆÊfó&“6ˆ◊∆WFR –¢––¢––¢“¿–¢∞–¢&ñB#¢r¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$«∑≥"Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢%$Ù4U54TB"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$7W7Fˆ÷W%ÙñÊ&˜Ç"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢CS¿–¢'í#¢¿–¢&Ê÷R#¢$ñÊ&˜Ç(	B÷&≤&ˆ6W76VB –¢––¢––¢“¿–¢∞–¢&ñB#¢Ç¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$◊∑≥"Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢%E%TR"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$7W7Fˆ÷W%ÙñÊ&˜Ç"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢CÉ¿–¢'í#¢¿–¢&Ê÷R#¢$ñÊ&˜Ç(	B÷&≤í&ˆ6W76VB –¢––¢––¢“¿–¢∞–¢&ñB#¢í¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$Á∑≥"Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢'∑∂Ê˜w◊“"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$7W7Fˆ÷W%ÙñÊ&˜Ç"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢S¿–¢'í#¢¿–¢&Ê÷R#¢$ñÊ&˜Ç(	B6fR&ˆ6W76VBFñ÷R –¢––¢––¢“¿–¢∞–¢&ñB#¢#¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$%G∑≥2Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢%TUTTB"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$∆ñ6FñˆÁ2"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢S¿–¢'í#¢¿–¢&Ê÷R#¢$6ˆÁ6VÁB“VWVRWFˆ÷Fñ2FV∆ófW'í –¢––¢“¿–¢&fñ«FW"#¢∞–¢&Ê÷R#¢$fñÊ¬∆ñ6Fñˆ‚FWFñ¬f∆ñB“VWVR6ˆÁ6VÁBWFˆ÷Fñ6∆«í"¿–¢&6ˆÊFóFñˆÁ2#¢∞–¢∞–¢∞–¢&#¢'∑≥BÊF◊“"¿–¢&"#¢$ÙDUDî≈5Ù$‰µÙ44ıTÂB"¿–¢&Ú#¢'FWáC¶WV√¶6í –¢“¿–¢∞–¢&#¢'∑∂ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'ñ¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'ñW5¬#≤G'VS≤ñbÜ6ˆÁFñÁ2Ü∆˜vW"É"Ê&ì≤¬&F∂VÂ¬"ì≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'FñFµ¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬&Êı¬#≤G'VS≤ñbÜ∆˜vW"áG&ñ“É"Ê&íí“¬'Fµ¬#≤G'VS≤ñbÜ6ˆÁFñÁ2Ü∆˜vW"É"Ê&ì≤¬'FñF¬"ì≤G'VS≤f«6Rííííííó◊“"¿–¢&"#¢'G'VR"¿–¢&Ú#¢'FWáC¶WV√¶6í –¢––¢––¢––¢––¢“¿–¢∞–¢&ñB#¢#¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$%W∑≥2Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢$%ÖıcB„Û##"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$∆ñ6FñˆÁ2"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢S¿–¢'í#¢¿–¢&Ê÷R#¢$6ˆÁ6VÁB“&V6˜&BFV◊∆FRfW'6ñˆ‚ –¢––¢––¢“¿–¢∞–¢&ñB#¢#"¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$4∑≥2Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢$$ƒÙ4¥TEÙ4ÙÂ4TÂEı$UTï$TB"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$∆ñ6FñˆÁ2"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢S¿–¢'í#¢¿–¢&Ê÷R#¢$6ˆÁ6VÁB“∂VW7&VFóBÊBƒ’2vFR∆ˆ6∂VB –¢––¢––¢“¿–¢∞–¢&ñB#¢#2¿–¢&÷ˆGV∆R#¢&vˆˆv∆R◊6ÜVWG3ßWFFT6V∆¬"¿–¢'fW'6ñˆ‚#¢"¿–¢'&÷WFW'2#¢∞–¢%ıÙî’D4Ù‰ÂıÚ#¢sì3c`–¢“¿–¢&÷W"#¢∞–¢&6V∆¬#¢$G∑≥2Êıı$ıuÙÂT‘$U%ıˆ◊“"¿–¢'f«VR#¢'∑∂Ê˜w◊“"¿–¢'6V∆V7B#¢&g&ˆ‘∆¬"¿–¢'6ÜVWDñB#¢$∆ñ6FñˆÁ2"¿–¢'7&VG6ÜVWDñB#¢#ÜÁV’v‘&gßWG%#ÑWv√fÜÁ5ÛñátóUˆvƒccÜ&tˆ‰R"¿–¢'f«VTñÁWD˜Fñˆ‚#¢%U4U%ÙTÂDU$TB –¢“¿–¢&÷WFFF#¢∞–¢&FW6ñvÊW"#¢∞–¢'Ç#¢S¿–¢'í#¢¿–¢&Ê÷R#¢$∆ñ6Fñˆ‚“WFFRWFˆ÷FVB6ˆÁ6VÁBFñ÷W7F◊ –¢––¢––¢––¢“¿–¢&÷WFFF#¢∞–¢&ñÁ7FÁB#¢f«6R¿–¢'fW'6ñˆ‚#¢¿–¢'66VÊ&ñÚ#¢∞–¢'&˜VÊGG&ó2#¢¿–¢&÷ÑW'&˜'2#¢2¿–¢&WFÙ6ˆ÷÷óB#¢G'VR¿–¢&WFÙ6ˆ÷÷óEG&ñvvW$∆7B#¢G'VR¿–¢'6WVVÁFñ¬#¢G'VR¿–¢'6∆˜G2#¢ÁV∆¬¿–¢&6ˆÊfñFVÁFñ¬#¢f«6R¿–¢&FF∆˜72#¢f«6R¿–¢&F«#¢f«6R¿–¢&g&W6Öf&ñ&∆W2#¢f«6P–¢“¿–¢&FW6ñvÊW"#¢∞–¢&˜'ÜÁ2#¢∞–†–¢––¢“¿–¢'¶ˆÊR#¢&WSÊ÷∂RÊ6ˆ“"¿–¢&Ê˜FW2#¢∞–†–¢––¢––ß
+  "name": "S06 - Application Details Collection After Signed Consent",
+  "flow": [
+    {
+      "id": 2,
+      "module": "google-sheets:watchRows",
+      "version": 2,
+      "parameters": {
+        "from": "drive",
+        "mode": "select",
+        "limit": 1,
+        "sheetId": "Customer_Inbox",
+        "__IMTCONN__": 7930616,
+        "spreadsheetId": "/10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "tableFirstRow": "A1:N1",
+        "includesHeaders": true,
+        "valueRenderOption": "FORMATTED_VALUE",
+        "dateTimeRenderOption": "FORMATTED_STRING"
+      },
+      "mapper": {},
+      "metadata": {
+        "designer": {
+          "x": 0,
+          "y": 0,
+          "name": "Trigger ‚Äî Watch Application Detail Replies"
+        },
+        "interface": [
+          {
+            "name": "__ROW_NUMBER__",
+            "type": "number",
+            "label": "Row number"
+          },
+          {
+            "name": "0",
+            "type": "text",
+            "label": "Received At"
+          },
+          {
+            "name": "1",
+            "type": "text",
+            "label": "Phone Number"
+          },
+          {
+            "name": "2",
+            "type": "text",
+            "label": "Customer Message"
+          },
+          {
+            "name": "3",
+            "type": "text",
+            "label": "Attachment URL"
+          },
+          {
+            "name": "4",
+            "type": "text",
+            "label": "Attachment Type"
+          },
+          {
+            "name": "5",
+            "type": "text",
+            "label": "Message ID"
+          },
+          {
+            "name": "6",
+            "type": "text",
+            "label": "Channel"
+          },
+          {
+            "name": "7",
+            "type": "text",
+            "label": "Source"
+          },
+          {
+            "name": "8",
+            "type": "text",
+            "label": "Lead ID"
+          },
+          {
+            "name": "9",
+            "type": "text",
+            "label": "Application ID"
+          },
+          {
+            "name": "10",
+            "type": "text",
+            "label": "Message Type"
+          },
+          {
+            "name": "11",
+            "type": "text",
+            "label": "Process Status"
+          },
+          {
+            "name": "12",
+            "type": "text",
+            "label": "AI Processed"
+          },
+          {
+            "name": "13",
+            "type": "text",
+            "label": "AI Processed At"
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "module": "google-sheets:filterRows",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "filter": {
+        "name": "Only new application-detail text replies",
+        "conditions": [
+          [
+            {
+              "a": "{{2.`10`}}",
+              "b": "TEXT",
+              "o": "text:equal:ci"
+            },
+            {
+              "a": "{{2.`11`}}",
+              "b": "NEW",
+              "o": "text:equal:ci"
+            },
+            {
+              "a": "{{2.`12`}}",
+              "b": "FALSE",
+              "o": "text:equal:ci"
+            }
+          ]
+        ]
+      },
+      "mapper": {
+        "from": "drive",
+        "limit": "1",
+        "filter": [
+          [
+            {
+              "a": "A",
+              "b": "{{2.`9`}}",
+              "o": "text:equal"
+            }
+          ]
+        ],
+        "sheetId": "Applications",
+        "sortOrder": "asc",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "tableFirstRow": "A1:CZ1",
+        "includesHeaders": true,
+        "valueRenderOption": "FORMATTED_VALUE",
+        "dateTimeRenderOption": "FORMATTED_STRING"
+      },
+      "metadata": {
+        "designer": {
+          "x": 300,
+          "y": 0,
+          "name": "Application ‚Äî Find by Application ID"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "module": "google-sheets:filterRows",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "from": "drive",
+        "limit": "1",
+        "filter": [
+          [
+            {
+              "a": "B",
+              "b": "{{2.`8`}}",
+              "o": "text:equal"
+            }
+          ]
+        ],
+        "sheetId": "Conversation_State",
+        "sortOrder": "asc",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "tableFirstRow": "A1:CZ1",
+        "includesHeaders": true,
+        "valueRenderOption": "FORMATTED_VALUE",
+        "dateTimeRenderOption": "FORMATTED_STRING"
+      },
+      "metadata": {
+        "designer": {
+          "x": 600,
+          "y": 0,
+          "name": "State ‚Äî Find by Lead ID"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "{{if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"M\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"L\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"O\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"P\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"Q\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"R\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"AC\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"AD\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"AE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"AF\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"AG\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"AH\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"AJ\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"AK\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"AL\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"AN\"; \"\"))))))))))))))))}}{{3.`__ROW_NUMBER__`}}",
+        "value": "'{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring); if(4.`4` = \"APP_DETAILS_EMAIL\"; lower(trim(2.`2`)); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; \"YES\"; if(lower(trim(2.`2`)) = \"yes\"; \"YES\"; if(contains(lower(2.`2`); \"ada akaun\"); \"YES\"; if(lower(trim(2.`2`)) = \"tidak\"; \"NO\"; if(lower(trim(2.`2`)) = \"no\"; \"NO\"; if(lower(trim(2.`2`)) = \"tak\"; \"NO\"; if(contains(lower(2.`2`); \"tiada\"); \"NO\"; \"UNKNOWN\"))))))); trim(2.`2`))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; 3.`12`; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; 3.`11`; if(4.`4` = \"APP_DETAILS_EMAIL\"; 3.`14`; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; 3.`15`; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; 3.`16`; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; 3.`17`; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; 3.`28`; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; 3.`29`; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; 3.`30`; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; 3.`31`; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; 3.`32`; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; 3.`33`; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; 3.`35`; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; 3.`36`; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; 3.`37`; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; 3.`39`; emptystring)))))))))))))))))}}",
+        "select": "fromAll",
+        "sheetId": "Applications",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 900,
+          "y": 0,
+          "name": "Application - Validate Detail Only After Signed Consent"
+        }
+      },
+      "filter": {
+        "name": "Only Signed-Consent Application Detail Steps",
+        "conditions": [
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APPLICATION_DETAILS_PENDING",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_IC_NUMBER",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_EMAIL",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_EMPLOYER_NAME",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_EMPLOYER_ADDRESS",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_EMPLOYER_PHONE",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_1_NAME",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_1_PHONE",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_1_RELATIONSHIP",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_2_NAME",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_2_PHONE",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_REFERENCE_2_RELATIONSHIP",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_PRODUCT_BRAND",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_PRODUCT_MODEL",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_LOAN_TENURE",
+              "o": "text:equal:ci"
+            }
+          ],
+          [
+            {
+              "a": "{{4.`4`}}",
+              "b": "APP_DETAILS_BANK_ACCOUNT",
+              "o": "text:equal:ci"
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "id": 6,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "AW{{3.`__ROW_NUMBER__`}}",
+        "value": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"APPLICANT_IC_NUMBER,EMAIL,EMPLOYER_NAME,EMPLOYER_ADDRESS,EMPLOYER_PHONE,REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"EMAIL,EMPLOYER_NAME,EMPLOYER_ADDRESS,EMPLOYER_PHONE,REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"EMPLOYER_NAME,EMPLOYER_ADDRESS,EMPLOYER_PHONE,REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"EMPLOYER_ADDRESS,EMPLOYER_PHONE,REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"EMPLOYER_PHONE,REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"REFERENCE_1_NAME,REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"REFERENCE_1_PHONE,REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"REFERENCE_1_RELATIONSHIP,REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"REFERENCE_2_NAME,REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"REFERENCE_2_PHONE,REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"REFERENCE_2_RELATIONSHIP,PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"PRODUCT_BRAND,PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"PRODUCT_MODEL,LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"LOAN_TENURE_YEARS,BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"BANK_ACCOUNT_AVAILABLE\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"NONE\"; \"\")))))))))))))))); 3.`48`)}}",
+        "select": "fromAll",
+        "sheetId": "Applications",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 1200,
+          "y": 0,
+          "name": "Application ‚Äî Preserve or Recompute Missing Fields"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "D{{3.`__ROW_NUMBER__`}}",
+        "value": "{{now}}",
+        "select": "fromAll",
+        "sheetId": "Applications",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 1500,
+          "y": 0,
+          "name": "Application ‚Äî Update Timestamp"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "F{{3.`__ROW_NUMBER__`}}",
+        "value": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"APPLICATION_DETAILS_COMPLETE\"; 3.`5`); 3.`5`)}}",
+        "select": "fromAll",
+        "sheetId": "Applications",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 1800,
+          "y": 0,
+          "name": "Application - Preserve or Complete Information Stage"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "E{{4.`__ROW_NUMBER__`}}",
+        "value": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"APP_DETAILS_IC_NUMBER\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"APP_DETAILS_EMAIL\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"APP_DETAILS_EMPLOYER_NAME\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"APP_DETAILS_EMPLOYER_ADDRESS\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"APP_DETAILS_EMPLOYER_PHONE\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"APP_DETAILS_REFERENCE_1_NAME\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"APP_DETAILS_REFERENCE_1_PHONE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"APP_DETAILS_REFERENCE_2_NAME\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"APP_DETAILS_REFERENCE_2_PHONE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"APP_DETAILS_PRODUCT_BRAND\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"APP_DETAILS_PRODUCT_MODEL\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"APP_DETAILS_LOAN_TENURE\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"APP_DETAILS_BANK_ACCOUNT\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"APPLICATION_DETAILS_COMPLETE\"; \"\")))))))))))))))); 4.`4`)}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 2100,
+          "y": 0,
+          "name": "State - Advance Application Information Step"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "Q{{4.`__ROW_NUMBER__`}}",
+        "value": "{{2.`2`}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 2400,
+          "y": 0,
+          "name": "State ‚Äî Save Customer Reply"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "R{{4.`__ROW_NUMBER__`}}",
+        "value": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"Terima kasih. Sila berikan nombor IC penuh anda (12 digit).\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"Baik. Apakah alamat e-mel anda?\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"Sila berikan nama majikan atau syarikat tempat anda bekerja.\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"Apakah alamat penuh majikan anda?\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"Sila berikan nombor telefon majikan anda.\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"Sekarang maklumat rujukan pertama. Apakah nama penuh rujukan pertama?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"Apakah nombor telefon rujukan pertama?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"Apakah hubungan rujukan pertama dengan anda?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"Apakah nama penuh rujukan kedua?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"Apakah nombor telefon rujukan kedua?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"Apakah hubungan rujukan kedua dengan anda?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"Apakah jenama motosikal atau produk yang anda pilih?\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"Apakah model motosikal atau produk yang anda pilih?\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"Pilih tempoh pinjaman antara 2 hingga 5 tahun.\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"Adakah anda mempunyai akaun bank peribadi? Jawab Ya atau Tidak.\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"Terima kasih. Maklumat permohonan anda sudah lengkap. Jika masih ada dokumen yang belum lengkap, anda boleh hantar di sini. Permohonan akan disediakan untuk LMS selepas dokumen lengkap dan borang kebenaran CTOS/CCRIS disahkan.\"; \"\")))))))))))))))); \"Maklumat itu belum sah. Sila jawab semula soalan terakhir dengan format yang diminta.\")}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 2700,
+          "y": 0,
+          "name": "State - Save Next Information Question"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "S{{4.`__ROW_NUMBER__`}}",
+        "value": "{{2.`5`}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3000,
+          "y": 0,
+          "name": "State ‚Äî Save Message ID"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "T{{4.`__ROW_NUMBER__`}}",
+        "value": "{{2.`0`}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3300,
+          "y": 0,
+          "name": "State ‚Äî Save Customer Reply Time"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "U{{4.`__ROW_NUMBER__`}}",
+        "value": "{{now}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3600,
+          "y": 0,
+          "name": "State ‚Äî Save AI Message Time"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "AA{{4.`__ROW_NUMBER__`}}",
+        "value": "{{now}}",
+        "select": "fromAll",
+        "sheetId": "Conversation_State",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 3900,
+          "y": 0,
+          "name": "State ‚Äî Update Timestamp"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "module": "google-sheets:addRow",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "mode": "fromAll",
+        "values": {
+          "Lead ID": "{{2.`8`}}",
+          "Language": "BAHASA_MELAYU",
+          "Outbox ID": "S06-{{2.`5`}}-{{formatDate(now; \"YYYYMMDDHHmmss\")}}",
+          "Created At": "{{now}}",
+          "Send Status": "PENDING",
+          "Message Text": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"Terima kasih. Sila berikan nombor IC penuh anda (12 digit).\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"Baik. Apakah alamat e-mel anda?\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"Sila berikan nama majikan atau syarikat tempat anda bekerja.\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"Apakah alamat penuh majikan anda?\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"Sila berikan nombor telefon majikan anda.\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"Sekarang maklumat rujukan pertama. Apakah nama penuh rujukan pertama?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"Apakah nombor telefon rujukan pertama?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"Apakah hubungan rujukan pertama dengan anda?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"Apakah nama penuh rujukan kedua?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"Apakah nombor telefon rujukan kedua?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"Apakah hubungan rujukan kedua dengan anda?\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"Apakah jenama motosikal atau produk yang anda pilih?\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"Apakah model motosikal atau produk yang anda pilih?\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"Pilih tempoh pinjaman antara 2 hingga 5 tahun.\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"Adakah anda mempunyai akaun bank peribadi? Jawab Ya atau Tidak.\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"Terima kasih. Maklumat permohonan anda sudah lengkap. Jika masih ada dokumen yang belum lengkap, anda boleh hantar di sini. Permohonan akan disediakan untuk LMS selepas dokumen lengkap dan borang kebenaran CTOS/CCRIS disahkan.\"; \"\")))))))))))))))); \"Maklumat itu belum sah. Sila jawab semula soalan terakhir dengan format yang diminta.\")}}",
+          "Message Type": "SESSION_TEXT",
+          "Phone Number": "{{2.`1`}}",
+          "Scheduled At": "{{now}}",
+          "Attempt Count": "0",
+          "Template Name": "{{if(if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false); if(4.`4` = \"APP_DETAILS_EMAIL\"; if(contains(trim(2.`2`); \"@\"); if(contains(trim(2.`2`); \".\"); true; false); false); if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 9; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 10; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 11; true; if(length(replace(replace(2.`2`; \"-\"; emptystring); \" \"; emptystring)) = 12; true; false)))); if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; if(trim(2.`2`) = \"2\"; true; if(trim(2.`2`) = \"3\"; true; if(trim(2.`2`) = \"4\"; true; if(trim(2.`2`) = \"5\"; true; false)))); if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; if(lower(trim(2.`2`)) = \"ya\"; true; if(lower(trim(2.`2`)) = \"yes\"; true; if(contains(lower(2.`2`); \"ada akaun\"); true; if(lower(trim(2.`2`)) = \"tidak\"; true; if(lower(trim(2.`2`)) = \"no\"; true; if(lower(trim(2.`2`)) = \"tak\"; true; if(contains(lower(2.`2`); \"tiada\"); true; false))))))); if(length(trim(2.`2`)) = 0; false; true)))))))); if(4.`4` = \"APPLICATION_DETAILS_PENDING\"; \"JKM_S06_ASK_IC\"; if(4.`4` = \"APP_DETAILS_IC_NUMBER\"; \"JKM_S06_ASK_EMAIL\"; if(4.`4` = \"APP_DETAILS_EMAIL\"; \"JKM_S06_ASK_EMPLOYER_NAME\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_NAME\"; \"JKM_S06_ASK_EMPLOYER_ADDRESS\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_ADDRESS\"; \"JKM_S06_ASK_EMPLOYER_PHONE\"; if(4.`4` = \"APP_DETAILS_EMPLOYER_PHONE\"; \"JKM_S06_ASK_REFERENCE_1_NAME\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_NAME\"; \"JKM_S06_ASK_REFERENCE_1_PHONE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_PHONE\"; \"JKM_S06_ASK_REFERENCE_1_RELATIONSHIP\"; if(4.`4` = \"APP_DETAILS_REFERENCE_1_RELATIONSHIP\"; \"JKM_S06_ASK_REFERENCE_2_NAME\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_NAME\"; \"JKM_S06_ASK_REFERENCE_2_PHONE\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_PHONE\"; \"JKM_S06_ASK_REFERENCE_2_RELATIONSHIP\"; if(4.`4` = \"APP_DETAILS_REFERENCE_2_RELATIONSHIP\"; \"JKM_S06_ASK_PRODUCT_BRAND\"; if(4.`4` = \"APP_DETAILS_PRODUCT_BRAND\"; \"JKM_S06_ASK_PRODUCT_MODEL\"; if(4.`4` = \"APP_DETAILS_PRODUCT_MODEL\"; \"JKM_S06_ASK_LOAN_TENURE\"; if(4.`4` = \"APP_DETAILS_LOAN_TENURE\"; \"JKM_S06_ASK_BANK_ACCOUNT\"; if(4.`4` = \"APP_DETAILS_BANK_ACCOUNT\"; \"JKM_S06_INFORMATION_COMPLETE\"; \"\")))))))))))))))); \"JKM_S06_INVALID_DETAIL\")}}",
+          "Application ID": "{{3.`0`}}",
+          "WhatsApp Number ID": "{{2.`16`}}",
+          "WABA ID": "{{2.`18`}}",
+          "Internal Channel ID": "{{2.`25`}}",
+          "Reply To Message ID": "{{2.`5`}}",
+          "Send Routing Status": "AUTO_AI_CONVERSATION",
+          "Business Unit": "{{2.`26`}}",
+          "Customer ID": "{{2.`27`}}",
+          "Team ID": "{{2.`28`}}"
+        },
+        "sheetId": "Message_Outbox",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "includesHeaders": true,
+        "insertDataOption": "INSERT_ROWS",
+        "useColumnHeaders": true,
+        "valueInputOption": "USER_ENTERED",
+        "insertUnformatted": false
+      },
+      "metadata": {
+        "designer": {
+          "x": 4200,
+          "y": 0,
+          "name": "Message - Ask Next Detail or Confirm Information Complete"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "L{{2.`__ROW_NUMBER__`}}",
+        "value": "PROCESSED",
+        "select": "fromAll",
+        "sheetId": "Customer_Inbox",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 4500,
+          "y": 0,
+          "name": "Inbox ‚Äî Mark Processed"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "M{{2.`__ROW_NUMBER__`}}",
+        "value": "TRUE",
+        "select": "fromAll",
+        "sheetId": "Customer_Inbox",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 4800,
+          "y": 0,
+          "name": "Inbox ‚Äî Mark AI Processed"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "module": "google-sheets:updateCell",
+      "version": 2,
+      "parameters": {
+        "__IMTCONN__": 7930616
+      },
+      "mapper": {
+        "cell": "N{{2.`__ROW_NUMBER__`}}",
+        "value": "{{now}}",
+        "select": "fromAll",
+        "sheetId": "Customer_Inbox",
+        "spreadsheetId": "10hnumWmBfzupDrR8Ewl6hns_9hwA9qe_glF68bgOaNE",
+        "valueInputOption": "USER_ENTERED"
+      },
+      "metadata": {
+        "designer": {
+          "x": 5100,
+          "y": 0,
+          "name": "Inbox ‚Äî Save Processed Time"
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "instant": false,
+    "version": 1,
+    "scenario": {
+      "roundtrips": 1,
+      "maxErrors": 3,
+      "autoCommit": true,
+      "autoCommitTriggerLast": true,
+      "sequential": true,
+      "slots": null,
+      "confidential": false,
+      "dataloss": false,
+      "dlq": false,
+      "freshVariables": false
+    },
+    "designer": {
+      "orphans": []
+    },
+    "zone": "eu1.make.com",
+    "notes": []
+  }
+}
