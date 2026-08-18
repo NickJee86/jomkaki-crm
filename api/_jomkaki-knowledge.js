@@ -1,7 +1,11 @@
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-18.4',
+  version: '2026-08-18.5',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
+  approvedSources: Object.freeze([
+    'https://app.notion.com/p/3bfc040b616e81a38377cbe7b55bea1a',
+    'https://app.notion.com/p/3c0c040b616e81a3883ec441f01d4d30'
+  ]),
   status: 'APPROVED',
   conversation: Object.freeze({
     defaultLanguage: 'MS',
@@ -40,6 +44,14 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
       ['12 months', 'Monthly 12 Months (RM)']
     ])
   }),
+  loanKedai: Object.freeze({
+    primarySalesPath: true,
+    normalProcessingWorkingDays: Object.freeze([1, 3]),
+    processingStartsAfterCompleteDocuments: true,
+    subjectToEligibilityAndVerification: true,
+    proactivelyPromoteCashPurchase: false,
+    answerExplicitApprovedMotorCashPriceOnly: true
+  }),
   documents: Object.freeze({
     minimum: Object.freeze(['IC_FRONT', 'IC_BACK', 'INCOME_PROOF']),
     consentRequiredBeforeCreditCheck: true,
@@ -58,4 +70,3 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
-
