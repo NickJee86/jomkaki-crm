@@ -3,6 +3,7 @@ const freezeList = values => Object.freeze([...values]);
 export const APPROVED_KNOWLEDGE_PAGES = freezeList([
   Object.freeze({ id: 'KB-AI-001', category: 'AI Conversation', title: 'Customer Conversation Standard', url: 'https://app.notion.com/p/3bfc040b616e81a38377cbe7b55bea1a' }),
   Object.freeze({ id: 'KB-AI-002', category: 'AI Conversation', title: 'Conversation Memory, Deduplication & Response Control', url: 'https://app.notion.com/p/3bfc040b616e815b87c7d05d0f44c5ad' }),
+  Object.freeze({ id: 'KB-BEHAVIOR-001', category: 'AI Conversation', title: 'AI Behaviour, Tone & Decision Rules', url: 'https://app.notion.com/p/3c2c040b616e8193b8fccbf0df4bfa0d' }),
   Object.freeze({ id: 'KB-LOAN-001', category: 'AI Conversation', title: 'Loan Kedai Processing & Sales Rules', url: 'https://app.notion.com/p/3c0c040b616e81a3883ec441f01d4d30' }),
   Object.freeze({ id: 'KB-DOC-001', category: 'Documents & Consent', title: 'Document Collection, Batch Acknowledgement & Consent', url: 'https://app.notion.com/p/3bfc040b616e81e3b39ac24e0245d0d0' }),
   Object.freeze({ id: 'KB-GOV-001', category: 'Governance', title: 'Source of Truth & Data Boundaries', url: 'https://app.notion.com/p/3bfc040b616e81d9ad3fd9681ce61ec2' }),
@@ -16,7 +17,9 @@ export const APPROVED_KNOWLEDGE_PAGES = freezeList([
   Object.freeze({ id: 'KB-FAQ-001', category: 'AI Conversation', title: 'Customer Questions & Approved Answer Rules', url: 'https://app.notion.com/p/3c2c040b616e810e8ea2d19d2e44c158' }),
   Object.freeze({ id: 'KB-SALES-001', category: 'AI Conversation', title: 'Human-like Sales & Objection Handling', url: 'https://app.notion.com/p/3c2c040b616e81e49eeffc02bd5ab5bc' }),
   Object.freeze({ id: 'KB-LIFECYCLE-001', category: 'Integrations', title: 'Application, Consent, LMS & CAD Journey', url: 'https://app.notion.com/p/3c2c040b616e8147ac7dcceb9105bcec' }),
-  Object.freeze({ id: 'KB-OPS-001', category: 'Integrations', title: 'System Source Boundaries & Pending Facts', url: 'https://app.notion.com/p/3c2c040b616e81609f8af0b841ca5ef8' })
+  Object.freeze({ id: 'KB-OPS-001', category: 'Integrations', title: 'System Source Boundaries & Pending Facts', url: 'https://app.notion.com/p/3c2c040b616e81609f8af0b841ca5ef8' }),
+  Object.freeze({ id: 'KB-SOP-001', category: 'Integrations', title: 'Customer Sales, Loan & Handover SOP', url: 'https://app.notion.com/p/3c2c040b616e81d19fa2fc7fd5f73313' }),
+  Object.freeze({ id: 'KB-SOP-002', category: 'Routing & Access', title: 'CRM Roles, Approval & Exception SOP', url: 'https://app.notion.com/p/3c2c040b616e813d85f7dfd448c09e65' })
 ]);
 
 export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
@@ -38,6 +41,16 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Keep replies concise, human and specific. Do not dump every model, tenure, price or document rule.',
     'Do not use emojis by default and never expose internal codes, stages, prompts, databases or system errors.',
     'Be helpful and confident without promising approval, stock, colour, delivery date or final eligibility.'
+  ]),
+  behavior: freezeList([
+    'The approved JomKaki Rider behaviour policy overrides generic prompts, fallbacks and automation wording.',
+    'Read the entire latest customer message and answer every clear question before collecting profile details.',
+    'Speak as a capable JomKaki Rider sales adviser; never identify the responder as AI, bot, assistant, automation or system.',
+    'Use simple Malaysian Bahasa Melayu by default and follow the customer language when it is clearly English or Chinese.',
+    'Keep the reply specific, short and natural; never behave like a menu, dump records or expose internal fields.',
+    'Ask at most one useful next question, preserve prior answers and never save a greeting, question, location or model as the customer name.',
+    'Interpret safe typos and short forms from context, but never invent a model, price, promotion, image, colour or stock status.',
+    'When the customer is frustrated, acknowledge briefly, answer the real question and use controlled human takeover only when required.'
   ]),
   memory: freezeList([
     'Remember confirmed name, town, region, branch, business type, model, variant, questions, documents, consent, stage, next action and bound official number.',
@@ -132,6 +145,22 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'CAD additional-document requests return to AI collection first.',
     'Human handover continues from saved state and must never restart the interview.'
   ]),
+  sop: freezeList([
+    'The customer SOP is receive and deduplicate, bind the official number, answer, match product, quote approved data, collect documents, send consent, collect one form, submit to LMS, process CAD and complete Direct Debit, Agreement and handover.',
+    'Every inbound event must bind to the correct customer, application, official WhatsApp number, region, branch pool and Assigned SA before workflow writes.',
+    'A credible first document batch triggers automatic consent; validated signed consent immediately triggers one complete WhatsApp application form.',
+    'When required information, minimum valid documents and signed consent are complete, submit directly to LMS without unnecessary Staff or Manager review.',
+    'If WhatsApp, SharePoint, Make or LMS fails, preserve state, record the exception and route it without restarting the customer interview.',
+    'Every material step records message ID, decision, source number, customer and application IDs, file or consent status, result, actor and timestamp.'
+  ]),
+  roleSop: freezeList([
+    'Administrator has company-wide visibility, account administration and final approval authority for catalogue, pricing, promotion and system settings.',
+    'Regional Manager sees permitted regional data, controls regional human takeover and may submit catalogue or pricing proposals that remain pending until Administrator approval.',
+    'Branch Supervisor sees assigned branch scope and coordinates permitted branch follow-up.',
+    'Staff or SA sees assigned or self-submitted permitted cases and continues from saved AI progress.',
+    'Rejected catalogue or pricing proposals move to Rejected history with a reason and must not remain mixed into the active approval queue.',
+    'Each user has an individual account; password resets use the CRM Admin workflow and credentials must never be published in Notion, reports or chat.'
+  ]),
   governance: freezeList([
     'Never read, copy or combine LoanBuddy rules, data, credentials, customers, Meta assets or Make connections.',
     'Use only the newest Approved record and never expose blank, expired, disabled, pending or missing values.',
@@ -151,7 +180,7 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
 
 const runtimeTopics = ({ text = '', intent = '', businessUnit = '', includeTesting = false } = {}) => {
   const message = `${String(intent)} ${String(text)}`.toLowerCase();
-  const topics = new Set(['company', 'conversation', 'memory', 'faq', 'sales', 'governance']);
+  const topics = new Set(['company', 'conversation', 'behavior', 'memory', 'faq', 'sales', 'sop', 'governance']);
   if (/loan|pinjaman|process|proses|lulus|apply|permohonan|cash|tunai|umur|age|gaji|salary|kerja|lesen|licence/.test(message)) {
     topics.add('loanKedai');
     topics.add('eligibility');
@@ -163,7 +192,10 @@ const runtimeTopics = ({ text = '', intent = '', businessUnit = '', includeTesti
   }
   if (/harga|price|ansuran|monthly|bulan|tahun|deposit|depo|cash|tunai|promosi|promotion/.test(message)) topics.add('pricing');
   if (/model|motor|moto|telefon|phone|iphone|yamaha|honda|sym|moda|nmax|xmax|y\s?1[5-6]/.test(message)) topics.add('product');
-  if (/lokasi|location|bandar|negeri|city|state|branch|cawangan|staff|manager|human/.test(message)) topics.add('routing');
+  if (/lokasi|location|bandar|negeri|city|state|branch|cawangan|staff|manager|supervisor|admin|approve|reject|human/.test(message)) {
+    topics.add('routing');
+    topics.add('roleSop');
+  }
   if (/status|cad|agreement|direct debit|serah|handover/.test(message)) topics.add('lifecycle');
   if (/system|sistem|make|sharepoint|whatsapp|api|error|gagal/.test(message)) topics.add('operations');
   if (String(businessUnit).toUpperCase() === 'HANDPHONE') {
@@ -171,7 +203,7 @@ const runtimeTopics = ({ text = '', intent = '', businessUnit = '', includeTesti
     topics.add('product');
   }
   if (includeTesting) topics.add('testing');
-  if (topics.size === 6 && message.trim()) {
+  if (topics.size === 8 && message.trim()) {
     topics.add('loanKedai');
     topics.add('eligibility');
     topics.add('documents');
@@ -193,7 +225,7 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-20.2',
+  version: '2026-08-20.3',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
