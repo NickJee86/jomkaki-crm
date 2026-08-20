@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { getAccessToken } from './_auth.js';
-import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
+import { approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -569,6 +569,8 @@ const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
   return previous[right.length] <= limit;
 };
 
+const INVALID_CUSTOMER_NAME_WORDS = /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|bagaimana|macam mana|model|motor|moto|motorcycle|motosikal|telefon|phone|handphone|iphone|harga|price|ansuran|monthly|loan|pinjaman|kedai|dokumen|document|promosi|promotion|cash|tunai|deposit|depo|tinggal|bandar|negeri|lokasi|location|cari|mahu|nak|boleh|ada|yamaha|honda|sym|moda|nmax|xmax|y16|y16zr)\b/i;
+
 export function extractCustomerName(value = '') {
   let candidate = clean(value)
     .replace(/^(?:nama\s+saya|saya\s+bernama|my\s+name\s+is|i\s+am|i'm|call\s+me|saya|我叫|我是)\s*/i, '')
@@ -577,6 +579,7 @@ export function extractCustomerName(value = '') {
   if (!candidate || candidate.length < 2 || candidate.length > 60) return '';
   if (/\d/.test(candidate) || candidate.split(/\s+/).length > 5) return '';
   if (/^(hi|hello|hey|hai|morning|afternoon|evening|yes|no|ok|okay|motor|moto|phone|iphone|handphone|yamaha|honda)$/i.test(normalized)) return '';
+  if (INVALID_CUSTOMER_NAME_WORDS.test(normalized)) return '';
   if (!/^[\p{L}][\p{L}'’ -]*$/u.test(candidate)) return '';
   return candidate.replace(/\s+/g, ' ');
 }
@@ -669,7 +672,7 @@ export function buildInitialConversationState({ lead = {}, application = {}, rou
     'Phone Number': digits(phone),
     'Current Step': 'STEP_01_WELCOME',
     'Qualification Status': 'IN_PROGRESS',
-    'Customer Name': clean(lead['Customer Name']),
+    'Customer Name': usableCustomerName(lead['Customer Name']),
     'Product Category': clean(businessUnit),
     'Selected Branch ID': clean(lead['Selected Branch ID']),
     'Last Customer Message': clean(text),
@@ -698,7 +701,7 @@ export function buildAutomaticApplication({ lead = {}, state = {}, route = {}, d
     'Lead ID': clean(lead['Lead ID']),
     'Created At': timestamp,
     'Updated At': timestamp,
-    'Applicant Name': clean(state['Customer Name'] || lead['Customer Name']),
+    'Applicant Name': usableCustomerName(state['Customer Name'] || lead['Customer Name']),
     'Phone Number': clean(lead['Phone Number']),
     Region: clean(lead.Region),
     'Business Unit': unit,
@@ -873,9 +876,10 @@ const instantCopy = (language, key, values = {}) => {
   return copies[language]?.[key] || copies.EN[key] || '';
 };
 
-const usableCustomerName = value => {
+export const usableCustomerName = value => {
   const name = clean(value);
-  return name && !/^WhatsApp Customer\b/i.test(name) ? name : '';
+  if (!name || /^WhatsApp Customer\b/i.test(name)) return '';
+  return extractCustomerName(name);
 };
 
 const profileContinuation = ({ language = 'MS', state = {}, lead = {}, baseText = '', completeStep = 'STEP_03_PRODUCT' } = {}) => {
@@ -934,6 +938,13 @@ export function buildProgressiveProfileChanges({ text = '', aiIntent = null, sta
   const stateChanges = {};
   const leadChanges = {};
   const applicationChanges = {};
+  const rawStoredName = clean(state['Customer Name'] || lead['Customer Name']);
+  const storedNameIsPolluted = rawStoredName && !/^WhatsApp Customer\b/i.test(rawStoredName) && !usableCustomerName(rawStoredName);
+  if (storedNameIsPolluted) {
+    stateChanges['Customer Name'] = '';
+    leadChanges['Customer Name'] = '';
+    applicationChanges['Applicant Name'] = '';
+  }
   if (customerName) {
     stateChanges['Customer Name'] = customerName;
     leadChanges['Customer Name'] = customerName;
@@ -1018,12 +1029,13 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
   const language = instantLanguage(text, state);
   const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
   const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const approvedKnowledge = approvedKnowledgeForRuntime({ text, businessUnit: unit });
   const context = {
     language,
     currentStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
     businessUnit: unit,
     region: canonicalRegion(lead.Region || routeRegion) || 'UNASSIGNED',
-    customerName: clean(state['Customer Name'] || lead['Customer Name']).replace(/^WhatsApp Customer\b.*$/i, ''),
+    customerName: usableCustomerName(state['Customer Name'] || lead['Customer Name']),
     cityOrArea: clean(lead['City or Area'] || lead.State),
     selectedProduct,
     previousCustomerMessage: clean(state['Last Customer Message']).slice(0, 400),
@@ -1050,11 +1062,11 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
   const request = {
     model,
     instructions,
-    input: `Approved conversation context:\n${JSON.stringify(context)}`,
+    input: `Approved Notion knowledge snapshot:\n${approvedKnowledge}\n\nApproved conversation context:\n${JSON.stringify(context)}`,
     max_output_tokens: 180,
     store: false,
     safety_identifier: safetyIdentifier,
-    metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version) }
+    metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
   };
   if (reasoningEffort && /^(?:gpt-5|o\d)/i.test(model)) request.reasoning = { effort: reasoningEffort };
   return request;
@@ -1134,6 +1146,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
       loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
       cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.'
     },
+    approvedNotionKnowledge: approvedKnowledgeForRuntime({ text, businessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit), includeTesting: false }),
     catalogChoices
   };
   const instructions = [
@@ -1186,7 +1199,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     max_output_tokens: 500,
     store: false,
     safety_identifier: safetyIdentifier,
-    metadata: { workflow: 'jomkaki_whatsapp_intent', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version) }
+    metadata: { workflow: 'jomkaki_whatsapp_intent', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
   };
   if (/^gpt-5\.6/i.test(model)) request.reasoning = { effort: reasoningEffort, context: 'current_turn' };
   return request;
@@ -1671,9 +1684,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   let product = productMatch.product;
   let unit = clean(product?.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'MOTOR';
   let pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-  const knownName = clean(state['Customer Name'] || lead['Customer Name']);
+  const knownName = usableCustomerName(state['Customer Name'] || lead['Customer Name']);
   const locationConfirmed = !!clean(lead['City or Area'] || lead.State);
-  const identityReady = !!knownName && !/^WhatsApp Customer\b/i.test(knownName) && !!clean(lead.Region || routeRegion) && locationConfirmed;
+  const identityReady = !!knownName && !!clean(lead.Region || routeRegion) && locationConfirmed;
   if (productMatch.ambiguous) {
     const formattedOptions = productMatch.options.join(language === 'ZH' ? '、' : ' atau ');
     return { handled: true, productIntent: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'MODEL_CLARIFY', { options: formattedOptions }) };
@@ -1791,7 +1804,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   }
   if (questionPriority) return { handled: true, aiFallback: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
   if ((step === 'STEP_01_NAME' || !step || step === 'STEP_01_WELCOME') && (!interpretedIntent || interpretedIntent === 'PROVIDE_NAME')) {
-    const name = clean(aiIntent?.customerName) || extractCustomerName(text);
+    const name = usableCustomerName(aiIntent?.customerName) || extractCustomerName(text);
     return name
       ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
       : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
@@ -2089,7 +2102,7 @@ export default async function handler(req, res) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
           const initialLocation = instantDecision.location || progressiveProfile.location || {};
-          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': progressiveProfile.customerName || existingCustomer?.['Customer Name'] || profileName || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: clean(initialLocation.region || routeRegion), State: clean(initialLocation.state), 'City or Area': clean(initialLocation.city), 'Business Unit': routeBusinessUnit, 'Team ID': clean(initialLocation.teamId || teamId), 'Selected Branch ID': clean(initialLocation.branchId || branchId), 'Assigned SA ID': '' };
+          lead = { 'Lead ID': makeId('LEAD'), 'Customer ID': customerId, 'Customer Name': progressiveProfile.customerName || usableCustomerName(existingCustomer?.['Customer Name']) || usableCustomerName(profileName) || `WhatsApp Customer ${phone.slice(-4)}`, 'Phone Number': phone, 'Normalized Phone': phone, Region: clean(initialLocation.region || routeRegion), State: clean(initialLocation.state), 'City or Area': clean(initialLocation.city), 'Business Unit': routeBusinessUnit, 'Team ID': clean(initialLocation.teamId || teamId), 'Selected Branch ID': clean(initialLocation.branchId || branchId), 'Assigned SA ID': '' };
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
           await appendObject(token, 'Leads', { ...lead, 'Created At': timestamp, 'Updated At': timestamp, 'Lead Status': 'NEW', 'Processing Mode': 'AI_MANAGED', 'Lead Source': 'WHATSAPP_CLOUD', 'Source Channel': 'WHATSAPP_CLOUD', 'Primary WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, Notes: 'AI-managed Lead; Staff remains unassigned unless document collection or follow-up fails', 'Created By': 'META_WEBHOOK', 'Updated By': 'META_WEBHOOK' });
           leads.push(lead);
@@ -2317,3 +2330,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
