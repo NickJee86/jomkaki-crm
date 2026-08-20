@@ -638,7 +638,12 @@ export default async function handler(req, res) {
   res.setHeader('Vary', 'Cookie');
   res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   if (session) {
-    try { session = await validateSession(req, session); } catch { session = false; }
+    try { session = await validateSession(req, session); }
+    catch (error) {
+      // Keep the signed session during a transient account-directory failure.
+      // Clearing the cookie here made a normal data refresh look like logout.
+      console.error('CRM session validation deferred', error);
+    }
   }
   if (!session) clearSession(res);
   if (!session) return res.status(401).json({ live: false, error: 'Authentication required.' });
@@ -1777,3 +1782,4 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
+

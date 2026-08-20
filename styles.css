@@ -8,4 +8,5 @@
 @media(max-width:650px){.modal-backdrop{padding:0}.modal{height:100vh;max-height:none;border-radius:0}.form-grid,.detail-grid{grid-template-columns:1fr}.form-grid .full{grid-column:1}.modal-content{padding:18px}.modal>header{padding:18px}.toolbar{flex-wrap:wrap}.toolbar input{width:100%}}
 .brand-logo{width:42px;height:42px;object-fit:cover;border-radius:12px;display:block;box-shadow:0 8px 18px #061825}.login-logo{width:92px;height:92px;border-radius:20px;margin:0 auto 20px;box-shadow:0 12px 28px rgba(8,33,48,.18)}
 .app-shell[hidden]{display:none!important}
+.nav-counts{margin:20px 8px 0;padding:12px;border:1px solid #29485c;border-radius:12px;background:#0f2d40;display:grid;gap:7px}.nav-counts span{display:flex;justify-content:space-between;gap:8px;color:#8298a6;font-size:9px}.nav-counts b{order:2;color:#d7e6ec;font-size:10px}.nav-item[hidden]{display:none!important}
 
