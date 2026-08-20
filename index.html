@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./styles.css?v=20260805-2" />
-  <link rel="stylesheet" href="./v2.css?v=20260810-secondhand-report" />
+  <link rel="stylesheet" href="./v2.css?v=20260820-navigation-session1" />
   <link rel="stylesheet" href="./comfort.css?v=20260807-1" />
   <link rel="stylesheet" href="./design-refresh.css?v=20260808-readiness-1" />
   <link rel="stylesheet" href="./brand-refresh.css?v=20260818-rider-brand1" />
@@ -41,27 +41,18 @@
         <div><strong>JomKaki</strong><span>Rider CRM</span></div>
       </div>
       <nav class="nav" aria-label="Primary navigation">
-        <p class="nav-label">Overview</p>
-        <button class="nav-item active" data-view="dashboard"><span>CC</span>Command Centre</button>
-        <button class="nav-item" data-view="workbench"><span>MW</span>My Workbench <i id="workBadge">0</i></button>
-        <button class="nav-item" data-view="reports"><span>RA</span>Reports & Analytics</button>
-        <p class="nav-label">Customer Operations</p>
-        <button class="nav-item" data-view="leads"><span>LP</span>Lead Pipeline <b id="leadBadge">0</b></button>
-        <button class="nav-item" data-view="applications"><span>AP</span>Applications <b id="applicationBadge">0</b></button>
-        <button class="nav-item" data-view="documents"><span>DOC</span>Documents <b id="documentBadge">0</b></button>
-        <button class="nav-item" data-view="inbox"><span>IN</span>Customer Inbox <i id="inboxBadge">0</i></button>
-        <button class="nav-item" data-view="outbox"><span>OUT</span>Message Outbox</button>
-        <p class="nav-label">Sales Management</p>
-        <button class="nav-item" data-view="catalog"><span>MC</span>Motor Catalog</button>
-        <button class="nav-item" data-view="pricing"><span>MP</span>Motor Pricing</button>
-        <button class="nav-item" data-view="usedMotorInventory"><span>2H</span>2nd Hand Inventory</button>
-        <button class="nav-item" data-view="handphoneCatalog"><span>HP</span>Handphone Catalog</button>
-        <button class="nav-item" data-view="handphonePricing"><span>H$</span>Handphone Pricing</button>
-        <button class="nav-item" data-view="team"><span>BT</span>Branches & Team</button>
-        <p class="nav-label">Administration</p>
-        <button class="nav-item" data-view="users"><span>UA</span>Users & Access</button>
-        <button class="nav-item" data-view="activity"><span>AA</span>Activity & Audit</button>
-        <button class="nav-item" data-view="settings"><span>SS</span>System Settings</button>
+        <p class="nav-label">Workspace</p>
+        <button class="nav-item active" data-view="dashboard"><span>HM</span>Home</button>
+        <button class="nav-item" data-view="customers"><span>CU</span>Customers <b id="leadBadge">0</b></button>
+        <button class="nav-item" data-view="workbench"><span>TK</span>Tasks & Approvals <i id="workBadge">0</i></button>
+        <button class="nav-item" data-view="products"><span>PR</span>Products & Pricing</button>
+        <button class="nav-item" data-view="reports"><span>RP</span>Reports</button>
+        <button class="nav-item" data-view="management"><span>MG</span>Management</button>
+        <div class="nav-counts" aria-label="Current workload">
+          <span><b id="applicationBadge">0</b> applications</span>
+          <span><b id="documentBadge">0</b> files</span>
+          <span><b id="inboxBadge">0</b> unread</span>
+        </div>
       </nav>
       <div class="integration-card">
         <span class="status-dot"></span>
@@ -83,10 +74,11 @@
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="./app-v2.js?v=20260818-document-status2"></script>
+  <script src="./app-v2.js?v=20260820-navigation-session1"></script>
   <script src="./business-architecture.js?v=20260818-document-status1"></script>
   <script src="./product-business.js?v=20260817-catalog-workflow2"></script>
   <script src="./handphone-tenure-v2.js?v=20260814-audit-fix1"></script>
   <script src="./second-hand-motor.js?v=20260811-1"></script>
 </body>
 </html>
+
