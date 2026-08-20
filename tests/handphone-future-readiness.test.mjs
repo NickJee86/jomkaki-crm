@@ -92,8 +92,9 @@ test('CRM supports separate Handphone catalog, pricing, access and shared custom
   assert.match(tenureUi, /Monthly 5 years \(RM\)/);
   assert.match(tenureUi, /Blank years are not quoted by AI/);
   assert.match(index, /handphone-tenure-v2\.js/);
-  assert.match(index, /data-view="handphoneCatalog"/);
-  assert.match(index, /data-view="handphonePricing"/);
+  assert.match(index, /data-view="products"/);
+  assert.match(appUi, /hubCard\('handphoneCatalog'/);
+  assert.match(appUi, /hubCard\('handphonePricing'/);
   assert.match(appUi, /handphoneCatalog:catalog/);
   assert.match(appUi, /handphonePricing:pricing/);
   assert.match(appUi, /view==='handphoneCatalog'\?'catalog'/);
@@ -167,3 +168,4 @@ test('Motor and Handphone Make scenarios are isolated with no Motor response lea
   }
   assert.match(s03HandphoneRaw, /TEAM-HP|Handphone|HANDPHONE/);
 });
+
