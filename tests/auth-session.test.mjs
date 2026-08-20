@@ -14,6 +14,7 @@ const passwordHash = auth.hashPassword('Temporary!123');
 let enabled = true;
 let authVersion = '2026-08-07T10:00:00.000Z';
 let includeLegacyPlaceholder = false;
+let directoryAvailable = true;
 
 const headers = ['Account ID','Username','Display Name','Role','SA ID','Branch ID','Region','Status','Access Scope','Login Enabled','Last Verified','Notes','Password Hash','Must Change Password','Failed Login Attempts','Locked Until','Last Password Reset','Updated At','Business Access'];
 globalThis.fetch = async url => {
@@ -21,6 +22,7 @@ globalThis.fetch = async url => {
   if (target.includes('sts.googleapis.com')) return new Response(JSON.stringify({ access_token: 'federated' }), { status: 200 });
   if (target.includes('generateAccessToken')) return new Response(JSON.stringify({ accessToken: 'google-token' }), { status: 200 });
   if (target.includes('/values/CRM_User_Access')) {
+    if (!directoryAvailable) return new Response(JSON.stringify({ error: 'temporary outage' }), { status: 503 });
     const row = ['STAFF-1','staff.one','Staff One','STAFF','SA-1','BR-1','EAST_MALAYSIA',enabled?'ACTIVE':'DISABLED','Own customers',enabled?'TRUE':'FALSE','','',passwordHash,'FALSE','0','','',authVersion,'BOTH'];
     const values = [headers, row];
     if (includeLegacyPlaceholder) values.push(['STAFF-LEGACY','legacy.staff','Legacy Staff','STAFF','SA-2','BR-1','EAST_MALAYSIA','ACTIVE','Own customers','TRUE','','Legacy Vercel account','','FALSE','0','','','','BOTH']);
@@ -37,6 +39,10 @@ const signed = auth.getSession(request);
 assert.equal(signed.username, 'staff.one');
 assert.equal((await auth.validateSession(request, signed)).saId, 'SA-1');
 assert.equal((await auth.validateSession(request, signed)).businessAccess, 'BOTH');
+
+directoryAvailable = false;
+assert.equal((await auth.validateSession(request, signed)).username, 'staff.one', 'temporary account-directory failure must preserve a valid signed session');
+directoryAvailable = true;
 
 enabled = false;
 assert.equal(await auth.validateSession(request, signed), false, 'disabled account must invalidate an existing session');
@@ -55,3 +61,4 @@ const legacySession = auth.getSession({ headers: { cookie: legacyCookie } });
 assert.equal((await auth.validateSession({ headers: { cookie: legacyCookie } }, legacySession)).username, 'legacy.staff', 'a legacy environment session must remain valid while its Sheet row has no hash');
 
 console.log('auth-session tests passed');
+
