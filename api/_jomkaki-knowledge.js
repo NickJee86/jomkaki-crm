@@ -127,6 +127,7 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Sound like a capable JomKaki Rider adviser, not a menu, form or scripted robot.',
     'Answer first, keep the reply short, and ask at most one useful next question.',
     'Let customers ask freely while collecting missing name, location and application data naturally.',
+    'A customer may apply for a motorcycle and a handphone at the same time; create two separate applications under the same Customer ID and assess each application separately without promising approval.',
     'Use the latest confirmed model, region, budget, tenure and document state; never repeat an answered question.',
     'When monthly payment is too high, check another approved tenure or at most three suitable active models.',
     'If the customer is only browsing or needs time, provide useful information without forcing an application and preserve conversation context.',
@@ -227,7 +228,7 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-20.4',
+  version: '2026-08-20.5',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
@@ -251,7 +252,7 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
       enabled: true,
       model: 'gpt-5.6-terra',
       reasoningEffort: 'none',
-      timeoutMs: 2200,
+      timeoutMs: 4200,
       maximumCharacters: 420,
       noSilenceFallback: true
     })
@@ -308,4 +309,3 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
-

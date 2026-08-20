@@ -778,7 +778,9 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. The approved monthly instalment is not available in the system yet, but I can check it with the branch for you.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
       AVAILABLE_MODELS: `Those are only a few popular examples, not the full catalogue. Other options I can check include ${models}. Which type do you prefer, or what monthly budget is comfortable for you?`,
-      SERVICE_RECOVERY: `Sorry, my earlier reply was not helpful. I understand you want a clear answer. ${models ? `Available options I can check include ${models}. ` : ''}What monthly budget would be comfortable for you?`,
+      COMBINED_APPLICATION: 'Yes, you may apply for a motorcycle and a phone at the same time. They will be handled as two separate applications and assessed separately based on eligibility. Which one would you like me to check first?',
+      SERVICE_RECOVERY: 'Sorry, my earlier reply did not answer your question. I do not want to give you another unrelated or inaccurate answer, so I will ask a manager to review your original question and reply here.',
+      SERVICE_RECOVERY_PREFIX: 'Sorry, my earlier reply did not answer your question.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Sorry, my earlier reply did not answer your question. For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. You may send all files together; there is no need to send them one by one.',
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
@@ -828,7 +830,9 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Kadar ansuran yang diluluskan belum ada dalam sistem sekarang, tetapi saya boleh semak dengan cawangan untuk anda.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
       AVAILABLE_MODELS: `Itu cuma beberapa pilihan popular, bukan semua model yang ada. Pilihan lain yang saya boleh semak termasuk ${models}. Anda suka jenis apa, atau bajet bulanan berapa yang selesa?`,
-      SERVICE_RECOVERY: `Maaf, jawapan tadi memang tak membantu. Saya faham anda mahu jawapan yang jelas. ${models ? `Antara pilihan yang saya boleh semak ialah ${models}. ` : ''}Bajet bulanan yang anda selesa sekitar berapa?`,
+      COMBINED_APPLICATION: 'Boleh mohon motor dan telefon pada masa yang sama. Kedua-duanya akan dibuat sebagai dua permohonan berasingan dan dinilai berasingan mengikut kelayakan. Anda mahu saya semak motor atau telefon dahulu?',
+      SERVICE_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Saya tak mahu beri satu lagi jawapan yang tidak berkaitan atau tidak tepat, jadi saya akan minta pengurus semak soalan asal anda dan balas di sini.',
+      SERVICE_RECOVERY_PREFIX: 'Maaf, jawapan tadi memang tidak menjawab soalan anda.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Untuk loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Boleh hantar semua fail sekali gus; tak perlu hantar satu per satu.',
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
@@ -874,7 +878,9 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
       AVAILABLE_MODELS: `那些只是几款热门例子，不是全部车型。我还可以查询 ${models}。你喜欢哪种类型，或舒服的月供预算大约是多少？`,
-      SERVICE_RECOVERY: `抱歉，刚才的回复没有解决你的问题。${models ? `目前可以查询的选择包括 ${models}。` : ''}请问你希望每月供款大约多少？`,
+      COMBINED_APPLICATION: '可以同时申请摩托车和手机，两项会作为独立申请，并分别按照资格审核。你想先查询摩托车还是手机？',
+      SERVICE_RECOVERY: '抱歉，刚才没有回答你的问题。我不想再给你不相关或不准确的答案，所以会请经理查看你原本的问题，并在这里回复。',
+      SERVICE_RECOVERY_PREFIX: '抱歉，刚才没有回答你的问题。',
       DOCUMENT_REQUIREMENTS_RECOVERY: '不好意思，刚才没有正确回答你的问题。店内贷款所需的基本文件是身份证正反面，以及最新薪水单或 EPF 报表。可以一次发送所有文件，不需要逐份发送。',
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
@@ -1021,7 +1027,7 @@ export function buildProgressiveProfileChanges({ text = '', aiIntent = null, sta
   return { unit, customerName, location, stateChanges, leadChanges, applicationChanges };
 }
 
-const AI_FALLBACK_DEFAULT_TIMEOUT_MS = Number(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.timeoutMs) || 2600;
+const AI_FALLBACK_DEFAULT_TIMEOUT_MS = Number(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.timeoutMs) || 4200;
 const AI_FALLBACK_MAX_CHARACTERS = Number(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.maximumCharacters) || 420;
 const AI_FALLBACK_BLOCKED_CLAIMS = /\b(?:guaranteed approval|guaranteed to pass|confirm(?:ed)?\s+(?:approve|approval|lulus)|pasti\s+lulus|dijamin\s+lulus|100%\s+lulus)\b/i;
 const AI_FALLBACK_DISCLOSURE = /\b(?:artificial intelligence|automated (?:assistant|system)|chatbot|bot reply|as an ai|saya (?:ialah|adalah) ai|saya bot)\b/i;
@@ -1106,6 +1112,7 @@ const AI_INTENTS = Object.freeze([
   'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'PROMOTION', 'MODEL_SELECTION',
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
   'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
+  'COMBINED_APPLICATION',
   'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
@@ -1145,16 +1152,22 @@ const validAiIntent = value => {
 
 export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
   const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const seenCatalogChoices = new Set();
   const catalogChoices = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
-  ].filter(row => truth(row.Active)).slice(0, 180).map(row => ({
+  ].filter(row => truth(row.Active)).filter(row => {
+    const key = [row.__businessUnit, row.Brand, row.Model, row.Variant, row['Search Keywords']].map(normalizedWords).join('|');
+    if (!key.replace(/\|/g, '') || seenCatalogChoices.has(key)) return false;
+    seenCatalogChoices.add(key);
+    return true;
+  }).slice(0, 96).map(row => ({
     catalogId: clean(row['Catalog ID']),
     unit: clean(row.__businessUnit),
     brand: clean(row.Brand),
     model: clean(row.Model),
     variant: clean(row.Variant),
-    keywords: clean(row['Search Keywords']).slice(0, 120)
+    keywords: clean(row['Search Keywords']).slice(0, 80)
   }));
   const context = {
     currentStep: clean(state['Current Step']) || 'STEP_01_WELCOME',
@@ -1181,6 +1194,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, or ada model lain, resolve the intent against the selected product and last assistant message.',
+    'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
@@ -1222,7 +1236,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     instructions,
     input: JSON.stringify(context),
     text: { format: { type: 'json_schema', name: 'jomkaki_customer_intent', strict: true, schema } },
-    max_output_tokens: 500,
+    max_output_tokens: 420,
     store: false,
     safety_identifier: safetyIdentifier,
     metadata: { workflow: 'jomkaki_whatsapp_intent', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
@@ -1330,6 +1344,13 @@ const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
 const asksForOtherModels = text => /(model lain|motor lain|phone lain|telefon lain|apa model.*(?:ada|lain)|other models?|what else.*(?:available|have)|其他型号|别的型号)/i.test(clean(text));
 const asksForAvailableModels = text => /(?:\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b|\b(?:hanya|cuma|only)\b.*\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu|sahaja|saja|only)\b|\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu)\b.*\b(?:sahaja|saja|only)\b|\b(?:berapa banyak|how many)\b.*\b(?:model|pilihan|choice|option)\b)/i.test(clean(text));
+const asksForCombinedApplication = text => {
+  const value = normalizedWords(text);
+  const mentionsMotor = /\b(?:motor|moto|motosikal|motorcycle)\b/i.test(value);
+  const mentionsPhone = /\b(?:handphone|phone|telefon|iphone|smartphone|hp)\b/i.test(value);
+  const together = /\b(?:satu masa|1 masa|masa yang sama|sekali(?:gus)?|serentak|dua dua|both|same time|at the same time|together)\b/i.test(value);
+  return mentionsMotor && mentionsPhone && together;
+};
 const customerIsFrustrated = text => /(?:\b(?:tak|tidak|x)\s*faham\b|\b(?:bodoh|stupid|useless|pukimak|puki\s*mak|bangang|bengap)\b|\bwhat\s+are\s+you\s+talking\s+about\b|不明白|很笨|没用)/i.test(clean(text));
 const saysThanks = text => /^(?:terima kasih|thanks?(?: you)?|tq|thank you|谢谢|多谢)[.! ]*$/i.test(clean(text));
 
@@ -1673,6 +1694,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       text: instantCopy(language, 'DOCUMENT_REQUIREMENTS_RECOVERY')
     };
   }
+  if (interpretedIntent === 'COMBINED_APPLICATION' || asksForCombinedApplication(text)) {
+    return {
+      handled: true,
+      combinedApplicationIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: explicitUnit || fallbackUnit || 'MOTOR',
+      text: instantCopy(language, 'COMBINED_APPLICATION')
+    };
+  }
   const unitOnly = /^(?:motor|moto|motorcycle|motosikal|phone|handphone|telefon|iphone)[!. ]*$/i.test(clean(text));
   if (unitOnly) {
     const unit = explicitUnit || fallbackUnit || productUnitFromText(text, '') || 'MOTOR';
@@ -1932,12 +1963,27 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     return { handled: true, nextStep: continuation.nextStep, productUnit: unit, text: continuation.text };
   }
   if (interpretedIntent === 'BUDGET' || raisesBudgetConcern(text)) return { handled: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'BUDGET') };
+  if (frustrationDetected) {
+    const recoverablePreviousQuestion = previousCustomerText
+      && !customerIsFrustrated(previousCustomerText)
+      && normalizedWords(previousCustomerText) !== normalizedWords(text)
+      && clean(previousCustomerText).length >= 4
+      ? previousCustomerText
+      : '';
+    return {
+      handled: true,
+      serviceRecovery: true,
+      aiFallback: !!recoverablePreviousQuestion,
+      aiFallbackQuestion: recoverablePreviousQuestion,
+      humanFollowUpRequired: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      text: instantCopy(language, 'SERVICE_RECOVERY')
+    };
+  }
   const suggestionPricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
   const suggestions = availableModelSuggestions(catalogPool, suggestionPricing, unit, lead.Region || routeRegion);
   const suggestionText = suggestions.join(language === 'ZH' ? '、' : ', ');
-  if (frustrationDetected) {
-    return { handled: true, serviceRecovery: true, nextStep: 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'SERVICE_RECOVERY', { models: suggestionText }) };
-  }
   if (['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent) || asksForOtherModels(text) || asksForAvailableModels(text)) {
     if (suggestions.length) {
       const baseText = instantCopy(language, interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS', { models: suggestionText });
@@ -1958,7 +2004,15 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const continuation = profileContinuation({ language, state, lead, baseText: aiIntent.suggestedReply, completeStep: step || 'STEP_03_PRODUCT' });
     return { handled: true, aiGenerated: true, aiUnderstood: true, nextStep: continuation.nextStep, productUnit: unit, text: continuation.text };
   }
-  if (questionPriority) return { handled: true, aiFallback: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
+  if (questionPriority) return {
+    handled: true,
+    aiFallback: true,
+    answerCustomerQuestionFirst: true,
+    humanFollowUpRequired: true,
+    nextStep: step || 'STEP_03_PRODUCT',
+    productUnit: unit,
+    text: instantCopy(language, 'SERVICE_RECOVERY')
+  };
   if ((step === 'STEP_01_NAME' || !step || step === 'STEP_01_WELCOME') && (!interpretedIntent || interpretedIntent === 'PROVIDE_NAME')) {
     const name = usableCustomerName(aiIntent?.customerName) || extractCustomerName(text);
     return name
@@ -2205,6 +2259,7 @@ export default async function handler(req, res) {
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text) || conversationalDocumentRequirement(text));
         const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
+        const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
         const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting
           ? await requestAiIntent({
@@ -2241,15 +2296,22 @@ export default async function handler(req, res) {
         }
         if (progressiveProfile.location?.teamId) teamId = progressiveProfile.location.teamId;
         if (routeUsable && !human && instantDecision.aiFallback) {
+          const remainingReplyBudgetMs = Math.max(500, 4700 - (Date.now() - aiTurnStartedAt));
           const generatedReply = await requestAiFallbackReply({
-            text,
+            text: instantDecision.aiFallbackQuestion || text,
             state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },
             lead: { ...(lead || {}), ...progressiveProfile.leadChanges },
             routeBusinessUnit,
             routeRegion,
-            phone
+            phone,
+            timeoutMs: remainingReplyBudgetMs
           });
-          if (generatedReply) instantDecision = { ...instantDecision, text: generatedReply, aiGenerated: true };
+          if (generatedReply) {
+            const generatedText = instantDecision.serviceRecovery
+              ? sanitizeAiFallbackReply(`${instantCopy(instantLanguage(text, conversationState || {}), 'SERVICE_RECOVERY_PREFIX')} ${generatedReply}`, instantLanguage(text, conversationState || {})) || generatedReply
+              : generatedReply;
+            instantDecision = { ...instantDecision, text: generatedText, aiGenerated: true, humanFollowUpRequired: undefined };
+          }
         }
         let willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);

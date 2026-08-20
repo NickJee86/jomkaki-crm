@@ -314,6 +314,21 @@ test('unknown business questions use the answer-first AI route instead of a fixe
   assert.doesNotMatch(decision.text, /nama anda/i);
 });
 
+test('a customer can ask for motor and handphone together without falling into the generic menu', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME' },
+    text: 'kalau nak beli handphone dan motor dalam 1 masa boleh tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR'
+  });
+  assert.equal(decision.combinedApplicationIntent, true);
+  assert.equal(decision.answerCustomerQuestionFirst, true);
+  assert.match(decision.text, /boleh mohon motor dan telefon pada masa yang sama/i);
+  assert.match(decision.text, /dua permohonan berasingan/i);
+  assert.doesNotMatch(decision.text, /model, ansuran bulanan, dokumen|nama anda|iPhone/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
 test('profile facts provided during any conversation step are progressively mapped into CRM records', () => {
   const profile = buildProgressiveProfileChanges({
     text: 'nama saya Aiman, saya di Bintulu. kerja dengan ABC Trading gaji RM3000 bajet RM400',
@@ -663,16 +678,19 @@ test('repeating only motor offers real options instead of repeating the same mod
 
 test('customer frustration triggers a useful recovery reply and never repeats the failed question', () => {
   const decision = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR', 'Last AI Message': 'Model motor atau telefon yang mana anda minat?' },
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR', 'Last Customer Message': 'boleh beli motor dan phone sekali tak', 'Last AI Message': 'Model motor atau telefon yang mana anda minat?' },
     lead: { 'Customer Name': 'Mike', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
     text: 'tak faham ke apa saya cakap', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
     motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
   });
   assert.equal(decision.serviceRecovery, true);
+  assert.equal(decision.aiFallback, true);
+  assert.equal(decision.aiFallbackQuestion, 'boleh beli motor dan phone sekali tak');
+  assert.equal(decision.humanFollowUpRequired, true);
   assert.match(decision.text, /Maaf/);
-  assert.match(decision.text, /Yamaha Y15ZR/);
-  assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
+  assert.match(decision.text, /pengurus/i);
+  assert.doesNotMatch(decision.text, /Yamaha Y15ZR|iPhone|bajet bulanan|Model motor atau telefon yang mana/i);
 });
 
 test('loan kedai perlukan apa returns the required documents even when AI misclassifies it as processing time', () => {
@@ -775,7 +793,8 @@ test('a Malay conversation does not switch to English because the customer uses 
     lead: { 'Customer Name': 'Charles', Region: 'WEST_MALAYSIA', 'City or Area': 'Klang' },
     text: 'u ni tak faham apa i cakap ke', messageType: 'text', routeBusinessUnit: 'MOTOR'
   });
-  assert.match(decision.text, /Model motor atau telefon|Boleh|saya/i);
+  assert.match(decision.text, /Maaf|saya/i);
+  assert.match(decision.text, /pengurus/i);
   assert.doesNotMatch(decision.text, /Which motorcycle|You can send/i);
 });
 
@@ -1220,7 +1239,8 @@ test('post-quote sales questions receive an immediate natural Malay answer inste
   const unknown = buildInstantSalesDecision({ ...base, text: 'boleh explain lagi?' });
   assert.match(documents.text, /IC depan dan belakang/);
   assert.match(budget.text, /Bajet bulanan/);
-  assert.match(unknown.text, /model, ansuran bulanan, dokumen/);
+  assert.match(unknown.text, /pengurus/i);
+  assert.doesNotMatch(unknown.text, /model, ansuran bulanan, dokumen/i);
   assert.equal(unknown.aiFallback, true);
   [documents, budget, unknown].forEach(result => assert.equal(result.handled, true));
 });
