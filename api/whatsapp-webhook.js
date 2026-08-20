@@ -786,6 +786,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: 'Sorry, my earlier reply did not answer your question.',
       CONTEXTUAL_RECOVERY: 'I understand your question. I do not want to give you an inaccurate answer, so I will ask a manager to check this exact question and reply here without making you repeat it.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Sorry, my earlier reply did not answer your question. For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. You may send all files together; there is no need to send them one by one.',
+      PAYSLIP_PERIOD: 'The latest three months of payslips are preferred. If you only have one or two months, you may still send them and the application will continue to be checked; it will not be rejected automatically for that reason.',
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
@@ -842,6 +843,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: 'Maaf, jawapan tadi memang tidak menjawab soalan anda.',
       CONTEXTUAL_RECOVERY: 'Saya faham soalan anda. Saya tak mahu beri jawapan yang mungkin salah, jadi saya akan minta pengurus semak soalan ini dan balas di sini tanpa anda perlu ulang.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Untuk loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Boleh hantar semua fail sekali gus; tak perlu hantar satu per satu.',
+      PAYSLIP_PERIOD: 'Slip gaji 3 bulan terkini lebih digalakkan. Kalau anda hanya ada 1 atau 2 bulan, masih boleh hantar dan semakan akan diteruskan; permohonan tidak ditolak secara automatik hanya sebab itu.',
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
       SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
@@ -894,6 +896,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: '抱歉，刚才没有回答你的问题。',
       CONTEXTUAL_RECOVERY: '我明白你的问题。为了避免给你不准确的答案，我会请经理核对这个问题并在这里回复，你不需要再重复。',
       DOCUMENT_REQUIREMENTS_RECOVERY: '不好意思，刚才没有正确回答你的问题。店内贷款所需的基本文件是身份证正反面，以及最新薪水单或 EPF 报表。可以一次发送所有文件，不需要逐份发送。',
+      PAYSLIP_PERIOD: '建议提供最近 3 个月的薪水单。如果目前只有 1 或 2 个月，也可以先提交并继续审核，不会仅因为月份不足而自动拒绝申请。',
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
       SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
@@ -1128,7 +1131,7 @@ const AI_INTENTS = Object.freeze([
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
   'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
   'COMBINED_APPLICATION',
-  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
+  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'PAYSLIP_PERIOD', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
 
@@ -1358,6 +1361,7 @@ const requestedProductStorage = text => {
   return match ? `${match[1]}${match[2].toUpperCase()}` : '';
 };
 const asksForDocuments = text => /(?:dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|(?:loan\s*(?:kedai|shop)|shop\s*loan).{0,35}(?:perlukan?|perlu|need|required|kena\s*(?:sedia|hantar)|sediakan).{0,20}(?:apa|ape|what)|(?:apa|ape|what).{0,20}(?:yang\s*)?(?:perlu|need|required|kena\s*sediakan).{0,35}(?:loan\s*(?:kedai|shop)|shop\s*loan)|需要什么文件|要什么文件)/i.test(clean(text));
+const asksForPayslipPeriod = text => /(?:\b(?:berapa|brp|how many)\s*(?:bulan|months?)\b.{0,30}\b(?:slip\s*gaji|payslips?|pay\s*slips?|salary\s*slips?)\b|\b(?:slip\s*gaji|payslips?|pay\s*slips?|salary\s*slips?)\b.{0,30}\b(?:berapa|brp|how many)\s*(?:bulan|months?)\b|薪水单.{0,15}(?:几个月|多少个月)|(?:几个月|多少个月).{0,15}薪水单)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
@@ -1733,6 +1737,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const previousCustomerText = clean(state['Last Customer Message']);
   const frustrationDetected = interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text);
   const recoveringDocumentQuestion = frustrationDetected && conversationalDocumentRequirement(previousCustomerText);
+  const payslipPeriodQuestion = interpretedIntent === 'PAYSLIP_PERIOD' || asksForPayslipPeriod(text);
   const documentStatusQuestion = interpretedIntent === 'DOCUMENT_STATUS'
     || (isDocumentStatusQuestion(text) && (documents.length > 0 || /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(clean(text))));
   const documentRequirementQuestion = interpretedIntent === 'DOCUMENT_REQUIREMENTS'
@@ -1740,6 +1745,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     || conversationalDocumentRequirement(text)
     || wantsToApply(text)
     || (isDocumentStatusQuestion(text) && !!selectedModel);
+  if (payslipPeriodQuestion) {
+    return { handled: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'PAYSLIP_PERIOD') };
+  }
   if (documentStatusQuestion) {
     return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
   }
