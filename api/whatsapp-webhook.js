@@ -759,7 +759,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -801,6 +801,12 @@ const instantCopy = (language, key, values = {}) => {
       PROMOTION_NONE: 'There is no approved active motorcycle promotion recorded for your area at the moment.',
       PROMOTION_MODEL: 'Which model would you like me to check in detail?',
       HANDPHONE_DEPOSIT_POLICY: `For phones, I can only share the approved monthly instalment. The deposit and selling price are not quoted to customers.`,
+      INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using the Hire Purchase method. The actual monthly instalment depends on the approved model, deposit and tenure.',
+      COLOUR_OPTIONS: `For ${brand} ${model}, the approved catalogue colours are ${colours}.`,
+      STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}.`,
+      HANDPHONE_STORAGE_OVERVIEW: `For the current phone range, the approved storage choices are ${storage}. Tell me which model you prefer and I will give you its exact monthly instalment.`,
+      COLOUR_STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}, and the colours are ${colours}.`,
+      PRODUCT_OPTIONS_UNAVAILABLE: `I have confirmed ${brand} ${model}, but its approved ${options} choices are not recorded yet. I can arrange a catalogue check without asking you to choose the model again.`,
       QUOTE_ONLY: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation.`,
       NAME_AFTER_ANSWER: 'May I know your name?',
       LOCATION_AFTER_ANSWER: 'Which city or state are you currently staying in?',
@@ -843,6 +849,12 @@ const instantCopy = (language, key, values = {}) => {
       PROMOTION_NONE: 'Buat masa ini, belum ada promosi motor aktif yang diluluskan untuk kawasan anda dalam sistem.',
       PROMOTION_MODEL: 'Model mana satu anda mahu saya semak dengan lebih lanjut?',
       HANDPHONE_DEPOSIT_POLICY: `Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Deposit dan harga jualan tidak diberikan kepada pelanggan.`,
+      INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran bulanan sebenar ikut model, deposit dan tempoh yang diluluskan.',
+      COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang direkodkan dalam katalog diluluskan ialah ${colours}.`,
+      STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}.`,
+      HANDPHONE_STORAGE_OVERVIEW: `Untuk rangkaian telefon semasa, pilihan kapasiti yang diluluskan ialah ${storage}. Beritahu model yang anda minat dan saya akan beri ansuran bulanan yang tepat.`,
+      COLOUR_STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}, dan warna yang ada ialah ${colours}.`,
+      PRODUCT_OPTIONS_UNAVAILABLE: `Saya sudah sahkan ${brand} ${model}, tetapi pilihan ${options} yang diluluskan belum direkodkan. Saya boleh minta semakan katalog tanpa suruh anda pilih model semula.`,
       QUOTE_ONLY: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       NAME_AFTER_ANSWER: 'Boleh saya tahu nama anda?',
       LOCATION_AFTER_ANSWER: 'Anda tinggal di bandar atau negeri mana?',
@@ -867,6 +879,12 @@ const instantCopy = (language, key, values = {}) => {
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
       HELP: '可以。我能协助查询型号、月供、所需文件或申请进度。你想先查询哪一项？',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
+      INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
+      COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
+      STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
+      HANDPHONE_STORAGE_OVERVIEW: `目前手机目录中已获批的容量选择是：${storage}。告诉我你喜欢的型号，我会提供准确月供。`,
+      COLOUR_STORAGE_OPTIONS: `${brand} ${model} 已获批的容量有 ${storage}，颜色有 ${colours}。`,
+      PRODUCT_OPTIONS_UNAVAILABLE: `已确认是 ${brand} ${model}，但获批的${options}选择尚未记录。我可以安排目录核对，不会再让你重选型号。`,
       QUOTE_ONLY: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。`,
       NAME_AFTER_ANSWER: '请问该怎么称呼您？',
       LOCATION_AFTER_ANSWER: '请问您目前住在哪个城市或州属？',
@@ -1080,7 +1098,8 @@ const responseOutputText = result => {
 
 const AI_INTENTS = Object.freeze([
   'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'PROMOTION', 'MODEL_SELECTION',
-  'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE',
+  'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
+  'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
   'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
@@ -1155,7 +1174,8 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'Use the conversation context. Do not restart onboarding when the customer is asking a question. Every question in the latest customer message always takes priority over collecting name, location, or other profile details.',
     'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
-    'For short follow-ups such as cash berapa, berapa lama, 3 tahun, apa lagi perlu, or ada model lain, resolve the intent against the selected product and last assistant message.',
+    'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, or ada model lain, resolve the intent against the selected product and last assistant message.',
+    'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
     'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
@@ -1290,6 +1310,10 @@ const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|per
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
+const asksForMonthlyInstalment = text => /(?:\b(?:ansuran|bayaran)\s*(?:bulanan|sebulan)\b|\bberapa\s*(?:sebulan|bulanannya?)\b|\bsebulan\s*berapa\b|\bmonthly\s*(?:instalment|installment|payment|berapa|how much)?\b|每月多少|月供多少|多少月供)/i.test(clean(text));
+const asksForInterestRate = text => /(?:\b(?:kadar|faedah|interest)\b.{0,25}\b(?:loan|pinjaman|kedai|berapa|peratus|percent|%|setahun|tahun)\b|\b(?:loan|pinjaman|kedai)\b.{0,25}\b(?:kadar|faedah|interest|peratus|percent|%)\b|利率|年利率)/i.test(clean(text));
+const asksForProductColour = text => /(?:\b(?:warna|colour|color|colours|colors)\b|什么颜色|有哪些颜色|颜色)/i.test(clean(text));
+const asksForProductStorage = text => /(?:\b(?:berapa|brp|what|which|available|ada)\s*(?:gb|tb)\b|\b(?:storage|capacity|kapasiti|memory|memori)\b|多少\s*(?:gb|tb)|什么容量|容量)/i.test(clean(text));
 const asksForDocuments = text => /(?:dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|(?:loan\s*(?:kedai|shop)|shop\s*loan).{0,35}(?:perlukan?|perlu|need|required|kena\s*(?:sedia|hantar)|sediakan).{0,20}(?:apa|ape|what)|(?:apa|ape|what).{0,20}(?:yang\s*)?(?:perlu|need|required|kena\s*sediakan).{0,35}(?:loan\s*(?:kedai|shop)|shop\s*loan)|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
@@ -1395,6 +1419,8 @@ const productAliases = row => {
   return [...aliases].filter(alias => compactModelText(alias).length >= 2);
 };
 
+const modelCore = value => normalizedWords(value).replace(/^(?:apple\s+)?iphone\s+/, '').trim();
+
 export function matchInstantProduct(text, catalogs = []) {
   const query = normalizedWords(text), compactQuery = compactModelText(text), queryCandidates = modelQueryCandidates(text);
   if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
@@ -1413,6 +1439,7 @@ export function matchInstantProduct(text, catalogs = []) {
     let score = 0;
     if (query === model) score = 2400;
     else if (compactQuery === compactModel) score = 2300;
+    else if (modelCore(row.Model) && queryCandidates.some(candidate => candidate.words === modelCore(row.Model))) score = 2250;
     else if (model && includesTerm(query, model)) score = 2200;
     else if (compactModel.length >= 4 && queryCandidates.some(candidate => candidate.compact === compactModel)) score = 2100;
     for (const alias of productAliases(row)) {
@@ -1439,6 +1466,52 @@ export function matchInstantProduct(text, catalogs = []) {
   }
   return { product: ranked[0].row, options: [], ambiguous: false };
 }
+
+const approvedCatalogRow = row => truth(row.Active) && (!clean(row['Approval Status']) || clean(row['Approval Status']).toUpperCase() === 'APPROVED');
+
+const splitPhoneVariant = row => {
+  const directStorage = clean(row.Storage || row.Capacity || row['Storage Capacity']);
+  const directColour = clean(row.Colour || row.Color);
+  if (directStorage || directColour) return { storage: directStorage, colour: directColour };
+  const variant = clean(row.Variant);
+  if (!variant) return { storage: '', colour: '' };
+  const divided = variant.split(/(?:Â·|·|\||\/)/).map(part => clean(part)).filter(Boolean);
+  if (divided.length >= 2) return { storage: divided[0], colour: divided.slice(1).join(' / ') };
+  const storageMatch = variant.match(/\b\d+\s*(?:GB|TB)\b/i);
+  const storage = clean(storageMatch?.[0]).replace(/\s+/g, '').toUpperCase();
+  const colour = clean(storageMatch ? variant.replace(storageMatch[0], '').replace(/^\s*[-–—,:]+\s*|\s*[-–—,:]+\s*$/g, '') : variant);
+  return { storage, colour: /^(?:standard|default)$/i.test(colour) ? '' : colour };
+};
+
+const approvedPhoneOptions = (product, catalogs = []) => {
+  if (!product) return { storage: [], colours: [] };
+  const brand = normalizedWords(product.Brand), model = normalizedWords(product.Model);
+  const family = catalogs.filter(row => approvedCatalogRow(row) && normalizedWords(row.Brand) === brand && normalizedWords(row.Model) === model);
+  const storage = new Set(), colours = new Set();
+  for (const row of family) {
+    const option = splitPhoneVariant(row);
+    if (option.storage) storage.add(option.storage);
+    if (option.colour) colours.add(option.colour);
+  }
+  return {
+    storage: [...storage].sort((a, b) => (Number.parseInt(a, 10) || 0) - (Number.parseInt(b, 10) || 0) || a.localeCompare(b)),
+    colours: [...colours].sort((a, b) => a.localeCompare(b))
+  };
+};
+
+const approvedPhoneStorageOverview = (catalogs = []) => {
+  const groups = new Map();
+  for (const row of catalogs.filter(approvedCatalogRow)) {
+    const model = clean(row.Model), option = splitPhoneVariant(row);
+    if (!model || !option.storage) continue;
+    if (!groups.has(model)) groups.set(model, new Set());
+    groups.get(model).add(option.storage);
+  }
+  return [...groups.entries()].slice(0, 6).map(([model, values]) => {
+    const sorted = [...values].sort((a, b) => (Number.parseInt(a, 10) || 0) - (Number.parseInt(b, 10) || 0) || a.localeCompare(b));
+    return `${model}: ${sorted.join('/')}`;
+  }).join('; ');
+};
 
 const requestedMonthlyTenure = (value = '', unit = '') => {
   const text = normalizedWords(value);
@@ -1584,6 +1657,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (interpretedIntent === 'PROCESSING_TIME' || asksForLoanProcessingTime(text)) {
     return { handled: true, aiUnderstood: !!interpretedIntent, loanKedaiIntent: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'LOAN_PROCESSING_TIME') };
   }
+  if (interpretedIntent === 'INTEREST_RATE' || asksForInterestRate(text)) {
+    return { handled: true, interestRateIntent: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'INTEREST_RATE') };
+  }
   if ((interpretedIntent === 'FOLLOW_UP_TIME' || asksHowLongForAnswer(text)) && followsPendingBranchCheck(state)) {
     return { handled: true, aiUnderstood: !!interpretedIntent, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'FOLLOW_UP_TIME') };
   }
@@ -1623,13 +1699,57 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     };
   }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
+  const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
+  const deterministicProductMatch = matchInstantProduct(text, catalogPool);
+  const optionProduct = deterministicProductMatch.product || storedSelectedProduct;
+  const colourQuestion = interpretedIntent === 'PRODUCT_COLOUR' || asksForProductColour(text);
+  const storageQuestion = interpretedIntent === 'PRODUCT_STORAGE' || asksForProductStorage(text);
+  if (storageQuestion && !optionProduct && handphoneCatalog.some(approvedCatalogRow)) {
+    const overview = approvedPhoneStorageOverview(handphoneCatalog);
+    if (overview) return {
+      handled: true,
+      productOptionsIntent: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: 'HANDPHONE',
+      text: instantCopy(language, 'HANDPHONE_STORAGE_OVERVIEW', { storage: overview })
+    };
+  }
+  if ((colourQuestion || storageQuestion) && optionProduct) {
+    const optionUnit = clean(optionProduct.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'HANDPHONE';
+    const familyCatalog = optionUnit === 'HANDPHONE' ? handphoneCatalog : catalogPool;
+    const phoneOptions = approvedPhoneOptions(optionProduct, familyCatalog);
+    const hasColours = phoneOptions.colours.length > 0, hasStorage = phoneOptions.storage.length > 0;
+    const requestedBoth = colourQuestion && storageQuestion;
+    const copyKey = requestedBoth && hasColours && hasStorage
+      ? 'COLOUR_STORAGE_OPTIONS'
+      : colourQuestion && hasColours ? 'COLOUR_OPTIONS'
+      : storageQuestion && hasStorage ? 'STORAGE_OPTIONS'
+      : 'PRODUCT_OPTIONS_UNAVAILABLE';
+    const missingLabel = [colourQuestion && !hasColours ? (language === 'MS' ? 'warna' : language === 'ZH' ? '颜色' : 'colour') : '', storageQuestion && !hasStorage ? (language === 'MS' ? 'kapasiti' : language === 'ZH' ? '容量' : 'storage') : ''].filter(Boolean).join(language === 'ZH' ? '和' : ' dan ');
+    return {
+      handled: true,
+      productOptionsIntent: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: optionUnit,
+      product: optionProduct,
+      text: instantCopy(language, copyKey, {
+        brand: optionProduct.Brand,
+        model: optionProduct.Model,
+        colours: phoneOptions.colours.join(language === 'ZH' ? '、' : ', '),
+        storage: phoneOptions.storage.join(language === 'ZH' ? '、' : ', '),
+        options: missingLabel || (language === 'MS' ? 'pilihan' : language === 'ZH' ? '选项' : 'option')
+      }),
+      humanFollowUpRequired: copyKey === 'PRODUCT_OPTIONS_UNAVAILABLE' ? true : undefined
+    };
+  }
   const requestedTenure = aiIntent?.tenureYears
     ? (canonicalBusinessUnit(explicitUnit || fallbackUnit || routeBusinessUnit) === 'HANDPHONE' ? `${Number(aiIntent.tenureYears) * 12} months` : `${aiIntent.tenureYears} years`)
     : requestedMonthlyTenure(text, fallbackUnit || routeBusinessUnit);
   const cashPriceQuestion = interpretedIntent === 'CASH_PRICE' || asksForCashPrice(text);
   const depositQuestion = interpretedIntent === 'DEPOSIT' || asksForDeposit(text);
-  if ((requestedTenure || depositQuestion || cashPriceQuestion) && selectedModel) {
-    const selectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
+  const monthlyQuestion = interpretedIntent === 'MONTHLY_INSTALMENT' || asksForMonthlyInstalment(text);
+  if ((requestedTenure || depositQuestion || cashPriceQuestion || monthlyQuestion) && optionProduct) {
+    const selectedProduct = optionProduct;
     if (selectedProduct) {
       const selectedUnit = clean(selectedProduct.__businessUnit).toUpperCase() || fallbackUnit || routeBusinessUnit || 'MOTOR';
       const selectedPricing = selectedUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
@@ -1646,8 +1766,8 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
           : requestedRate?.deposit ? 'DEPOSIT_QUOTE' : 'DEPOSIT_UNAVAILABLE', {
           brand: selectedProduct.Brand, model: selectedProduct.Model, deposit: requestedRate?.deposit
         })
-        : instantCopy(language, requestedRate ? 'TENURE_QUOTE' : 'TENURE_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure, amount: requestedRate?.amount
+        : instantCopy(language, requestedRate ? (monthlyQuestion && !requestedTenure ? 'QUOTE_ONLY' : 'TENURE_QUOTE') : 'TENURE_UNAVAILABLE', {
+          brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
         });
       const continuation = cashPriceQuestion
         ? { nextStep: step || 'STEP_04_DOCUMENTS', text: baseText }
@@ -1669,9 +1789,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const aiSelectedProduct = clean(aiIntent?.catalogId)
     ? allCatalogs.find(row => clean(row['Catalog ID']) === clean(aiIntent.catalogId))
     : null;
-  let productMatch = aiSelectedProduct
-    ? { product: aiSelectedProduct, options: [], ambiguous: false }
-    : matchInstantProduct(aiIntent?.normalizedModel || text, catalogPool);
+  let productMatch = deterministicProductMatch.product || deterministicProductMatch.ambiguous
+    ? deterministicProductMatch
+    : aiSelectedProduct
+      ? { product: aiSelectedProduct, options: [], ambiguous: false }
+      : matchInstantProduct(aiIntent?.normalizedModel || text, catalogPool);
   const mayContinueClarification = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
     && previousCustomerText && previousCustomerText !== clean(text)
     && previousCustomerText.length <= 80 && clean(text).length <= 40
@@ -2261,8 +2383,8 @@ export default async function handler(req, res) {
             const deliveredState = {
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
-              'Selected Product Brand': clean(instantDecision.product?.Brand),
-              'Selected Product Model': clean(instantDecision.product?.Model)
+              'Selected Product Brand': clean(instantDecision.product?.Brand || conversationState['Selected Product Brand']),
+              'Selected Product Model': clean(instantDecision.product?.Model || conversationState['Selected Product Model'])
             };
             await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], deliveredState, 'CZ');
             Object.assign(conversationState, deliveredState);
