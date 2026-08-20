@@ -17,6 +17,7 @@ import {
   buildProgressiveProfileChanges,
   CREDIT_CONSENT_TEMPLATE_URL,
   customerAskedQuestion,
+  enforceConversationReplyContract,
   extractCustomerName,
   guardConversationProgress,
   hasRecentDocumentAcknowledgement,
@@ -312,6 +313,21 @@ test('unknown business questions use the answer-first AI route instead of a fixe
   assert.equal(decision.aiFallback, true);
   assert.equal(decision.answerCustomerQuestionFirst, true);
   assert.doesNotMatch(decision.text, /nama anda/i);
+});
+
+test('a customer can ask for motor and handphone together without falling into the generic menu', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME' },
+    text: 'kalau nak beli handphone dan motor dalam 1 masa boleh tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR'
+  });
+  assert.equal(decision.combinedApplicationIntent, true);
+  assert.equal(decision.answerCustomerQuestionFirst, true);
+  assert.match(decision.text, /boleh mohon motor dan telefon pada masa yang sama/i);
+  assert.match(decision.text, /dua permohonan berasingan/i);
+  assert.doesNotMatch(decision.text, /model, ansuran bulanan, dokumen|nama anda|iPhone/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
 test('profile facts provided during any conversation step are progressively mapped into CRM records', () => {
@@ -663,16 +679,19 @@ test('repeating only motor offers real options instead of repeating the same mod
 
 test('customer frustration triggers a useful recovery reply and never repeats the failed question', () => {
   const decision = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR', 'Last AI Message': 'Model motor atau telefon yang mana anda minat?' },
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Mike', 'Product Category': 'MOTOR', 'Last Customer Message': 'boleh beli motor dan phone sekali tak', 'Last AI Message': 'Model motor atau telefon yang mana anda minat?' },
     lead: { 'Customer Name': 'Mike', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
     text: 'tak faham ke apa saya cakap', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
     motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }]
   });
   assert.equal(decision.serviceRecovery, true);
+  assert.equal(decision.aiFallback, true);
+  assert.equal(decision.aiFallbackQuestion, 'boleh beli motor dan phone sekali tak');
+  assert.equal(decision.humanFollowUpRequired, true);
   assert.match(decision.text, /Maaf/);
-  assert.match(decision.text, /Yamaha Y15ZR/);
-  assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
+  assert.match(decision.text, /pengurus/i);
+  assert.doesNotMatch(decision.text, /Yamaha Y15ZR|iPhone|bajet bulanan|Model motor atau telefon yang mana/i);
 });
 
 test('loan kedai perlukan apa returns the required documents even when AI misclassifies it as processing time', () => {
@@ -775,7 +794,8 @@ test('a Malay conversation does not switch to English because the customer uses 
     lead: { 'Customer Name': 'Charles', Region: 'WEST_MALAYSIA', 'City or Area': 'Klang' },
     text: 'u ni tak faham apa i cakap ke', messageType: 'text', routeBusinessUnit: 'MOTOR'
   });
-  assert.match(decision.text, /Model motor atau telefon|Boleh|saya/i);
+  assert.match(decision.text, /Maaf|saya/i);
+  assert.match(decision.text, /pengurus/i);
   assert.doesNotMatch(decision.text, /Which motorcycle|You can send/i);
 });
 
@@ -874,7 +894,7 @@ test('a missing motor deposit is never guessed', () => {
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }],
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y16ZR', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }]
   });
-  assert.match(decision.text, /belum ada dalam sistem|semak dengan cawangan/i);
+  assert.match(decision.text, /pengesahan cawangan|semak dengan cawangan/i);
   assert.doesNotMatch(decision.text, /RM\d/i);
 });
 
@@ -972,7 +992,7 @@ test('a recognised model without approved regional pricing gets a useful reply i
   assert.equal(decision.handled, true);
   assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
   assert.match(decision.text, /NMAX/);
-  assert.match(decision.text, /semak dengan cawangan/i);
+  assert.match(decision.text, /pengesahan cawangan|semak dengan cawangan/i);
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
@@ -1220,7 +1240,8 @@ test('post-quote sales questions receive an immediate natural Malay answer inste
   const unknown = buildInstantSalesDecision({ ...base, text: 'boleh explain lagi?' });
   assert.match(documents.text, /IC depan dan belakang/);
   assert.match(budget.text, /Bajet bulanan/);
-  assert.match(unknown.text, /model, ansuran bulanan, dokumen/);
+  assert.match(unknown.text, /pengurus/i);
+  assert.doesNotMatch(unknown.text, /model, ansuran bulanan, dokumen/i);
   assert.equal(unknown.aiFallback, true);
   [documents, budget, unknown].forEach(result => assert.equal(result.handled, true));
 });
@@ -1423,4 +1444,183 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.equal(decision.handled, true);
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('motor category spelling variants never fall through to the generic help menu', () => {
+  for (const text of ['motor scuter ada tak', 'scooter ada tak', 'skuter ada ke']) {
+    const decision = buildInstantSalesDecision({
+      state: { 'Current Step': 'STEP_03_PRODUCT' },
+      lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+      text,
+      messageType: 'text',
+      routeBusinessUnit: 'MOTOR',
+      routeRegion: 'EAST_MALAYSIA'
+    });
+    assert.equal(decision.productCategoryIntent, true);
+    assert.equal(decision.requestedProductCategory, 'SCOOTER');
+    assert.equal(decision.catalogReviewRequired, true);
+    assert.equal(decision.humanFollowUpRequired, true);
+    assert.match(decision.text, /skuter.*bantu semak/i);
+    assert.match(decision.text, /tetap akan minta cawangan semak/i);
+    assert.doesNotMatch(decision.text, /model, ansuran bulanan, dokumen|anda mahu saya semak yang mana/i);
+    assert.doesNotMatch(decision.text, /tak ada|tiada|tidak ada|unavailable|not available/i);
+    assert.equal((decision.text.match(/\?/g) || []).length, 1);
+  }
+});
+
+test('motor category enquiry offers only approved priced regional matches when available', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'motor scuter ada tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M-SCOOTER-1', Brand: 'Yamaha', Model: 'NMAX', Category: 'Scooter', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M-CUB-1', Brand: 'Honda', Model: 'Wave Alpha', Category: 'Cub', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M-SCOOTER-PENDING', Brand: 'Test', Model: 'Pending Scooter', Category: 'Scooter', Active: 'TRUE', 'Approval Status': 'PENDING_APPROVAL' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M-SCOOTER-1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M-CUB-1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '180' },
+      { 'Catalog ID': 'M-SCOOTER-PENDING', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '199' }
+    ]
+  });
+  assert.equal(decision.productCategoryIntent, true);
+  assert.match(decision.text, /Yamaha NMAX/);
+  assert.doesNotMatch(decision.text, /Wave Alpha|Pending Scooter/);
+  assert.equal(decision.humanFollowUpRequired, undefined);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('an unlisted named model remains a valid enquiry and is queued for confirmation', () => {
+  for (const aiIntent of [
+    { intent: 'UNLISTED_PRODUCT', language: 'MS', businessUnit: 'MOTOR', normalizedModel: 'Aveta Nova 160', confidence: 0.98 },
+    { intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', normalizedModel: 'Aveta Nova 160', confidence: 0.98 }
+  ]) {
+    const decision = buildInstantSalesDecision({
+      state: { 'Current Step': 'STEP_03_PRODUCT' },
+      text: 'aveta nova 160 ada tak',
+      messageType: 'text',
+      routeBusinessUnit: 'MOTOR',
+      aiIntent
+    });
+    assert.equal(decision.unlistedProductIntent, true);
+    assert.equal(decision.catalogReviewRequired, true);
+    assert.equal(decision.humanFollowUpRequired, true);
+    assert.equal(decision.requestedProduct, 'Aveta Nova 160');
+    assert.match(decision.text, /akan semak Aveta Nova 160/i);
+    assert.match(decision.text, /tetap akan minta cawangan sahkan/i);
+    assert.doesNotMatch(decision.text, /anda mahu saya semak yang mana|model.*mana.*minat/i);
+    assert.equal((decision.text.match(/\?/g) || []).length, 1);
+  }
+});
+
+test('unlisted product availability has a deterministic safe path even when AI interpretation is unavailable', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT' },
+    text: 'motor Aveta Nova 160 ada tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR'
+  });
+  assert.equal(decision.unlistedProductIntent, true);
+  assert.equal(decision.catalogReviewRequired, true);
+  assert.match(decision.text, /Aveta Nova 160/i);
+  assert.doesNotMatch(decision.text, /tak ada|tiada|tidak ada|unavailable|not available/i);
+});
+
+test('approved runtime product knowledge explicitly keeps unlisted enquiries alive', () => {
+  const knowledge = approvedKnowledgeForRuntime({ text: 'scooter ada tak', businessUnit: 'MOTOR' });
+  assert.match(knowledge, /unlisted model or category remains a valid enquiry/i);
+  assert.match(knowledge, /never reject the customer/i);
+  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-20.7');
+});
+
+test('the global reply contract blocks menus, profile-gating and internal identity leakage', () => {
+  const state = {
+    'Current Step': 'STEP_01_NAME',
+    'Last AI Message': 'Boleh saya tahu nama anda?'
+  };
+  for (const candidate of [
+    'Boleh. Saya boleh bantu semak model, ansuran bulanan, dokumen yang diperlukan atau status permohonan. Anda mahu saya semak yang mana?',
+    'Boleh saya tahu nama anda?',
+    'Saya adalah AI chatbot yang membantu anda.'
+  ]) {
+    const guarded = enforceConversationReplyContract({
+      state,
+      text: 'scooter ada tak?',
+      decision: { handled: true, nextStep: 'STEP_01_NAME', text: candidate }
+    });
+    assert.equal(guarded.replyContractRecovered, true);
+    assert.equal(guarded.humanFollowUpRequired, true);
+    assert.match(guarded.text, /faham soalan anda/i);
+    assert.doesNotMatch(guarded.text, /saya boleh bantu semak model|nama anda|AI|chatbot/i);
+    assert.equal((guarded.text.match(/[?？]/g) || []).length, 0);
+  }
+});
+
+test('the global reply contract prevents duplicate normal replies and caps every reply at one question', () => {
+  const duplicate = enforceConversationReplyContract({
+    state: { 'Last AI Message': 'Model mana yang anda mahu semak?' },
+    text: 'scooter ada tak',
+    decision: { handled: true, text: 'Model mana yang anda mahu semak?' }
+  });
+  assert.equal(duplicate.replyContractRecovered, true);
+  assert.doesNotMatch(duplicate.text, /Model mana yang anda mahu semak/i);
+
+  const multiQuestion = enforceConversationReplyContract({
+    state: {},
+    text: 'nak semak motor',
+    decision: { handled: true, text: 'Baik. Model apa? Bajet berapa? Tinggal di mana? 😊' }
+  });
+  assert.equal(multiQuestion.replyContractRecovered, undefined);
+  assert.equal((multiQuestion.text.match(/[?？]/g) || []).length, 1);
+  assert.doesNotMatch(multiQuestion.text, /😊/u);
+});
+
+test('ordinary structured workflows remain intact while the global contract governs every normal chat reply', () => {
+  const applicationForm = 'TOLONG ISI MAKLUMAT DI BAWAH:\nNama pemohon:\nAlamat Rumah:\nNombor tel pemohon:';
+  const structured = enforceConversationReplyContract({
+    state: { 'Last AI Message': applicationForm },
+    text: 'ok',
+    decision: { handled: true, applicationDetails: true, text: applicationForm }
+  });
+  assert.equal(structured.text, applicationForm);
+  assert.equal(structured.replyContractApplied, undefined);
+
+  const normal = enforceConversationReplyContract({
+    state: {},
+    text: 'berapa lama process loan?',
+    decision: { handled: true, text: 'Biasanya 1–3 hari bekerja selepas dokumen lengkap diterima. Mahu saya bantu mula semakan?' }
+  });
+  assert.equal(normal.replyContractApplied, true);
+  assert.equal(normal.replyContractRecovered, undefined);
+  assert.match(normal.text, /1–3 hari bekerja/);
+});
+
+test('major chatbot intents all return specific replies instead of the old capability menu', () => {
+  const catalog = [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'NMAX', Category: 'Scooter', Active: 'TRUE', 'Approval Status': 'APPROVED' }];
+  const pricing = [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365', 'Deposit (RM)': '500' }];
+  const base = {
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA', motorCatalog: catalog, motorPricing: pricing
+  };
+  const scenarios = [
+    ['scooter ada tak', /Yamaha NMAX/],
+    ['nmax berapa sebulan', /RM365/],
+    ['deposit berapa untuk nmax', /RM500/],
+    ['loan kedai perlukan apa', /IC depan dan belakang/],
+    ['process loan berapa lama', /1[–-]3 hari bekerja/],
+    ['interest setahun berapa', /10%/],
+    ['boleh apply motor dan phone sekali?', /dua permohonan berasingan/i]
+  ];
+  for (const [text, expected] of scenarios) {
+    const decision = buildInstantSalesDecision({ ...base, text });
+    const guarded = enforceConversationReplyContract({ state: base.state, text, decision });
+    assert.match(guarded.text, expected);
+    assert.doesNotMatch(guarded.text, /saya boleh bantu semak model, ansuran bulanan|anda mahu saya semak yang mana/i);
+    assert.ok((guarded.text.match(/[?？]/g) || []).length <= 1);
+  }
 });
