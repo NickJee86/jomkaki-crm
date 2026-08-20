@@ -1047,6 +1047,96 @@ test('phone shorthand groups colour rows and identifies the requested model fami
   assert.equal(match.product.Model, 'iPhone 17 Pro Max');
   assert.equal(matchInstantProduct('nak ip17pm', catalog).product.Model, 'iPhone 17 Pro Max');
   assert.equal(matchInstantProduct('iphone 17 promx ada?', catalog).product.Model, 'iPhone 17 Pro Max');
+  assert.equal(matchInstantProduct('17 pro', catalog).product.Model, 'iPhone 17 Pro');
+  assert.equal(matchInstantProduct('iphone 17 pro la', catalog).product.Model, 'iPhone 17 Pro');
+});
+
+test('confirmed phone model answers storage and colour follow-ups from approved catalogue variants', () => {
+  const catalog = [
+    { 'Catalog ID': 'HP-17P-256-OR', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB · Cosmic Orange', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'HP-17P-512-BL', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '512GB · Deep Blue', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'HP-17P-1TB-SI', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '1TB · Silver', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'HP-17PM-256-OR', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB · Cosmic Orange', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+  ];
+  const base = {
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE', 'Selected Product Brand': 'Apple', 'Selected Product Model': 'iPhone 17 Pro' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, messageType: 'text', routeBusinessUnit: 'HANDPHONE', handphoneCatalog: catalog
+  };
+  const storage = buildInstantSalesDecision({ ...base, text: 'yang ini ada berapa gb?' });
+  const colours = buildInstantSalesDecision({ ...base, text: 'warna apa je ada?' });
+  const explicit = buildInstantSalesDecision({ ...base, state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE' }, text: 'iphone 17 pro ada warna apa?' });
+  assert.equal(storage.product.Model, 'iPhone 17 Pro');
+  assert.match(storage.text, /256GB/);
+  assert.match(storage.text, /512GB/);
+  assert.match(storage.text, /1TB/);
+  assert.doesNotMatch(storage.text, /pilih satu|Pro Max/i);
+  assert.match(colours.text, /Cosmic Orange/);
+  assert.match(colours.text, /Deep Blue/);
+  assert.match(colours.text, /Silver/);
+  assert.equal(explicit.product.Model, 'iPhone 17 Pro');
+  assert.match(explicit.text, /Cosmic Orange/);
+});
+
+test('general latest-phone storage question answers from the approved catalogue before asking for a model', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT' }, text: 'nak tahu dulu phone latest ada berapa gb', messageType: 'text', routeBusinessUnit: 'HANDPHONE',
+    handphoneCatalog: [
+      { 'Catalog ID': 'HP-17-256', Brand: 'Apple', Model: 'iPhone 17', Variant: '256GB · Black', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17P-256', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB · Silver', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17P-512', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '512GB · Deep Blue', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+    ]
+  });
+  assert.equal(decision.productUnit, 'HANDPHONE');
+  assert.match(decision.text, /iPhone 17: 256GB/);
+  assert.match(decision.text, /iPhone 17 Pro: 256GB\/512GB/);
+  assert.doesNotMatch(decision.text, /Maksud anda|Pilih satu/i);
+});
+
+test('selected product handles general monthly follow-up without asking for the model again', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'sebulan berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Deposit (RM)': '500' }],
+    aiIntent: { intent: 'MONTHLY_INSTALMENT', language: 'MS', businessUnit: 'MOTOR', confidence: 0.99 }
+  });
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.match(decision.text, /RM340/);
+  assert.match(decision.text, /5 years|5 tahun/i);
+  assert.doesNotMatch(decision.text, /model.*mana|maksud anda|pilih satu/i);
+});
+
+test('exact customer model overrides an incorrect AI catalogue guess', () => {
+  const catalog = [
+    { 'Catalog ID': 'Y15', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' },
+    { 'Catalog ID': 'Y16', Brand: 'Yamaha', Model: 'Y16ZR', Active: 'TRUE' }
+  ];
+  const pricing = [
+    { 'Catalog ID': 'Y15', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340' },
+    { 'Catalog ID': 'Y16', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' }
+  ];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT' }, lead: { Region: 'EAST_MALAYSIA' }, text: 'Yamaha Y15ZR', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: catalog, motorPricing: pricing,
+    aiIntent: { intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', catalogId: 'Y16', normalizedModel: 'Y16ZR', confidence: 0.99 }
+  });
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.match(decision.text, /RM340/);
+  assert.doesNotMatch(decision.text, /Y16ZR|RM365/);
+});
+
+test('Loan Kedai interest rate is answered deterministically from approved knowledge', () => {
+  for (const text of ['kadar loan kedai berapa', 'interest setahun berapa', '年利率多少']) {
+    const decision = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_03_PRODUCT' }, text, messageType: 'text', routeBusinessUnit: 'MOTOR' });
+    assert.equal(decision.interestRateIntent, true);
+    assert.match(decision.text, /10%/);
+    assert.doesNotMatch(decision.text, /model.*mana|pilih satu/i);
+  }
+});
+
+test('conversation state preserves the selected product when a follow-up reply has no new product', () => {
+  assert.match(source, /instantDecision\.product\?\.Brand \|\| conversationState\['Selected Product Brand'\]/);
+  assert.match(source, /instantDecision\.product\?\.Model \|\| conversationState\['Selected Product Model'\]/);
 });
 
 test('phone shorthand can override a stale motor category without asking the customer to restart', () => {
