@@ -75,6 +75,7 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'An application may start without a personal bank account, but a personal account and Direct Debit are required before Agreement signing and disbursement.',
     'Working OKU applicants may apply; non-working applicants are not eligible.',
     'Currently restricted occupations are Police, Army, Grab rider and Foodpanda rider; policy remains configurable.',
+    'Motor Loan Kedai uses a 10% per-year Hire Purchase rate; customer monthly instalments must still come from the approved model, deposit, region and tenure pricing table.',
     'Motor Loan Kedai tenure is 2 to 5 years, subject to approved pricing and eligibility.',
     'Never guarantee approval or automatically reject merely because one supporting document or statement month is missing.'
   ]),
@@ -100,13 +101,14 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Never guess, calculate or infer a customer price from an internal selling price.',
     'For motor, quote only the correct approved region, exact model or variant and available tenure; include approved deposit when relevant.',
     'For handphone, show monthly payment only. Never disclose selling price, cash price, internal price or deposit.',
+    'For handphone, approved storage and colour choices come from the active catalogue variants for the confirmed model; answer those choices directly without restarting model selection.',
     'A filled approved tenure is available; a blank, disabled, expired or unapproved value must not be quoted.',
     'Give the most relevant option first and offer other approved tenures only when useful or requested.',
     'If approved data is missing or conflicting, do not guess; create a pricing review for Administrator or Regional Manager.'
   ]),
   product: freezeList([
     'Normalize spacing, punctuation, case, abbreviations and likely typos before matching the active approved catalogue.',
-    'Understand short forms such as y16, y16zr, y 16, nmax and n max.',
+    'Understand short forms such as y15zr, y16, y16zr, y 16, nmax, n max, 17 pro and 17 pro max; an exact model code always overrides a fuzzy or stale conversation match.',
     'For one strong match, confirm naturally, send one exact approved image, answer the immediate question and ask one next-step question.',
     'For several plausible matches, ask one short clarification with only the most relevant choices.',
     'For no safe match, ask for one clue such as brand, photo, budget or spelling; never invent a model.',
@@ -225,7 +227,7 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-20.3',
+  version: '2026-08-20.4',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
