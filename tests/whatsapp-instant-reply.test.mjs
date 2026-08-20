@@ -14,7 +14,9 @@ import {
   buildInitialConversationState,
   buildInstantSalesDecision,
   buildMediaProxyUrl,
+  buildProgressiveProfileChanges,
   CREDIT_CONSENT_TEMPLATE_URL,
+  customerAskedQuestion,
   extractCustomerName,
   guardConversationProgress,
   hasRecentDocumentAcknowledgement,
@@ -253,12 +255,65 @@ test('webhook acknowledgement stays disabled so one inbound produces one final r
 });
 
 test('webhook persists the next conversation step before sending the reply', () => {
-  const persistIndex = source.indexOf("await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'AK')");
+  const persistIndex = source.indexOf("await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'CZ')");
   const sendIndex = source.indexOf('instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision })');
   assert.ok(persistIndex > 0);
   assert.ok(sendIndex > persistIndex);
   assert.match(source, /'Last AI Message': clean\(instantDecision\.text\)/);
   assert.doesNotMatch(source, /'Last AI Reply'/);
+});
+
+test('every customer question bypasses onboarding gates and gets an answer-first route', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME' },
+    text: 'hanya ada berapa model ni sahaja?',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' },
+      { 'Catalog ID': 'M2', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' }
+    ]
+  });
+  assert.equal(customerAskedQuestion('hanya ada berapa model ni sahaja?'), true);
+  assert.equal(decision.availableModelsIntent, true);
+  assert.match(decision.text, /bukan semua model/i);
+  assert.doesNotMatch(decision.text, /^Model motor atau telefon/i);
+});
+
+test('unknown business questions use the answer-first AI route instead of a fixed profile question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_01_NAME' },
+    text: 'kalau saya ada dua kerja macam mana kira?',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR'
+  });
+  assert.equal(decision.aiFallback, true);
+  assert.equal(decision.answerCustomerQuestionFirst, true);
+  assert.doesNotMatch(decision.text, /nama anda/i);
+});
+
+test('profile facts provided during any conversation step are progressively mapped into CRM records', () => {
+  const profile = buildProgressiveProfileChanges({
+    text: 'nama saya Aiman, saya di Bintulu. kerja dengan ABC Trading gaji RM3000 bajet RM400',
+    currentStep: 'STEP_03_PRODUCT',
+    routeBusinessUnit: 'MOTOR',
+    branches: [{ 'Branch ID': 'BR-BTU', 'Team ID': 'TEAM-EAST', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Bintulu', Active: 'TRUE', 'Business Unit': 'MOTOR' }],
+    aiIntent: {
+      intent: 'BUDGET', businessUnit: 'MOTOR', customerName: 'Aiman', locationQuery: 'Bintulu', monthlyBudgetRm: 400,
+      employerName: 'ABC Trading', jobPosition: 'Sales Assistant', employmentDurationMonths: 18, monthlyIncomeRm: 3000,
+      salaryPaymentMethod: 'BANK TRANSFER', tenureYears: 5
+    }
+  });
+  assert.equal(profile.leadChanges['Customer Name'], 'Aiman');
+  assert.equal(profile.leadChanges['City or Area'], 'Bintulu');
+  assert.equal(profile.stateChanges['Requested Amount'], '400');
+  assert.equal(profile.stateChanges['Monthly Income'], '3000');
+  assert.equal(profile.applicationChanges['Employer Name'], 'ABC Trading');
+  assert.equal(profile.applicationChanges['Loan Tenure Years'], '5');
 });
 
 test('an older Meta delivery can be recorded but must never receive a reply', () => {
