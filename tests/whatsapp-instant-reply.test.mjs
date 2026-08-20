@@ -39,10 +39,11 @@ import {
   sanitizeAiFallbackReply,
   shouldDispatchEarlyConsent,
   shouldSendImmediateAcknowledgement,
-  shouldStartApplicationDetails
+  shouldStartApplicationDetails,
+  usableCustomerName
 } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
-import { approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
+import { APPROVED_KNOWLEDGE_PAGES, approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -81,6 +82,18 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
   ]);
+  assert.equal(APPROVED_KNOWLEDGE_PAGES.length, 16);
+  assert.equal(JOMKAKI_KNOWLEDGE.approvedSources.length, 16);
+  assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, 'NOTION_APPROVED_COMPILED_CACHE');
+  assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, 16);
+  const productKnowledge = approvedKnowledgeForRuntime({ text: 'apa model motor ada', businessUnit: 'MOTOR' });
+  assert.match(productKnowledge, /\[conversation\]/);
+  assert.match(productKnowledge, /\[product\]/);
+  assert.match(productKnowledge, /active approved catalogue/i);
+  assert.doesNotMatch(productKnowledge, /LoanBuddy customer|LoanBuddy credential/i);
+  const applicationKnowledge = approvedKnowledgeForRuntime({ text: 'sudah sign consent, borang mana', businessUnit: 'MOTOR' });
+  assert.match(applicationKnowledge, /one complete WhatsApp application form/i);
+  assert.match(applicationKnowledge, /one or two outstanding items do not block consent/i);
 });
 
 test('the first application document immediately sends the consent PDF without waiting for all documents', () => {
@@ -476,7 +489,23 @@ test('sales onboarding safely captures the customer name', () => {
   assert.equal(extractCustomerName('Nama saya Ahmad Hakim'), 'Ahmad Hakim');
   assert.equal(extractCustomerName('Call me Mei Ling'), 'Mei Ling');
   assert.equal(extractCustomerName('Yamaha Y16ZR'), '');
+  assert.equal(extractCustomerName('apa model motor ada'), '');
+  assert.equal(extractCustomerName('berapa ansuran bulanan'), '');
+  assert.equal(usableCustomerName('apa model motor ada'), '');
   assert.equal(extractCustomerName('hi'), '');
+});
+
+test('a polluted customer-name field is quarantined and can never enter the greeting', () => {
+  const state = { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'apa model motor ada' };
+  const lead = { 'Customer Name': 'apa model motor ada' };
+  const greeting = buildInstantSalesDecision({ state, lead, text: 'hi', messageType: 'text' });
+  assert.equal(greeting.nextStep, 'STEP_01_NAME');
+  assert.match(greeting.text, /JomKaki Rider/);
+  assert.doesNotMatch(greeting.text, /Salam kenal, apa model motor ada/i);
+  const cleanup = buildProgressiveProfileChanges({ state, lead, currentStep: 'STEP_02_LOCATION', text: 'hi' });
+  assert.equal(cleanup.stateChanges['Customer Name'], '');
+  assert.equal(cleanup.leadChanges['Customer Name'], '');
+  assert.equal(cleanup.applicationChanges['Applicant Name'], '');
 });
 
 test('customer area resolves to the correct active business branch', () => {
@@ -1102,6 +1131,10 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
   assert.equal(request.safety_identifier.length, 64);
   assert.equal(request.input.includes('60123456789'), false);
   assert.equal(request.max_output_tokens, 180);
+  assert.match(request.input, /Approved Notion knowledge snapshot/);
+  assert.match(request.input, /\[conversation\]/);
+  assert.match(request.input, /\[memory\]/);
+  assert.equal(request.metadata.knowledge_pages, '16');
 
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
@@ -1257,3 +1290,4 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
+
