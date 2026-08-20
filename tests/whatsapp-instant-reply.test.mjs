@@ -82,18 +82,23 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
   ]);
-  assert.equal(APPROVED_KNOWLEDGE_PAGES.length, 16);
-  assert.equal(JOMKAKI_KNOWLEDGE.approvedSources.length, 16);
+  assert.equal(APPROVED_KNOWLEDGE_PAGES.length, 19);
+  assert.equal(JOMKAKI_KNOWLEDGE.approvedSources.length, 19);
   assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, 'NOTION_APPROVED_COMPILED_CACHE');
-  assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, 16);
+  assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, 19);
   const productKnowledge = approvedKnowledgeForRuntime({ text: 'apa model motor ada', businessUnit: 'MOTOR' });
   assert.match(productKnowledge, /\[conversation\]/);
+  assert.match(productKnowledge, /\[behavior\]/);
+  assert.match(productKnowledge, /\[sop\]/);
   assert.match(productKnowledge, /\[product\]/);
   assert.match(productKnowledge, /active approved catalogue/i);
   assert.doesNotMatch(productKnowledge, /LoanBuddy customer|LoanBuddy credential/i);
   const applicationKnowledge = approvedKnowledgeForRuntime({ text: 'sudah sign consent, borang mana', businessUnit: 'MOTOR' });
   assert.match(applicationKnowledge, /one complete WhatsApp application form/i);
   assert.match(applicationKnowledge, /one or two outstanding items do not block consent/i);
+  const roleKnowledge = approvedKnowledgeForRuntime({ text: 'regional manager approve catalog', businessUnit: 'MOTOR' });
+  assert.match(roleKnowledge, /\[roleSop\]/);
+  assert.match(roleKnowledge, /pending until Administrator approval/i);
 });
 
 test('the first application document immediately sends the consent PDF without waiting for all documents', () => {
@@ -1134,7 +1139,7 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
   assert.match(request.input, /Approved Notion knowledge snapshot/);
   assert.match(request.input, /\[conversation\]/);
   assert.match(request.input, /\[memory\]/);
-  assert.equal(request.metadata.knowledge_pages, '16');
+  assert.equal(request.metadata.knowledge_pages, '19');
 
   const fetchImpl = async (_url, options) => {
     const body = JSON.parse(options.body);
