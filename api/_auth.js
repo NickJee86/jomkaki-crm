@@ -73,18 +73,23 @@ export async function getAccessToken(req) {
   return response.ok ? (await response.json()).accessToken : '';
 }
 
-async function dynamicAccounts(req) {
+async function dynamicAccountDirectory(req) {
   try {
     const token = await getAccessToken(req);
-    if (!token) return [];
+    if (!token) return { available: false, accounts: [] };
     const range = encodeURIComponent('CRM_User_Access!A1:S1000');
     const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${range}`, { headers: { authorization: `Bearer ${token}` } });
-    if (!response.ok) return [];
+    if (!response.ok) return { available: false, accounts: [] };
     const [headers = [], ...rows] = (await response.json()).values || [];
-    return rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => row.Username).map(row => ({
+    const accounts = rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => row.Username).map(row => ({
       id: row['Account ID'], username: row.Username, passwordHash: row['Password Hash'], role: normaliseRole(row.Role), region: normaliseRegion(row.Region), businessAccess: normaliseBusinessAccess(row['Business Access'], row.Role), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], rowNumber: row.rowNumber, active: clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE', authSource: 'sheet', authVersion: clean(row['Updated At'])
     }));
-  } catch { return []; }
+    return { available: true, accounts };
+  } catch { return { available: false, accounts: [] }; }
+}
+
+async function dynamicAccounts(req) {
+  return (await dynamicAccountDirectory(req)).accounts;
 }
 
 export function getSession(req) {
@@ -121,7 +126,16 @@ export async function authenticate(req, username, password) {
 
 export async function validateSession(req, session) {
   if (!session?.username) return false;
-  const account = (await dynamicAccounts(req)).find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
+  const directory = await dynamicAccountDirectory(req);
+  if (!directory.available) {
+    // A temporary Google/Sheets outage must not sign out a user who still has a
+    // valid, signed and unexpired session cookie. Account changes are enforced
+    // again as soon as the directory becomes reachable.
+    if (clean(session.authSource) === 'sheet') return { ...session, validationDeferred: true };
+    const environment = environmentAccounts().find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
+    return environment ? session : false;
+  }
+  const account = directory.accounts.find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
   if (account?.passwordHash) {
     if (!account.active || (account.lockedUntil && new Date(account.lockedUntil).getTime() > Date.now())) return false;
     if (clean(session.authSource) !== 'sheet' || clean(session.authVersion) !== clean(account.authVersion)) return false;
@@ -178,3 +192,4 @@ export function setSession(res, account) {
 export function clearSession(res) {
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);
 }
+
