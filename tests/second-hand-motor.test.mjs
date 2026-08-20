@@ -55,7 +55,8 @@ test('CRM exposes secure inventory management, phone photo upload, location and 
   assert.match(ui, /Branch submission.*Regional\/Admin approval.*Customer & AI publication/s);
   assert.match(ui, /Submit for approval/);
   assert.match(ui, /Approve & publish/);
-  assert.match(index, /data-view="usedMotorInventory"/);
+  assert.match(index, /data-view="products"/);
+  assert.match(app, /hubCard\('usedMotorInventory'/);
 });
 
 test('Make routes second-hand questions through live stock, price, region and same-number reply rules', () => {
@@ -78,3 +79,4 @@ test('Administrator reports split second-hand inventory with flexible combined f
   assert.match(app, /2nd hand available stock value/i);
   assert.match(app, /report\.secondHandRows/);
 });
+
