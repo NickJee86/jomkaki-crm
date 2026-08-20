@@ -234,7 +234,7 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-20.7',
+  version: '2026-08-20.8',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
