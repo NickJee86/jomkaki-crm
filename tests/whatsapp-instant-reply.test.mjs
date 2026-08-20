@@ -1534,7 +1534,7 @@ test('approved runtime product knowledge explicitly keeps unlisted enquiries ali
   const knowledge = approvedKnowledgeForRuntime({ text: 'scooter ada tak', businessUnit: 'MOTOR' });
   assert.match(knowledge, /unlisted model or category remains a valid enquiry/i);
   assert.match(knowledge, /never reject the customer/i);
-  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-20.7');
+  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-20.8');
 });
 
 test('the global reply contract blocks menus, profile-gating and internal identity leakage', () => {
@@ -1622,5 +1622,25 @@ test('major chatbot intents all return specific replies instead of the old capab
     assert.match(guarded.text, expected);
     assert.doesNotMatch(guarded.text, /saya boleh bantu semak model, ansuran bulanan|anda mahu saya semak yang mana/i);
     assert.ok((guarded.text.match(/[?？]/g) || []).length <= 1);
+  }
+});
+
+
+test('payslip-month questions always receive the approved three-month rule directly', () => {
+  for (const text of ['berapa bulan slip gaji', 'saya tnya berapa bulan nak slip gaji tu']) {
+    const decision = buildInstantSalesDecision({
+      state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin' },
+      lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+      text,
+      messageType: 'text',
+      routeBusinessUnit: 'MOTOR',
+      aiIntent: { intent: 'GENERAL', language: 'MS', confidence: 0.99 }
+    });
+    const guarded = enforceConversationReplyContract({ state: {}, text, decision });
+    assert.match(guarded.text, /3 bulan terkini/i);
+    assert.match(guarded.text, /1 atau 2 bulan/i);
+    assert.match(guarded.text, /tidak ditolak secara automatik/i);
+    assert.doesNotMatch(guarded.text, /saya boleh bantu semak model|anda mahu saya semak yang mana/i);
+    assert.equal((guarded.text.match(/[?？]/g) || []).length, 0);
   }
 });
