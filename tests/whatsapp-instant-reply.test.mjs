@@ -1077,6 +1077,45 @@ test('confirmed phone model answers storage and colour follow-ups from approved 
   assert.match(explicit.text, /Cosmic Orange/);
 });
 
+test('misspelled Pro Max question keeps the most specific model and its approved variants', () => {
+  const catalog = [
+    { 'Catalog ID': 'HP-17-256-BLK', Brand: 'Apple', Model: 'iPhone 17', Variant: '256GB · Black', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 256gb black' },
+    { 'Catalog ID': 'HP-17-512-LAV', Brand: 'Apple', Model: 'iPhone 17', Variant: '512GB · Lavender', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 512gb lavender' },
+    { 'Catalog ID': 'HP-17P-256-SI', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB · Silver', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 pro 256gb silver' },
+    { 'Catalog ID': 'HP-17PM-256-OR', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB · Cosmic Orange', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 pro max 256gb cosmic orange' },
+    { 'Catalog ID': 'HP-17PM-512-BLU', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '512GB · Deep Blue', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 pro max 512gb deep blue' }
+  ];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'ipone 17 promax ada berapa warna dan gb?', messageType: 'text', routeBusinessUnit: 'HANDPHONE', handphoneCatalog: catalog
+  });
+  assert.equal(decision.product.Model, 'iPhone 17 Pro Max');
+  assert.match(decision.text, /256GB/);
+  assert.match(decision.text, /512GB/);
+  assert.match(decision.text, /Cosmic Orange/);
+  assert.match(decision.text, /Deep Blue/);
+  assert.doesNotMatch(decision.text, /Lavender|Maksud anda|Pilih satu/i);
+});
+
+test('explicit storage follow-up uses the confirmed Pro Max instead of asking for the model again', () => {
+  const catalog = [
+    { 'Catalog ID': 'HP-17-256-BLK', Brand: 'Apple', Model: 'iPhone 17', Variant: '256GB · Black', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 256gb black' },
+    { 'Catalog ID': 'HP-17PM-256-OR', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '256GB · Cosmic Orange', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 pro max 256gb cosmic orange' },
+    { 'Catalog ID': 'HP-17PM-512-BLU', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '512GB · Deep Blue', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'apple iphone 17 pro max 512gb deep blue' }
+  ];
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE', 'Selected Product Brand': 'Apple', 'Selected Product Model': 'iPhone 17 Pro Max' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: '256gb ada tak', messageType: 'text', routeBusinessUnit: 'HANDPHONE', handphoneCatalog: catalog
+  });
+  assert.equal(decision.product.Model, 'iPhone 17 Pro Max');
+  assert.match(decision.text, /^Ada\./);
+  assert.match(decision.text, /iPhone 17 Pro Max/);
+  assert.match(decision.text, /256GB/);
+  assert.doesNotMatch(decision.text, /Maksud anda|Pilih satu|iPhone 17 atau/i);
+});
+
 test('general latest-phone storage question answers from the approved catalogue before asking for a model', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT' }, text: 'nak tahu dulu phone latest ada berapa gb', messageType: 'text', routeBusinessUnit: 'HANDPHONE',
@@ -1385,4 +1424,3 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.match(decision.text, /Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
-

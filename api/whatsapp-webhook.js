@@ -759,7 +759,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -804,6 +804,8 @@ const instantCopy = (language, key, values = {}) => {
       INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using the Hire Purchase method. The actual monthly instalment depends on the approved model, deposit and tenure.',
       COLOUR_OPTIONS: `For ${brand} ${model}, the approved catalogue colours are ${colours}.`,
       STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}.`,
+      STORAGE_AVAILABLE: `Yes, ${brand} ${model} is available in ${requestedStorage}. The approved storage options are ${storage}.`,
+      STORAGE_UNAVAILABLE: `${requestedStorage} is not recorded for ${brand} ${model}. The approved storage options are ${storage}.`,
       HANDPHONE_STORAGE_OVERVIEW: `For the current phone range, the approved storage choices are ${storage}. Tell me which model you prefer and I will give you its exact monthly instalment.`,
       COLOUR_STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}, and the colours are ${colours}.`,
       PRODUCT_OPTIONS_UNAVAILABLE: `I have confirmed ${brand} ${model}, but its approved ${options} choices are not recorded yet. I can arrange a catalogue check without asking you to choose the model again.`,
@@ -852,6 +854,8 @@ const instantCopy = (language, key, values = {}) => {
       INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran bulanan sebenar ikut model, deposit dan tempoh yang diluluskan.',
       COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang direkodkan dalam katalog diluluskan ialah ${colours}.`,
       STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}.`,
+      STORAGE_AVAILABLE: `Ada. ${brand} ${model} tersedia dalam ${requestedStorage}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
+      STORAGE_UNAVAILABLE: `${requestedStorage} tidak direkodkan untuk ${brand} ${model}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
       HANDPHONE_STORAGE_OVERVIEW: `Untuk rangkaian telefon semasa, pilihan kapasiti yang diluluskan ialah ${storage}. Beritahu model yang anda minat dan saya akan beri ansuran bulanan yang tepat.`,
       COLOUR_STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}, dan warna yang ada ialah ${colours}.`,
       PRODUCT_OPTIONS_UNAVAILABLE: `Saya sudah sahkan ${brand} ${model}, tetapi pilihan ${options} yang diluluskan belum direkodkan. Saya boleh minta semakan katalog tanpa suruh anda pilih model semula.`,
@@ -882,6 +886,8 @@ const instantCopy = (language, key, values = {}) => {
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
       STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
+      STORAGE_AVAILABLE: `有，${brand} ${model} 提供 ${requestedStorage}。已获批容量有：${storage}。`,
+      STORAGE_UNAVAILABLE: `${brand} ${model} 暂未记录 ${requestedStorage}。已获批容量有：${storage}。`,
       HANDPHONE_STORAGE_OVERVIEW: `目前手机目录中已获批的容量选择是：${storage}。告诉我你喜欢的型号，我会提供准确月供。`,
       COLOUR_STORAGE_OPTIONS: `${brand} ${model} 已获批的容量有 ${storage}，颜色有 ${colours}。`,
       PRODUCT_OPTIONS_UNAVAILABLE: `已确认是 ${brand} ${model}，但获批的${options}选择尚未记录。我可以安排目录核对，不会再让你重选型号。`,
@@ -1313,7 +1319,11 @@ const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayme
 const asksForMonthlyInstalment = text => /(?:\b(?:ansuran|bayaran)\s*(?:bulanan|sebulan)\b|\bberapa\s*(?:sebulan|bulanannya?)\b|\bsebulan\s*berapa\b|\bmonthly\s*(?:instalment|installment|payment|berapa|how much)?\b|每月多少|月供多少|多少月供)/i.test(clean(text));
 const asksForInterestRate = text => /(?:\b(?:kadar|faedah|interest)\b.{0,25}\b(?:loan|pinjaman|kedai|berapa|peratus|percent|%|setahun|tahun)\b|\b(?:loan|pinjaman|kedai)\b.{0,25}\b(?:kadar|faedah|interest|peratus|percent|%)\b|利率|年利率)/i.test(clean(text));
 const asksForProductColour = text => /(?:\b(?:warna|colour|color|colours|colors)\b|什么颜色|有哪些颜色|颜色)/i.test(clean(text));
-const asksForProductStorage = text => /(?:\b(?:berapa|brp|what|which|available|ada)\s*(?:gb|tb)\b|\b(?:storage|capacity|kapasiti|memory|memori)\b|多少\s*(?:gb|tb)|什么容量|容量)/i.test(clean(text));
+const asksForProductStorage = text => /(?:\b(?:\d+\s*)?(?:gb|tb)\b|\b(?:berapa|brp|what|which|available|ada)\s*(?:gb|tb)\b|\b(?:storage|capacity|kapasiti|memory|memori)\b|多少\s*(?:gb|tb)|什么容量|容量)/i.test(clean(text));
+const requestedProductStorage = text => {
+  const match = clean(text).match(/\b(\d+)\s*(gb|tb)\b/i);
+  return match ? `${match[1]}${match[2].toUpperCase()}` : '';
+};
 const asksForDocuments = text => /(?:dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|(?:loan\s*(?:kedai|shop)|shop\s*loan).{0,35}(?:perlukan?|perlu|need|required|kena\s*(?:sedia|hantar)|sediakan).{0,20}(?:apa|ape|what)|(?:apa|ape|what).{0,20}(?:yang\s*)?(?:perlu|need|required|kena\s*sediakan).{0,35}(?:loan\s*(?:kedai|shop)|shop\s*loan)|需要什么文件|要什么文件)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
@@ -1389,7 +1399,7 @@ const productAliases = row => {
     if (shorthand.length >= 3) addModelAlias(aliases, shorthand);
   }
   for (const word of normalizedWords(row['Search Keywords']).split(' ')) {
-    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !modelAliasStopWords.has(word)) addModelAlias(aliases, word);
+    if ((word.length >= 3 || /^\d{2,}$/.test(word)) && !/^\d+(?:gb|tb)$/i.test(word) && !modelAliasStopWords.has(word)) addModelAlias(aliases, word);
   }
   for (const word of words) {
     const match = word.match(/^([a-z]+)(\d+)([a-z]+)?$/i);
@@ -1421,8 +1431,24 @@ const productAliases = row => {
 
 const modelCore = value => normalizedWords(value).replace(/^(?:apple\s+)?iphone\s+/, '').trim();
 
+const iphoneModelTier = value => {
+  const words = normalizedWords(value);
+  if (!/\biphone\b/.test(words)) return '';
+  if (/\bpro\s+max\b/.test(words)) return 'PRO_MAX';
+  if (/\bpro\b/.test(words)) return 'PRO';
+  return 'BASE';
+};
+
+const requestedIphoneTier = value => {
+  const words = normalizedWords(value), compact = compactModelText(value);
+  if (/(?:pro\s*max|promax|promx|prmax)\b/.test(words) || /(?:^|\d)(?:pm|promax|promx)(?:$|\D)/.test(compact)) return 'PRO_MAX';
+  if (/\bpro\b/.test(words) || /(?:^|\d)p(?:$|\D)/.test(compact)) return 'PRO';
+  return '';
+};
+
 export function matchInstantProduct(text, catalogs = []) {
   const query = normalizedWords(text), compactQuery = compactModelText(text), queryCandidates = modelQueryCandidates(text);
+  const requiredIphoneTier = requestedIphoneTier(text);
   if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
   const activeCatalog = catalogs.filter(row => truth(row.Active));
   const aliasModels = new Map();
@@ -1436,6 +1462,10 @@ export function matchInstantProduct(text, catalogs = []) {
   }
   const matches = activeCatalog.map(row => {
     const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
+    const rowIphoneTier = iphoneModelTier(row.Model);
+    if (requiredIphoneTier && rowIphoneTier && rowIphoneTier !== requiredIphoneTier) {
+      return { row, score: 0, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
+    }
     let score = 0;
     if (query === model) score = 2400;
     else if (compactQuery === compactModel) score = 2300;
@@ -1720,8 +1750,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const phoneOptions = approvedPhoneOptions(optionProduct, familyCatalog);
     const hasColours = phoneOptions.colours.length > 0, hasStorage = phoneOptions.storage.length > 0;
     const requestedBoth = colourQuestion && storageQuestion;
+    const requestedStorage = requestedProductStorage(text);
+    const requestedStorageAvailable = requestedStorage && phoneOptions.storage.some(value => normalizedWords(value) === normalizedWords(requestedStorage));
     const copyKey = requestedBoth && hasColours && hasStorage
       ? 'COLOUR_STORAGE_OPTIONS'
+      : requestedStorage && hasStorage ? (requestedStorageAvailable ? 'STORAGE_AVAILABLE' : 'STORAGE_UNAVAILABLE')
       : colourQuestion && hasColours ? 'COLOUR_OPTIONS'
       : storageQuestion && hasStorage ? 'STORAGE_OPTIONS'
       : 'PRODUCT_OPTIONS_UNAVAILABLE';
@@ -1737,6 +1770,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         model: optionProduct.Model,
         colours: phoneOptions.colours.join(language === 'ZH' ? '、' : ', '),
         storage: phoneOptions.storage.join(language === 'ZH' ? '、' : ', '),
+        requestedStorage,
         options: missingLabel || (language === 'MS' ? 'pilihan' : language === 'ZH' ? '选项' : 'option')
       }),
       humanFollowUpRequired: copyKey === 'PRODUCT_OPTIONS_UNAVAILABLE' ? true : undefined
@@ -2452,4 +2486,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-
