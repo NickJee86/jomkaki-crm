@@ -1761,6 +1761,31 @@ test('the global reply contract prevents duplicate normal replies and caps every
   assert.doesNotMatch(multiQuestion.text, /😊/u);
 });
 
+test('rephrasing the same alternative-model question may repeat the same grounded answer without manager fallback', () => {
+  const catalog = [
+    { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+  ];
+  const pricing = [
+    { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+    { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+  ];
+  const state = { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' };
+  const lead = { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' };
+  const first = buildInstantSalesDecision({ state, lead, text: 'selain dari model ni ada apa model lagi', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
+  const repeatedState = { ...state, 'Last AI Message': first.text };
+  const second = buildInstantSalesDecision({ state: repeatedState, lead, text: 'ada apa model selain dari berapa ni', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
+  const guarded = enforceConversationReplyContract({ state: repeatedState, text: 'ada apa model selain dari berapa ni', decision: second });
+
+  assert.equal(second.availableModelsIntent, true);
+  assert.equal(guarded.replyContractRecovered, undefined);
+  assert.equal(guarded.humanFollowUpRequired, undefined);
+  assert.match(guarded.text, /Yamaha NMAX/);
+  assert.match(guarded.text, /Honda RS150R/);
+  assert.doesNotMatch(guarded.text, /pengurus|mungkin salah|tanpa anda perlu ulang/i);
+});
+
 test('ordinary structured workflows remain intact while the global contract governs every normal chat reply', () => {
   const applicationForm = 'TOLONG ISI MAKLUMAT DI BAWAH:\nNama pemohon:\nAlamat Rumah:\nNombor tel pemohon:';
   const structured = enforceConversationReplyContract({
@@ -1902,3 +1927,4 @@ test('question detector recognises topic switches, typos and multiple business q
   const intents = detectCustomerQuestionIntents('boss, y15 depo brp, 3 tahun sebulan berapa, slip gaji brp bulan dan kedai dekat mana?');
   for (const expected of ['BRANCH_LOCATION', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'PAYSLIP_PERIOD']) assert.ok(intents.includes(expected), expected);
 });
+
