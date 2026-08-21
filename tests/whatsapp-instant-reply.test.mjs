@@ -1557,6 +1557,46 @@ test('motor lain ada tak is answered directly before unlisted-product or manager
   assert.doesNotMatch(withoutRegionalPricing.text, /pengurus|mungkin salah|Yamaha Y15ZR/i);
 });
 
+test('indirect Malay alternative-model questions override stale document and application intents', () => {
+  const base = {
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+    ]
+  };
+  const phrases = [
+    'selain dari model ni ada apa lagi',
+    'selain daripada model ini ada apa lagi',
+    'yang lain ada tak',
+    'apa lagi pilihan motor yang ada',
+    'model selain ni ada?'
+  ];
+  for (const [index, text] of phrases.entries()) {
+    const wrongIntent = index % 2
+      ? { intent: 'DOCUMENT_STATUS', language: 'MS', businessUnit: 'MOTOR', confidence: 0.92 }
+      : { intent: 'DOCUMENT_REQUIREMENTS', language: 'MS', businessUnit: 'MOTOR', confidence: 0.92 };
+    const decision = buildInstantSalesDecision({ ...base, text, aiIntent: wrongIntent });
+    assert.equal(decision.availableModelsIntent, true, text);
+    assert.match(decision.text, /Yamaha NMAX/, text);
+    assert.match(decision.text, /Honda RS150R/, text);
+    assert.doesNotMatch(decision.text, /IC depan|slip gaji|penyata EPF|dokumen|pengurus|mungkin salah|Yamaha Y15ZR/i, text);
+    assert.equal((decision.text.match(/\?/g) || []).length, 1, text);
+    const detected = detectCustomerQuestionIntents(text);
+    assert.ok(detected.includes('OTHER_MODELS'), text);
+    assert.ok(!detected.includes('DOCUMENT_REQUIREMENTS'), text);
+    assert.ok(!detected.includes('DOCUMENT_STATUS'), text);
+  }
+});
+
 test('motor category spelling variants never fall through to the generic help menu', () => {
   for (const text of ['motor scuter ada tak', 'scooter ada tak', 'skuter ada ke']) {
     const decision = buildInstantSalesDecision({
