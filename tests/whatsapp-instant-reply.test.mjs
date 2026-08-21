@@ -9,6 +9,7 @@ import {
   buildApplicationDetailsTurn,
   buildAutomaticApplication,
   buildDocumentProgressReply,
+  buildDecisionAudit,
   buildEarlyConsentReply,
   buildImmediateAcknowledgement,
   buildInitialConversationState,
@@ -547,6 +548,37 @@ test('customer area resolves to the correct active business branch', () => {
   assert.equal(resolveCustomerLocation('hello', 'MOTOR', branches), null);
 });
 
+test('a branch-location question overrides stale product context and answers the current question', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Honda', 'Selected Product Model': 'Dash 125' },
+    lead: { Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Kuching', 'Selected Branch ID': 'BR-KCH' },
+    text: 'cawangan dekat mana', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [{ Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', State: 'Sarawak', City: 'Kuching', 'Branch ID': 'BR-KCH', 'Branch Name': 'Kuching Rider Centre', 'Branch Address': 'Jalan Pending, Kuching' }],
+    motorCatalog: [{ 'Catalog ID': 'DASH', Brand: 'Honda', Model: 'Dash 125', Active: 'TRUE' }]
+  });
+  assert.equal(decision.branchLocationIntent, true);
+  assert.match(decision.text, /Kuching Rider Centre/);
+  assert.match(decision.text, /Jalan Pending/);
+  assert.doesNotMatch(decision.text, /Dash 125|Maksud anda|model/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 0);
+});
+
+test('a branch-location question without an area lists recorded choices and asks only for location', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' },
+    lead: {}, text: 'location mana boss', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [
+      { Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', State: 'Sarawak', City: 'Kuching', 'Branch ID': 'BR-KCH', 'Branch Name': 'Kuching Rider Centre' },
+      { Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'SARAWAK', State: 'Sarawak', City: 'Bintulu', 'Branch ID': 'BR-BTU', 'Branch Name': 'Bintulu Rider Centre' }
+    ]
+  });
+  assert.equal(decision.branchLocationIntent, true);
+  assert.match(decision.text, /Kuching Rider Centre/);
+  assert.match(decision.text, /Bintulu Rider Centre/);
+  assert.doesNotMatch(decision.text, /Y15ZR|model/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
 test('a pure greeting asks for the customer name before the location', () => {
   const welcome = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_01_WELCOME' }, text: 'Hi', messageType: 'text' });
   assert.equal(welcome.nextStep, 'STEP_01_NAME');
@@ -874,6 +906,19 @@ test('a direct motor cash-price question answers once and never attaches the pro
   assert.match(decision.text, /harga tunai.*RM9300/i);
 });
 
+test('a cash-purchase question without a model receives a direct answer instead of a generic menu', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'boleh bayar cash?', messageType: 'text', routeBusinessUnit: 'MOTOR'
+  });
+  assert.equal(decision.cashPriceIntent, true);
+  assert.match(decision.text, /boleh beli motor secara tunai/i);
+  assert.match(decision.text, /model/i);
+  assert.doesNotMatch(decision.text, /saya boleh bantu semak model, ansuran/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
 test('a customer can ask the deposit for the already selected motor', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y16ZR' },
@@ -962,7 +1007,32 @@ test('the whole catalogue accepts natural customer shorthand instead of only sel
   assert.equal(matchInstantProduct('saya minat moca', catalog).product.Model, 'Moca');
 });
 
-test('an unpriced base model falls back to its approved priced variant instead of going silent', () => {
+test('motor variants remain distinct and an exact Street request cannot receive Standard pricing or image', () => {
+  const catalog = [
+    { 'Catalog ID': 'VARIO-STD', Brand: 'Honda', Model: 'Vario 125', Variant: 'Standard', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/vario-standard.jpg', __businessUnit: 'MOTOR' },
+    { 'Catalog ID': 'VARIO-STREET', Brand: 'Honda', Model: 'Vario 125', Variant: 'Street', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/vario-street.jpg', __businessUnit: 'MOTOR' }
+  ];
+  assert.equal(matchInstantProduct('Vario 125 Street', catalog).product['Catalog ID'], 'VARIO-STREET');
+  const broad = matchInstantProduct('Vario 125', catalog);
+  assert.equal(broad.ambiguous, true);
+  assert.deepEqual(broad.options.sort(), ['Honda Vario 125 Standard', 'Honda Vario 125 Street'].sort());
+
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Ali', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Ali', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Kuching' },
+    text: 'Vario 125 Street', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: catalog.map(({ __businessUnit, ...row }) => row),
+    motorPricing: [{ 'Catalog ID': 'VARIO-STD', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '222', 'Deposit (RM)': '1000' }]
+  });
+  assert.equal(decision.product['Catalog ID'], 'VARIO-STREET');
+  assert.equal(decision.product.Variant, 'Street');
+  assert.match(decision.text, /Vario 125 Street/i);
+  assert.doesNotMatch(decision.text, /RM222|RM1000/);
+  assert.notEqual(decision.imageUrl, 'https://cdn.example.test/vario-standard.jpg');
+  assert.equal(decision.humanFollowUpRequired, true);
+});
+
+test('an unpriced exact model is never silently replaced by a different priced model', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Kamis', 'Product Category': 'MOTOR' },
     lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' },
@@ -975,11 +1045,12 @@ test('an unpriced base model falls back to its approved priced variant instead o
       { 'Catalog ID': 'MTR-YAM-NMAXV3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 3 Years (RM)': '526', 'Monthly 4 Years (RM)': '425', 'Monthly 5 Years (RM)': '365' }
     ]
   });
-  assert.equal(decision.product.Model, 'NMAX V3');
-  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
-  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax-v3.jpg');
-  assert.match(decision.text, /NMAX V3/);
-  assert.match(decision.text, /RM365/);
+  assert.equal(decision.product.Model, 'NMAX');
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.imageUrl, undefined);
+  assert.match(decision.text, /NMAX/);
+  assert.doesNotMatch(decision.text, /NMAX V3|RM365/);
+  assert.equal(decision.humanFollowUpRequired, true);
 });
 
 test('a recognised model without approved regional pricing gets a useful reply instead of silence', () => {
@@ -1328,6 +1399,7 @@ test('AI intent understanding uses a strict grounded schema and never receives t
   assert.equal(request.text.format.strict, true);
   assert.equal(request.input.includes('60123456789'), false);
   assert.match(request.input, /MTR-YAM-NMAX/);
+  assert.match(JSON.stringify(request), /BRANCH_LOCATION/);
 
   const interpreted = await requestAiIntent({
     text: 'nma berapa sebulan bah',
@@ -1534,7 +1606,20 @@ test('approved runtime product knowledge explicitly keeps unlisted enquiries ali
   const knowledge = approvedKnowledgeForRuntime({ text: 'scooter ada tak', businessUnit: 'MOTOR' });
   assert.match(knowledge, /unlisted model or category remains a valid enquiry/i);
   assert.match(knowledge, /never reject the customer/i);
-  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-20.8');
+  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-21.9');
+});
+
+test('every customer reply can be traced to a decision route and knowledge version', () => {
+  const deterministic = buildDecisionAudit({ decision: { handled: true, branchLocationIntent: true } });
+  assert.deepEqual(deterministic, {
+    decisionRoute: 'BRANCH_LOCATION',
+    replySource: 'DETERMINISTIC',
+    knowledgeVersion: '2026-08-21.9'
+  });
+  const ai = buildDecisionAudit({ decision: { handled: true, aiGenerated: true }, aiIntent: { intent: 'GENERAL' } });
+  assert.equal(ai.decisionRoute, 'AI_FALLBACK');
+  assert.equal(ai.replySource, 'KNOWLEDGE_AI_FALLBACK');
+  assert.equal(ai.knowledgeVersion, '2026-08-21.9');
 });
 
 test('the global reply contract blocks menus, profile-gating and internal identity leakage', () => {
@@ -1624,7 +1709,6 @@ test('major chatbot intents all return specific replies instead of the old capab
     assert.ok((guarded.text.match(/[?？]/g) || []).length <= 1);
   }
 });
-
 
 test('payslip-month questions always receive the approved three-month rule directly', () => {
   for (const text of ['berapa bulan slip gaji', 'saya tnya berapa bulan nak slip gaji tu']) {

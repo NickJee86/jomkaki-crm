@@ -30,6 +30,12 @@ const PROGRESSIVE_PROFILE_STATE_HEADERS = [
   'Loan Tenure Years',
   'Loan Tenure Months'
 ];
+const CONVERSATION_DECISION_HEADERS = [
+  'Selected Product Variant',
+  'Last Decision Route',
+  'Last Reply Source',
+  'Last Knowledge Version'
+];
 
 export function reserveInboundMessage(messageId, now = Date.now()) {
   const id = clean(messageId);
@@ -711,7 +717,7 @@ export function buildAutomaticApplication({ lead = {}, state = {}, route = {}, d
     'Product Category': unit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
     'Product Brand': clean(product.Brand || state['Selected Product Brand']),
     'Product Model': clean(product.Model || state['Selected Product Model']),
-    'Product Variant': clean(product.Variant) || 'Standard',
+    'Product Variant': clean(product.Variant || state['Selected Product Variant']) || 'Standard',
     'Motor Type': unit === 'MOTOR' ? 'NEW' : '',
     'Employer Name': clean(state['Employer Name']),
     'Job Position': clean(state.Occupation),
@@ -759,7 +765,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), branches = clean(values.branches);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -800,6 +806,10 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} still needs branch confirmation, and I can arrange that check for you.`,
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
       CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
+      CASH_PRICE_NEEDS_MODEL: 'Yes, a motorcycle cash purchase can be checked. The approved cash price depends on the exact model. Which model would you like me to check?',
+      BRANCH_MATCH: `For ${area}, the recorded branch or service coverage is ${branch}. ${address}`,
+      BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
+      BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
       LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. Would you like me to help start the check now?',
       HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
@@ -857,6 +867,10 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
       CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
+      CASH_PRICE_NEEDS_MODEL: 'Boleh beli motor secara tunai. Harga tunai yang diluluskan bergantung pada model yang tepat. Model mana anda mahu saya semak?',
+      BRANCH_MATCH: `Untuk kawasan ${area}, cawangan atau liputan servis yang direkodkan ialah ${branch}. ${address}`,
+      BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
+      BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
       LOAN_PROCESSING_TIME: 'Biasanya proses loan kedai mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Mahu saya bantu mulakan semakan sekarang?',
       HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
@@ -904,6 +918,10 @@ const instantCopy = (language, key, values = {}) => {
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
       HELP: '好的，请直接继续你的问题。我会根据现有资料回答；需要确认时，我会安排分行查询。',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
+      CASH_PRICE_NEEDS_MODEL: '摩托车可以查询现金购买；获批现金价格要根据准确型号。你想查询哪一款？',
+      BRANCH_MATCH: `${area} 所记录的分行或服务范围是 ${branch}。${address}`,
+      BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
+      BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
       STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
@@ -1073,7 +1091,7 @@ export function sanitizeAiFallbackReply(value = '', language = 'MS') {
 export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
   const language = instantLanguage(text, state);
   const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
-  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const approvedKnowledge = approvedKnowledgeForRuntime({ text, businessUnit: unit });
   const context = {
     language,
@@ -1127,7 +1145,7 @@ const responseOutputText = result => {
 };
 
 const AI_INTENTS = Object.freeze([
-  'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'PROMOTION', 'MODEL_SELECTION', 'UNLISTED_PRODUCT',
+  'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'BRANCH_LOCATION', 'PROMOTION', 'MODEL_SELECTION', 'UNLISTED_PRODUCT',
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
   'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
   'COMBINED_APPLICATION',
@@ -1169,7 +1187,7 @@ const validAiIntent = value => {
 };
 
 export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
-  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const seenCatalogChoices = new Set();
   const catalogChoices = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
@@ -1217,6 +1235,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
+    'BRANCH_LOCATION means the customer asks where a branch, shop, showroom or nearest service point is. It must never be classified as PROVIDE_LOCATION or MODEL_SELECTION, even when a product was discussed in the previous turn.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
     'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
     'Understand product types and likely spelling variants such as scooter, skuter, scuter, kapcai, cub, moped, sport, naked, adventure, cruiser, touring and electric. A category question must be answered as a category enquiry, not with the generic help menu.',
@@ -1348,6 +1367,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
+const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
@@ -1475,9 +1495,14 @@ const modelQueryCandidates = value => {
 
 const productAliases = row => {
   const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' ').filter(Boolean);
+  const variant = normalizedWords(row.Variant);
   const aliases = new Set();
   addModelAlias(aliases, model);
   addModelAlias(aliases, `${brand} ${model}`);
+  if (variant) {
+    addModelAlias(aliases, `${model} ${variant}`);
+    addModelAlias(aliases, `${brand} ${model} ${variant}`);
+  }
   for (let start = 0; start < words.length; start += 1) {
     for (let end = start + 1; end <= words.length; end += 1) {
       const phrase = words.slice(start, end).join(' ');
@@ -1517,6 +1542,24 @@ const productAliases = row => {
   return [...aliases].filter(alias => compactModelText(alias).length >= 2);
 };
 
+const customerProductVariant = row => {
+  const variant = clean(row?.Variant);
+  return /^(?:default)$/i.test(variant) ? '' : variant;
+};
+
+const customerProductModel = (row, unit = '') => {
+  const businessUnit = canonicalBusinessUnit(unit || row?.__businessUnit);
+  return [clean(row?.Model), businessUnit === 'MOTOR' ? customerProductVariant(row) : ''].filter(Boolean).join(' ');
+};
+
+const productMatchKey = row => {
+  const unit = canonicalBusinessUnit(row?.__businessUnit);
+  const variant = unit === 'MOTOR' ? normalizedWords(customerProductVariant(row)) : '';
+  return `${unit}|${normalizedWords(row?.Model)}|${variant}`;
+};
+
+const customerProductLabel = row => [clean(row?.Brand), customerProductModel(row, row?.__businessUnit)].filter(Boolean).join(' ');
+
 const modelCore = value => normalizedWords(value).replace(/^(?:apple\s+)?iphone\s+/, '').trim();
 
 const iphoneModelTier = value => {
@@ -1541,7 +1584,7 @@ export function matchInstantProduct(text, catalogs = []) {
   const activeCatalog = catalogs.filter(row => truth(row.Active));
   const aliasModels = new Map();
   for (const row of activeCatalog) {
-    const modelKey = `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}`;
+    const modelKey = productMatchKey(row);
     for (const alias of productAliases(row)) {
       const aliasKey = compactModelText(alias);
       if (!aliasModels.has(aliasKey)) aliasModels.set(aliasKey, new Set());
@@ -1550,12 +1593,17 @@ export function matchInstantProduct(text, catalogs = []) {
   }
   const matches = activeCatalog.map(row => {
     const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
+    const exactModelVariant = normalizedWords(customerProductModel(row, row.__businessUnit));
+    const compactModelVariant = compactModelText(exactModelVariant);
+    const modelKey = productMatchKey(row);
     const rowIphoneTier = iphoneModelTier(row.Model);
     if (requiredIphoneTier && rowIphoneTier && rowIphoneTier !== requiredIphoneTier) {
-      return { row, score: 0, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
+      return { row, score: 0, modelKey };
     }
     let score = 0;
-    if (query === model) score = 2400;
+    if (exactModelVariant && query === exactModelVariant) score = 2700;
+    else if (compactModelVariant && compactQuery === compactModelVariant) score = 2600;
+    else if (query === model) score = 2400;
     else if (compactQuery === compactModel) score = 2300;
     else if (modelCore(row.Model) && queryCandidates.some(candidate => candidate.words === modelCore(row.Model))) score = 2250;
     else if (model && includesTerm(query, model)) score = 2200;
@@ -1571,7 +1619,7 @@ export function matchInstantProduct(text, catalogs = []) {
       else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (lowConfidenceAlias ? 900 : sharedAlias ? 1100 : 1700) + compactAlias.length);
       else if (compactAlias.length >= 4 && queryCandidates.some(candidate => candidate.compact.length >= 4 && oneModelTypoAway(candidate.compact, compactAlias))) score = Math.max(score, 1500 + compactAlias.length);
     }
-    return { row, score, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
+    return { row, score, modelKey };
   }).filter(match => match.score >= 1000);
   const bestByModel = new Map();
   for (const match of matches) if (!bestByModel.has(match.modelKey) || bestByModel.get(match.modelKey).score < match.score) bestByModel.set(match.modelKey, match);
@@ -1579,7 +1627,7 @@ export function matchInstantProduct(text, catalogs = []) {
   if (!ranked.length) return { product: null, options: [], ambiguous: false };
   const close = ranked.filter(match => match.score >= ranked[0].score - 80);
   if (close.length > 1) {
-    const options = close.slice(0, 4).map(match => `${clean(match.row.Brand)} ${clean(match.row.Model)}`.trim());
+    const options = close.slice(0, 4).map(match => customerProductLabel(match.row));
     return { product: null, options, ambiguous: true };
   }
   return { product: ranked[0].row, options: [], ambiguous: false };
@@ -1695,11 +1743,62 @@ const activeMotorPromotions = (catalogRows = [], pricingRows = [], region = '', 
 };
 
 const promotionOptionText = ({ row = {}, product = {} } = {}) => {
-  const model = [clean(product.Brand), clean(product.Model)].filter(Boolean).join(' ');
+  const model = customerProductLabel(product);
   const name = clean(row['Promotion Name']);
   const deposit = customerAmount(row['Promotion Deposit (RM)']);
   return [model, name ? `(${name})` : '', deposit ? `deposit RM${deposit}` : ''].filter(Boolean).join(' ');
 };
+
+const branchAddress = row => clean(row?.['Branch Address'] || row?.Address || row?.['Full Address'] || row?.Location);
+const branchMapUrl = row => clean(row?.['Google Maps URL'] || row?.['Map URL'] || row?.['Google Map URL']);
+const branchLabel = row => {
+  const name = clean(row?.['Branch Name']);
+  const locality = [clean(row?.City), clean(row?.State)].filter(Boolean).filter((value, index, values) => values.findIndex(item => normalizedWords(item) === normalizedWords(value)) === index).join(', ');
+  return [name, locality && normalizedWords(locality) !== normalizedWords(name) ? locality : ''].filter(Boolean).join(' — ');
+};
+
+export function buildBranchLocationDecision({ language = 'MS', state = {}, lead = {}, text = '', routeBusinessUnit = '', branches = [], aiIntent = null } = {}) {
+  const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
+  const activeBranches = branches.filter(row => truth(row.Active) && canonicalBusinessUnit(row['Business Unit']) === unit);
+  const explicitLocation = resolveCustomerLocation(aiIntent?.locationQuery || text, unit, branches);
+  const storedLocation = resolveCustomerLocation([lead['City or Area'], lead.State].filter(Boolean).join(' '), unit, branches);
+  const selectedBranchId = clean(explicitLocation?.branchId || lead['Selected Branch ID'] || state['Selected Branch ID'] || storedLocation?.branchId);
+  const selectedBranch = activeBranches.find(row => clean(row['Branch ID']) === selectedBranchId);
+  if (selectedBranch) {
+    const area = clean(explicitLocation?.city || lead['City or Area'] || lead.State || selectedBranch.City || selectedBranch.State);
+    const address = [branchAddress(selectedBranch), branchMapUrl(selectedBranch)].filter(Boolean).join(' ');
+    return {
+      handled: true,
+      branchLocationIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      location: explicitLocation || undefined,
+      text: instantCopy(language, 'BRANCH_MATCH', { area, branch: branchLabel(selectedBranch), address })
+    };
+  }
+  const requestedRegion = canonicalRegion(explicitLocation?.region || lead.Region);
+  const candidates = activeBranches.filter(row => !requestedRegion || canonicalRegion(row.Region) === requestedRegion).slice(0, 5);
+  if (candidates.length) return {
+    handled: true,
+    branchLocationIntent: true,
+    answerCustomerQuestionFirst: true,
+    nextStep: clean(state['Current Step']) || 'STEP_02_LOCATION',
+    productUnit: unit,
+    location: explicitLocation || undefined,
+    text: instantCopy(language, 'BRANCH_OPTIONS', { branches: candidates.map(branchLabel).filter(Boolean).join(language === 'ZH' ? '、' : '; ') })
+  };
+  return {
+    handled: true,
+    branchLocationIntent: true,
+    answerCustomerQuestionFirst: true,
+    nextStep: clean(state['Current Step']) || 'STEP_02_LOCATION',
+    productUnit: unit,
+    location: explicitLocation || undefined,
+    humanFollowUpRequired: activeBranches.length === 0 || undefined,
+    text: instantCopy(language, 'BRANCH_LOCATION_NEEDED')
+  };
+}
 
 const availableModelSuggestions = (catalogRows = [], pricingRows = [], unit = '', region = '', limit = 3) => catalogRows
   .filter(row => {
@@ -1734,6 +1833,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   ];
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
+  const selectedVariant = normalizedWords(state['Selected Product Variant']);
   const previousCustomerText = clean(state['Last Customer Message']);
   const frustrationDetected = interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text);
   const recoveringDocumentQuestion = frustrationDetected && conversationalDocumentRequirement(previousCustomerText);
@@ -1746,10 +1846,10 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     || wantsToApply(text)
     || (isDocumentStatusQuestion(text) && !!selectedModel);
   if (payslipPeriodQuestion) {
-    return { handled: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'PAYSLIP_PERIOD') };
+    return { handled: true, payslipPeriodIntent: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'PAYSLIP_PERIOD') };
   }
   if (documentStatusQuestion) {
-    return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
+    return { handled: true, documentStatusIntent: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
   }
   // A combined motor + phone application is a direct business question. Answer it
   // before the broad APPLY/document rules so the customer is not diverted into a
@@ -1763,6 +1863,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: explicitUnit || fallbackUnit || 'MOTOR',
       text: instantCopy(language, 'COMBINED_APPLICATION')
     };
+  }
+  if (interpretedIntent === 'BRANCH_LOCATION' || asksForBranchLocation(text)) {
+    return buildBranchLocationDecision({ language, state, lead, text, routeBusinessUnit: explicitUnit || fallbackUnit || routeBusinessUnit, branches, aiIntent });
   }
   if (documentRequirementQuestion) {
     const continuation = profileContinuation({ language, state, lead, baseText: instantCopy(language, 'APPLY'), completeStep: 'STEP_04_DOCUMENTS' });
@@ -1834,7 +1937,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     };
   }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
-  const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
+  const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel
+    && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand)
+    && (!selectedVariant || normalizedWords(row.Variant) === selectedVariant));
   const deterministicProductMatch = matchInstantProduct(text, catalogPool);
   const optionProduct = deterministicProductMatch.product || storedSelectedProduct;
   const colourQuestion = interpretedIntent === 'PRODUCT_COLOUR' || asksForProductColour(text);
@@ -1872,7 +1977,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       product: optionProduct,
       text: instantCopy(language, copyKey, {
         brand: optionProduct.Brand,
-        model: optionProduct.Model,
+        model: customerProductModel(optionProduct, optionUnit),
         colours: phoneOptions.colours.join(language === 'ZH' ? '、' : ', '),
         storage: phoneOptions.storage.join(language === 'ZH' ? '、' : ', '),
         requestedStorage,
@@ -1887,6 +1992,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const cashPriceQuestion = interpretedIntent === 'CASH_PRICE' || asksForCashPrice(text);
   const depositQuestion = interpretedIntent === 'DEPOSIT' || asksForDeposit(text);
   const monthlyQuestion = interpretedIntent === 'MONTHLY_INSTALMENT' || asksForMonthlyInstalment(text);
+  if (cashPriceQuestion && !optionProduct) {
+    const unit = explicitUnit || fallbackUnit || 'MOTOR';
+    return {
+      handled: true,
+      cashPriceIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      text: instantCopy(language, unit === 'HANDPHONE' ? 'HANDPHONE_CASH_POLICY' : 'CASH_PRICE_NEEDS_MODEL')
+    };
+  }
   if ((requestedTenure || depositQuestion || cashPriceQuestion || monthlyQuestion) && optionProduct) {
     const selectedProduct = optionProduct;
     if (selectedProduct) {
@@ -1897,16 +2013,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         ? instantCopy(language, selectedUnit === 'HANDPHONE'
           ? 'HANDPHONE_CASH_POLICY'
           : requestedRate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, cashPrice: requestedRate?.cashPrice
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), cashPrice: requestedRate?.cashPrice
         })
         : depositQuestion
           ? instantCopy(language, selectedUnit === 'HANDPHONE'
           ? 'HANDPHONE_DEPOSIT_POLICY'
           : requestedRate?.deposit ? 'DEPOSIT_QUOTE' : 'DEPOSIT_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, deposit: requestedRate?.deposit
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), deposit: requestedRate?.deposit
         })
         : instantCopy(language, requestedRate ? (monthlyQuestion && !requestedTenure ? 'QUOTE_ONLY' : 'TENURE_QUOTE') : 'TENURE_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
         });
       const continuation = cashPriceQuestion
         ? { nextStep: step || 'STEP_04_DOCUMENTS', text: baseText }
@@ -1955,20 +2071,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (product) {
     const pricingRegion = lead.Region || routeRegion;
     let rate = instantRate(product, pricing, unit, pricingRegion);
-    if (!rate) {
-      const pricedCatalog = catalogPool.filter(row => {
-        const rowUnit = clean(row.__businessUnit).toUpperCase() || unit;
-        const rowPricing = rowUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-        return instantRate(row, rowPricing, rowUnit, pricingRegion);
-      });
-      const pricedMatch = matchInstantProduct(text, pricedCatalog);
-      if (pricedMatch.product && !pricedMatch.ambiguous) {
-        product = pricedMatch.product;
-        unit = clean(product.__businessUnit).toUpperCase() || unit;
-        pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-        rate = instantRate(product, pricing, unit, pricingRegion);
-      }
-    }
     if (cashPriceQuestion) {
       return {
         handled: true,
@@ -1980,7 +2082,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         text: instantCopy(language, unit === 'HANDPHONE'
           ? 'HANDPHONE_CASH_POLICY'
           : rate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
-          brand: product.Brand, model: product.Model, cashPrice: rate?.cashPrice
+          brand: product.Brand, model: customerProductModel(product, unit), cashPrice: rate?.cashPrice
         }),
         humanFollowUpRequired: unit === 'MOTOR' && !rate?.cashPrice ? true : undefined
       };
@@ -1988,18 +2090,20 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     if (!rate) {
       const continuation = profileContinuation({
         language, state, lead,
-        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: product.Model }),
+        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
         completeStep: 'STEP_03_PRODUCT'
       });
       return { handled: true, productIntent: true, nextStep: continuation.nextStep, productUnit: unit, product, text: continuation.text, humanFollowUpRequired: true };
     }
-    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand);
+    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
+      && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
+      && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
     const approvedImage = !sameSelectedProduct && truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
     const continuation = identityReady
-      ? { nextStep: 'STEP_04_DOCUMENTS', text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }) }
+      ? { nextStep: 'STEP_04_DOCUMENTS', text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: customerProductModel(product, unit), tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }) }
       : profileContinuation({
         language, state, lead,
-        baseText: instantCopy(language, 'QUOTE_ONLY', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }),
+        baseText: instantCopy(language, 'QUOTE_ONLY', { brand: product.Brand, model: customerProductModel(product, unit), tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }),
         completeStep: 'STEP_04_DOCUMENTS'
       });
     return {
@@ -2208,6 +2312,30 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
     replyContractRecovered: recovered || undefined,
     answerCustomerQuestionFirst: customerExpectsAnswer(text) || decision.answerCustomerQuestionFirst || undefined,
     humanFollowUpRequired: recovered ? true : decision.humanFollowUpRequired
+  };
+}
+
+export function buildDecisionAudit({ decision = {}, aiIntent = null } = {}) {
+  const decisionRoute = decision.branchLocationIntent ? 'BRANCH_LOCATION'
+    : decision.cashPriceIntent ? 'CASH_PRICE'
+    : decision.productOptionsIntent ? 'PRODUCT_OPTIONS'
+    : decision.productIntent ? 'PRODUCT'
+    : decision.payslipPeriodIntent ? 'PAYSLIP_PERIOD'
+    : decision.documentStatusIntent ? 'DOCUMENT_STATUS'
+    : decision.documentRequirementsIntent ? 'DOCUMENT_REQUIREMENTS'
+    : decision.documentQueued ? 'DOCUMENT_RECEIVED'
+    : decision.shopLoanIntent ? 'SHOP_LOAN'
+    : decision.loanKedaiIntent ? 'PROCESSING_TIME'
+    : decision.promotionIntent ? 'PROMOTION'
+    : decision.combinedApplicationIntent ? 'COMBINED_APPLICATION'
+    : decision.catalogReviewRequired ? 'CATALOG_REVIEW'
+    : decision.serviceRecovery ? 'SERVICE_RECOVERY'
+    : decision.aiGenerated ? 'AI_FALLBACK'
+    : clean(aiIntent?.intent).toUpperCase() || 'GENERAL';
+  return {
+    decisionRoute,
+    replySource: decision.aiGenerated ? 'KNOWLEDGE_AI_FALLBACK' : aiIntent ? 'INTENT_GROUNDED' : 'DETERMINISTIC',
+    knowledgeVersion: clean(JOMKAKI_KNOWLEDGE.version)
   };
 }
 
@@ -2587,6 +2715,7 @@ export default async function handler(req, res) {
           willReply = true;
         }
         instantDecision = enforceConversationReplyContract({ state: conversationState || {}, text, decision: instantDecision });
+        const decisionAudit = buildDecisionAudit({ decision: instantDecision, aiIntent });
         willReply = routeUsable && !human && instantDecision.handled;
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
         if (!conversationState) {
@@ -2646,8 +2775,13 @@ export default async function handler(req, res) {
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
               'Selected Product Brand': clean(instantDecision.product?.Brand || conversationState['Selected Product Brand']),
-              'Selected Product Model': clean(instantDecision.product?.Model || conversationState['Selected Product Model'])
+              'Selected Product Model': clean(instantDecision.product?.Model || conversationState['Selected Product Model']),
+              'Selected Product Variant': clean(instantDecision.product?.Variant || conversationState['Selected Product Variant']),
+              'Last Decision Route': decisionAudit.decisionRoute,
+              'Last Reply Source': decisionAudit.replySource,
+              'Last Knowledge Version': decisionAudit.knowledgeVersion
             };
+            await ensureHeaders(token, 'Conversation_State', CONVERSATION_DECISION_HEADERS);
             await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], deliveredState, 'CZ');
             Object.assign(conversationState, deliveredState);
           }
@@ -2668,7 +2802,7 @@ export default async function handler(req, res) {
             'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
-            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
+            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}:${decisionAudit.decisionRoute}:KB${decisionAudit.knowledgeVersion}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
           });
         }
