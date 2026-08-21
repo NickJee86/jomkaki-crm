@@ -1,6 +1,59 @@
 const state={user:null,summary:{},data:{leads:[],applications:[],documents:[],inbox:[],outbox:[],catalog:[],pricing:[],team:[],users:[],activity:[],integrations:[],channels:[],qa:[]},view:'dashboard',loaded:false};
 const loadedResources=new Set();
 const app=document.getElementById('appView'),shell=document.getElementById('appShell'),gate=document.getElementById('loginGate'),form=document.getElementById('loginForm');
+let tableScrollDock=null,tableScrollDockTrack=null,activeHorizontalTable=null,tableScrollDockFrame=0,tableScrollDockSyncing=false;
+function ensureTableScrollDock(){
+  if(tableScrollDock)return tableScrollDock;
+  tableScrollDock=document.createElement('div');
+  tableScrollDock.id='tableScrollDock';
+  tableScrollDock.className='table-scroll-dock';
+  tableScrollDock.hidden=true;
+  tableScrollDock.tabIndex=0;
+  tableScrollDock.setAttribute('role','region');
+  tableScrollDock.setAttribute('aria-label','Scroll the visible table left or right');
+  tableScrollDock.innerHTML='<div class="table-scroll-dock-track"></div>';
+  tableScrollDockTrack=tableScrollDock.firstElementChild;
+  document.body.appendChild(tableScrollDock);
+  tableScrollDock.addEventListener('scroll',()=>{
+    if(!activeHorizontalTable||tableScrollDockSyncing)return;
+    tableScrollDockSyncing=true;
+    activeHorizontalTable.scrollLeft=tableScrollDock.scrollLeft;
+    tableScrollDockSyncing=false;
+  },{passive:true});
+  return tableScrollDock;
+}
+function horizontalTableVisibility(card){
+  if(!card||card.offsetParent===null||card.scrollWidth<=card.clientWidth+2)return 0;
+  const rect=card.getBoundingClientRect(),top=Math.max(rect.top,72),bottom=Math.min(rect.bottom,window.innerHeight-12);
+  return Math.max(0,bottom-top);
+}
+function syncTableScrollDock(){
+  tableScrollDockFrame=0;
+  const dock=ensureTableScrollDock(),cards=[...document.querySelectorAll('.table-card')];
+  const target=cards.map(card=>({card,score:horizontalTableVisibility(card)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score)[0]?.card||null;
+  if(!target){activeHorizontalTable=null;dock.hidden=true;return}
+  activeHorizontalTable=target;
+  const rect=target.getBoundingClientRect(),left=Math.max(12,rect.left),right=Math.min(window.innerWidth-12,rect.right),width=Math.max(120,right-left);
+  dock.style.left=`${left}px`;dock.style.width=`${width}px`;dock.hidden=false;
+  const overflow=Math.max(0,target.scrollWidth-target.clientWidth);
+  tableScrollDockTrack.style.width=`${Math.ceil(width+overflow)}px`;
+  tableScrollDockSyncing=true;dock.scrollLeft=target.scrollLeft;tableScrollDockSyncing=false;
+  if(!target.dataset.scrollDockBound){
+    target.dataset.scrollDockBound='true';
+    target.addEventListener('scroll',()=>{
+      if(activeHorizontalTable!==target||tableScrollDockSyncing)return;
+      tableScrollDockSyncing=true;dock.scrollLeft=target.scrollLeft;tableScrollDockSyncing=false;
+    },{passive:true});
+  }
+}
+function scheduleTableScrollDock(){if(!tableScrollDockFrame)tableScrollDockFrame=requestAnimationFrame(syncTableScrollDock)}
+function initializeTableScrollAccess(){
+  ensureTableScrollDock();
+  window.addEventListener('scroll',scheduleTableScrollDock,{passive:true});
+  window.addEventListener('resize',scheduleTableScrollDock,{passive:true});
+  new MutationObserver(scheduleTableScrollDock).observe(app,{childList:true,subtree:true});
+  scheduleTableScrollDock();
+}
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
 const pretty=v=>String(v||'—').replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
 const when=v=>{if(!v)return'—';const d=new Date(v);return Number.isNaN(d.valueOf())?String(v):new Intl.DateTimeFormat('en-MY',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kuala_Lumpur'}).format(d)};
@@ -291,6 +344,7 @@ ensureViewData=async function(view){
   const resourceView=view==='handphoneCatalog'?'catalog':view==='handphonePricing'?'pricing':view;
   return ensureViewDataBase(resourceView);
 };
+initializeTableScrollAccess();
 load();
 
 async function loadAdminReportData(){
@@ -1137,7 +1191,7 @@ function render(){
   const documentBadge=document.getElementById('documentBadge');if(documentBadge)documentBadge.textContent=state.data.documents.filter(record=>!isDemoRecord(record)).length;
   syncPrimaryNavigation();document.querySelectorAll('.nav-item:not([hidden])').forEach(item=>{item.onclick=()=>navigateToView(item.dataset.view).catch(error=>showWorkspaceError(error.message))});
   ({dashboard,customers,workbench,products,reports,management,leads,applications,documents,inbox,outbox,catalog,pricing,handphoneCatalog:catalog,handphonePricing:pricing,team,users:usersAdmin,activity,settings}[state.view]||dashboard)();
-  bind();applyDemoFeatureBanner();
+  bind();applyDemoFeatureBanner();scheduleTableScrollDock();
 }
 
 function whatsappChannelLabel(record={}){
@@ -1222,4 +1276,3 @@ function manualWhatsApp(target){
   const applyTarget=()=>{const item=selected||customerTarget(form.customer.value);if(item)form.phone.value=item.phone||''};if(!selected)form.customer.onchange=applyTarget;applyTarget();form.querySelector('[data-cancel]').onclick=()=>document.querySelector('.drawer-backdrop').remove();
   form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('[type=submit]'),message=document.getElementById('formMessage'),item=selected||customerTarget(form.customer.value),manualWindow=state.user?.whatsappMode==='MANUAL'?window.open('about:blank','_blank'):null;const leadId=item?.leadId||selectedLead?.id||selectedApplication?.leadId||'',applicationId=item?.applicationId||selectedApplication?.id||'';button.disabled=true;try{const saved=await post('sendCustomerMessage',{leadId,applicationId,phone:form.phone.value,message:form.message.value,messageType:form.messageType.value,templateName:form.templateName.value,language:form.language.value,channelId:item?.channelId||'',replyToMessageId:isInbox?selected.id:''});if(saved.mode==='MANUAL'&&saved.whatsappUrl){if(manualWindow)manualWindow.location=saved.whatsappUrl;else window.location.href=saved.whatsappUrl}else manualWindow?.close();document.querySelector('.drawer-backdrop').remove();await refreshMessaging('outbox')}catch(error){manualWindow?.close();message.textContent=error.message;button.disabled=false}};
 }
-

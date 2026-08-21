@@ -34,8 +34,16 @@ const CONVERSATION_DECISION_HEADERS = [
   'Selected Product Variant',
   'Last Decision Route',
   'Last Reply Source',
-  'Last Knowledge Version'
+  'Last Knowledge Version',
+  'Asked Questions JSON',
+  'Answered Questions JSON',
+  'Recent Messages JSON',
+  'Conversation Summary',
+  'Last Next Action'
 ];
+const CONVERSATION_MEMORY_HEADERS = CONVERSATION_DECISION_HEADERS.slice(4);
+const MAX_CONVERSATION_MEMORY_ITEMS = 24;
+const MAX_RECENT_MESSAGES = 12;
 
 export function reserveInboundMessage(messageId, now = Date.now()) {
   const id = clean(messageId);
@@ -949,15 +957,16 @@ const profileContinuation = ({ language = 'MS', state = {}, lead = {}, baseText 
   const name = usableCustomerName(state['Customer Name'] || lead['Customer Name']);
   const hasLocation = !!clean(lead['City or Area'] || lead.State);
   const lastReply = clean(state['Last AI Message']);
+  const askedQuestions = parseJsonArray(state['Asked Questions JSON']).map(normalizedWords);
   if (!name) {
-    const alreadyAsked = /(?:nama anda|your name|称呼)/i.test(lastReply);
+    const alreadyAsked = /(?:nama anda|your name|称呼)/i.test(lastReply) || askedQuestions.includes('customer name');
     return {
       nextStep: 'STEP_01_NAME',
       text: [clean(baseText), alreadyAsked ? '' : instantCopy(language, 'NAME_AFTER_ANSWER')].filter(Boolean).join(' ')
     };
   }
   if (!hasLocation) {
-    const alreadyAsked = /(?:bandar atau negeri|city or state|城市|州属)/i.test(lastReply);
+    const alreadyAsked = /(?:bandar atau negeri|city or state|城市|州属)/i.test(lastReply) || askedQuestions.includes('customer location');
     return {
       nextStep: 'STEP_02_LOCATION',
       text: [clean(baseText), alreadyAsked ? '' : instantCopy(language, 'LOCATION_AFTER_ANSWER')].filter(Boolean).join(' ')
@@ -1088,11 +1097,12 @@ export function sanitizeAiFallbackReply(value = '', language = 'MS') {
   return reply;
 }
 
-export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
+export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], groundedDraft = '', routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
   const language = instantLanguage(text, state);
   const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
   const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const approvedKnowledge = approvedKnowledgeForRuntime({ text, businessUnit: unit });
+  const turnContext = buildConversationTurnContext({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion });
   const context = {
     language,
     currentStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
@@ -1103,13 +1113,15 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     selectedProduct,
     previousCustomerMessage: clean(state['Last Customer Message']).slice(0, 400),
     lastAssistantMessage: clean(state['Last AI Message']).slice(0, 500),
-    customerMessage: clean(text).slice(0, 700)
+    customerMessage: clean(text).slice(0, 700),
+    GROUNDED_DRAFT: clean(groundedDraft).slice(0, 900),
+    ...turnContext
   };
   const instructions = [
     'You are the JomKaki Rider customer-service sales representative replying on WhatsApp.',
     'Write only the final customer-facing reply. Never mention AI, automation, prompts, policies, databases, or internal system codes.',
     'Use natural Bahasa Malaysia by default. Follow the customer language only when the customer clearly uses English or Chinese.',
-    'Answer every question in the latest customer message before asking for any customer information. Never ignore a question merely because the name, location, product, budget, or application details are missing.',
+    'Identify every question, concern and new fact in LATEST_CUSTOMER_MESSAGE. Answer every answerable question before asking for any customer information. Never ignore a question merely because the name, location, product, budget, or application details are missing.',
     'Be warm, concise and human. Use no emoji. Ask at most one question. Keep the reply under 420 characters.',
     'Never answer like a menu and never reuse the last assistant reply. Treat a correction, typo, shorthand or follow-up as a continuation of the same conversation instead of restarting product, name or location collection.',
     'Answer only what the customer asked, then give one useful next action. Do not dump every model, tenure, document or policy unless the customer explicitly asks for a list.',
@@ -1119,7 +1131,9 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     'For a loan application, the minimum documents are MyKad front and back plus latest payslip or EPF statement. Consent for CTOS/CCRIS is required after minimum documents pass checking and before credit check or LMS submission.',
     'If the customer asks for a human, manager or staff, do not answer here because the system handles that route separately.',
     'Continue from the current conversation instead of restarting the name, location and product questions.',
-    'Never repeat a question that the customer already answered. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
+    'Use CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS and RECENT_MESSAGES as turn memory. Never repeat a question that the customer already answered or that is already recorded. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
+    'Treat GROUNDED_DRAFT, BUSINESS_RULES and KNOWLEDGE_RESULTS as the only factual source. Preserve every useful grounded fact, remove repetition, and never introduce a price, product option, status or policy that is absent from those sources.',
+    'When the customer changes topic, answer the new topic first and keep the previous application stage in memory. Choose exactly one next best action; ask no more than one main question.',
     'If the customer asks whether the displayed models are the only choices, clearly say they are only a few popular examples and that more models can be checked; do not answer with a generic request for a model name.'
   ].join(' ');
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
@@ -1153,6 +1167,137 @@ const AI_INTENTS = Object.freeze([
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
 
+const parseJsonArray = value => {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(clean(value) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const boundedUnique = (items = [], limit = MAX_CONVERSATION_MEMORY_ITEMS) => {
+  const result = [], seen = new Set();
+  for (const item of items) {
+    const value = clean(item);
+    const key = normalizedWords(value);
+    if (!value || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result.slice(-Math.max(1, limit));
+};
+
+const redactConversationText = value => clean(value)
+  .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[email]')
+  .replace(/\b\d{9,16}\b/g, '[number]')
+  .replace(/https?:\/\/\S+/gi, '[link]')
+  .slice(0, 500);
+
+export function detectCustomerQuestionIntents(value = '') {
+  const text = clean(value), intents = [];
+  const add = intent => { if (AI_INTENTS.includes(intent) && !intents.includes(intent)) intents.push(intent); };
+  if (!text) return intents;
+  if (asksForBranchLocation(text)) add('BRANCH_LOCATION');
+  if (asksForPromotion(text)) add('PROMOTION');
+  if (asksForAvailableModels(text)) add('AVAILABLE_MODELS');
+  if (asksForOtherModels(text)) add('OTHER_MODELS');
+  if (asksForMonthlyInstalment(text)) add('MONTHLY_INSTALMENT');
+  if (asksForDeposit(text)) add('DEPOSIT');
+  if (asksForCashPrice(text)) add('CASH_PRICE');
+  if (requestedMonthlyTenure(text)) add('TENURE');
+  if (asksForInterestRate(text)) add('INTEREST_RATE');
+  if (asksForProductColour(text)) add('PRODUCT_COLOUR');
+  if (asksForProductStorage(text)) add('PRODUCT_STORAGE');
+  if (asksForCombinedApplication(text)) add('COMBINED_APPLICATION');
+  if (asksForPayslipPeriod(text)) add('PAYSLIP_PERIOD');
+  if (conversationalDocumentRequirement(text)) add('DOCUMENT_REQUIREMENTS');
+  if (isDocumentStatusQuestion(text) && /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(text)) add('DOCUMENT_STATUS');
+  if (asksForLoanProcessingTime(text)) add('PROCESSING_TIME');
+  if (asksAboutShopLoan(text)) add('SHOP_LOAN');
+  if (raisesBudgetConcern(text)) add('BUDGET');
+  if (!intents.length && customerAskedQuestion(text)) add('GENERAL');
+  return intents;
+}
+
+const approvedQuestionIntents = (value = [], text = '') => boundedUnique([
+  ...detectCustomerQuestionIntents(text),
+  ...(Array.isArray(value) ? value : [])
+    .map(item => clean(item).toUpperCase())
+    .filter(item => AI_INTENTS.includes(item))
+], 12);
+
+const documentStatusSnapshot = (documents = []) => {
+  const received = documents.map(row => clean(row['Document Type'])).filter(Boolean);
+  const verified = documents.filter(row => ['VERIFIED', 'APPROVED', 'PASSED'].includes(clean(row['Verification Status']).toUpperCase())).map(row => clean(row['Document Type'])).filter(Boolean);
+  const pending = documents.filter(row => !['VERIFIED', 'APPROVED', 'PASSED', 'REJECTED'].includes(clean(row['Verification Status']).toUpperCase())).map(row => clean(row['Document Type'])).filter(Boolean);
+  return { received: boundedUnique(received), verified: boundedUnique(verified), pendingVerification: boundedUnique(pending), receivedCount: documents.length };
+};
+
+export function buildRecentConversationMessages({ inbox = [], outbox = [], phone = '', state = {}, limit = MAX_RECENT_MESSAGES } = {}) {
+  const target = digits(phone);
+  const rows = [
+    ...inbox.filter(row => !target || digits(row['Phone Number']) === target).map(row => ({
+      role: 'customer', at: clean(row['Received At']), text: redactConversationText(row['Customer Message'])
+    })),
+    ...outbox.filter(row => !target || digits(row['Phone Number']) === target).map(row => ({
+      role: 'assistant', at: clean(row['Sent At'] || row['Created At']), text: redactConversationText(row['Message Text'] || row['Image Caption'])
+    }))
+  ].filter(item => item.text).sort((left, right) => (Date.parse(left.at) || 0) - (Date.parse(right.at) || 0));
+  if (!rows.length) {
+    if (clean(state['Last Customer Message'])) rows.push({ role: 'customer', at: clean(state['Last Customer Reply At']), text: redactConversationText(state['Last Customer Message']) });
+    if (clean(state['Last AI Message'])) rows.push({ role: 'assistant', at: clean(state['Last AI Message At']), text: redactConversationText(state['Last AI Message']) });
+  }
+  return rows.slice(-Math.max(1, Number(limit) || MAX_RECENT_MESSAGES));
+}
+
+export function buildConversationTurnContext({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '' } = {}) {
+  const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit'] || application['Business Unit']) || 'MOTOR';
+  const selectedProduct = [clean(state['Selected Product Brand'] || application['Product Brand']), clean(state['Selected Product Model'] || application['Product Model']), clean(state['Selected Product Variant'] || application['Product Variant'])].filter(Boolean).join(' ');
+  const customerProfile = {
+    name: usableCustomerName(state['Customer Name'] || lead['Customer Name'] || application['Applicant Name']),
+    cityOrArea: clean(lead['City or Area'] || lead.State),
+    region: canonicalRegion(lead.Region || application.Region || routeRegion) || 'UNASSIGNED',
+    businessUnit: unit,
+    selectedProduct,
+    employerName: clean(application['Employer Name'] || state['Employer Name']),
+    jobPosition: clean(application['Job Position'] || state.Occupation),
+    employmentDurationMonths: clean(application['Employment Duration Months'] || state['Employment Duration Months']),
+    monthlyIncome: clean(application['Basic Salary'] || state['Monthly Income']),
+    salaryPaymentMethod: clean(application['Salary Payment Method'] || state['Salary Payment Method']),
+    loanTenureYears: clean(application['Loan Tenure Years'] || state['Loan Tenure Years']),
+    loanTenureMonths: clean(application['Loan Tenure Months'] || state['Loan Tenure Months'])
+  };
+  return {
+    CONVERSATION_STATE: {
+      currentStep: clean(state['Current Step']) || 'STEP_01_WELCOME',
+      lastNextAction: clean(state['Last Next Action']),
+      conversationSummary: clean(state['Conversation Summary']).slice(0, 700),
+      selectedProduct
+    },
+    CUSTOMER_PROFILE: customerProfile,
+    ASKED_QUESTIONS: boundedUnique(parseJsonArray(state['Asked Questions JSON'])),
+    ANSWERED_QUESTIONS: boundedUnique(parseJsonArray(state['Answered Questions JSON'])),
+    DOCUMENT_STATUS: documentStatusSnapshot(documents),
+    BUSINESS_RULES: {
+      primarySalesPath: 'LOAN_KEDAI',
+      defaultLanguage: 'MS',
+      answerAllLatestQuestionsFirst: true,
+      maximumMainQuestions: 1,
+      neverRepeatKnownQuestion: true,
+      loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
+      minimumDocuments: 'MyKad front and back plus latest payslip or EPF statement',
+      consentRequiredBeforeCreditCheckAndLms: true,
+      unlistedProductIsNotRejection: true,
+      handphoneCashPriceMustNotBeDisclosed: true
+    },
+    KNOWLEDGE_RESULTS: approvedKnowledgeForRuntime({ text, businessUnit: unit, includeTesting: false }),
+    RECENT_MESSAGES: (Array.isArray(recentMessages) ? recentMessages : []).slice(-MAX_RECENT_MESSAGES).map(item => ({ role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text) })),
+    LATEST_CUSTOMER_MESSAGE: clean(text).slice(0, 900)
+  };
+}
+
 const validAiIntent = value => {
   if (!value || typeof value !== 'object' || !AI_INTENTS.includes(clean(value.intent).toUpperCase())) return null;
   const confidence = Math.max(0, Math.min(1, Number(value.confidence) || 0));
@@ -1165,6 +1310,8 @@ const validAiIntent = value => {
   const employmentDurationMonths = Math.max(0, Number.parseInt(value.employmentDurationMonths, 10) || 0);
   return {
     intent: clean(value.intent).toUpperCase(),
+    questionIntents: approvedQuestionIntents(value.questionIntents, ''),
+    customerQuestions: boundedUnique(Array.isArray(value.customerQuestions) ? value.customerQuestions : [], 8).map(item => item.slice(0, 160)),
     language,
     businessUnit,
     catalogId: clean(value.catalogId),
@@ -1182,11 +1329,13 @@ const validAiIntent = value => {
     needsHuman: value.needsHuman === true,
     answerCustomerQuestionFirst: value.answerCustomerQuestionFirst !== false,
     suggestedReply: sanitizeAiFallbackReply(value.suggestedReply, language),
+    nextBestAction: clean(value.nextBestAction).slice(0, 120),
+    escalationReason: clean(value.escalationReason).slice(0, 180),
     confidence
   };
 };
 
-export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
+export function buildAiIntentRequest({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
   const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const seenCatalogChoices = new Set();
   const catalogChoices = [
@@ -1205,6 +1354,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     variant: clean(row.Variant),
     keywords: clean(row['Search Keywords']).slice(0, 80)
   }));
+  const turnContext = buildConversationTurnContext({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion });
   const context = {
     currentStep: clean(state['Current Step']) || 'STEP_01_WELCOME',
     defaultBusinessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit) || 'MOTOR',
@@ -1221,13 +1371,14 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
       cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.'
     },
     approvedNotionKnowledge: approvedKnowledgeForRuntime({ text, businessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit), includeTesting: false }),
-    catalogChoices
+    catalogChoices,
+    ...turnContext
   };
   const instructions = [
     'Classify the latest WhatsApp customer message for JomKaki Rider. Return JSON only through the supplied schema.',
     'Understand informal Bahasa Malaysia, Sarawak/Sabah slang, abbreviations, misspellings, mixed English, and conversational follow-ups.',
     'Use the conversation context. Do not restart onboarding when the customer is asking a question. Every question in the latest customer message always takes priority over collecting name, location, or other profile details.',
-    'Classify the whole latest message, including multiple questions, corrections, shorthand and references to the prior reply. Never repeat the last assistant wording and never return a generic menu when a concrete customer request can be understood.',
+    'Classify the whole latest message, including multiple questions, corrections, shorthand and references to the prior reply. Put every distinct business-question intent in questionIntents in customer order and preserve short paraphrases in customerQuestions. Never repeat the last assistant wording and never return a generic menu when a concrete customer request can be understood.',
     'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'If the customer asks for a named product, category or type that has no safe catalog match, choose UNLISTED_PRODUCT, preserve the customer wording in normalizedModel, and set the correct businessUnit when clear. Missing from catalog is never a reason to reject the enquiry or claim the product does not exist.',
@@ -1242,12 +1393,16 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'Default to MS unless the customer clearly prefers English or Chinese. Profanity or obvious anger is FRUSTRATED, not a model name.',
     'If the customer asks a general question that is not answered by a deterministic intent, suggestedReply must directly answer all parts that can be answered safely before any follow-up. It must be concise, have no emoji, ask at most one question, never mention AI/automation/internal systems, and never invent prices, deposits, stock, promotions, approval, document status, or timelines.',
     'suggestedReply must sound like one human salesperson continuing the existing chat: answer only what was asked, preserve confirmed facts, accept corrections, and offer one useful next action instead of listing capabilities.',
+    'Use the named turn inputs CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS, BUSINESS_RULES, KNOWLEDGE_RESULTS and RECENT_MESSAGES. Do not ask for a fact already present or repeat a question in ASKED_QUESTIONS unless the previous answer was invalid.',
+    'Set nextBestAction to one concise internal action key or empty string. Set escalationReason only when facts conflict, a required approved fact is missing, or the customer explicitly requests a person.',
     'Set needsHuman when the customer explicitly asks for a person or when the request requires branch confirmation. Set answerCustomerQuestionFirst true whenever the customer asked a business question.'
   ].join(' ');
   const schema = {
     type: 'object', additionalProperties: false,
     properties: {
       intent: { type: 'string', enum: AI_INTENTS },
+      questionIntents: { type: 'array', items: { type: 'string', enum: AI_INTENTS }, maxItems: 8 },
+      customerQuestions: { type: 'array', items: { type: 'string' }, maxItems: 8 },
       language: { type: 'string', enum: ['MS', 'EN', 'ZH'] },
       businessUnit: { type: 'string', enum: ['', 'MOTOR', 'HANDPHONE'] },
       catalogId: { type: 'string' },
@@ -1265,9 +1420,11 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
       needsHuman: { type: 'boolean' },
       answerCustomerQuestionFirst: { type: 'boolean' },
       suggestedReply: { type: 'string' },
+      nextBestAction: { type: 'string' },
+      escalationReason: { type: 'string' },
       confidence: { type: 'number' }
     },
-    required: ['intent', 'language', 'businessUnit', 'catalogId', 'normalizedModel', 'tenureYears', 'monthlyBudgetRm', 'monthlyIncomeRm', 'employmentDurationMonths', 'locationQuery', 'customerName', 'employerName', 'jobPosition', 'salaryPaymentMethod', 'followUpSubject', 'needsHuman', 'answerCustomerQuestionFirst', 'suggestedReply', 'confidence']
+    required: ['intent', 'questionIntents', 'customerQuestions', 'language', 'businessUnit', 'catalogId', 'normalizedModel', 'tenureYears', 'monthlyBudgetRm', 'monthlyIncomeRm', 'employmentDurationMonths', 'locationQuery', 'customerName', 'employerName', 'jobPosition', 'salaryPaymentMethod', 'followUpSubject', 'needsHuman', 'answerCustomerQuestionFirst', 'suggestedReply', 'nextBestAction', 'escalationReason', 'confidence']
   };
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
   const model = clean(process.env.OPENAI_INTENT_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
@@ -1286,7 +1443,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
   return request;
 }
 
-export async function requestAiIntent({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [], env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
+export async function requestAiIntent({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [], env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
   const apiKey = clean(env.OPENAI_API_KEY);
   const configuredModel = clean(env.OPENAI_INTENT_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
   if (!apiKey || !clean(text)) {
@@ -1296,7 +1453,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(700, Number(timeoutMs) || AI_FALLBACK_DEFAULT_TIMEOUT_MS));
   try {
-    const body = buildAiIntentRequest({ text, state, lead, routeBusinessUnit, routeRegion, phone, motorCatalog, handphoneCatalog });
+    const body = buildAiIntentRequest({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion, phone, motorCatalog, handphoneCatalog });
     body.model = configuredModel || body.model;
     if (!/^gpt-5\.6/i.test(body.model)) delete body.reasoning;
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
@@ -1317,6 +1474,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
     const result = await response.json().catch(() => ({}));
     const raw = responseOutputText(result);
     const parsed = validAiIntent(JSON.parse(raw));
+    if (parsed) parsed.questionIntents = approvedQuestionIntents(parsed.questionIntents, text);
     if (!parsed) console.warn('openai_intent_failed', { reason: 'INVALID_STRUCTURED_OUTPUT', model: body.model });
     return parsed;
   } catch (error) {
@@ -1327,7 +1485,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
   }
 }
 
-export async function requestAiFallbackReply({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
+export async function requestAiFallbackReply({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], groundedDraft = '', routeBusinessUnit = '', routeRegion = '', phone = '', env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
   const apiKey = clean(env.OPENAI_API_KEY);
   const configuredModel = clean(env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
   if (!apiKey || !clean(text)) {
@@ -1337,7 +1495,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(500, Number(timeoutMs) || AI_FALLBACK_DEFAULT_TIMEOUT_MS));
   try {
-    const body = buildAiFallbackRequest({ text, state, lead, routeBusinessUnit, routeRegion, phone });
+    const body = buildAiFallbackRequest({ text, state, lead, application, documents, recentMessages, groundedDraft, routeBusinessUnit, routeRegion, phone });
     body.model = configuredModel || body.model;
     if (!/^(?:gpt-5|o\d)/i.test(body.model)) delete body.reasoning;
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
@@ -2254,6 +2412,136 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   return { handled: true, aiFallback: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
 }
 
+const MULTI_QUESTION_INTENTS = new Set([
+  'BRANCH_LOCATION', 'PROMOTION', 'AVAILABLE_MODELS', 'OTHER_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE',
+  'INTEREST_RATE', 'PRODUCT_COLOUR', 'PRODUCT_STORAGE', 'COMBINED_APPLICATION', 'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS',
+  'PAYSLIP_PERIOD', 'SHOP_LOAN', 'PROCESSING_TIME', 'BUDGET'
+]);
+
+const intentProbeText = ({ intent, originalText = '', state = {}, aiIntent = null } = {}) => {
+  const product = clean(aiIntent?.normalizedModel || [state['Selected Product Brand'], state['Selected Product Model'], state['Selected Product Variant']].filter(Boolean).join(' '));
+  const tenure = aiIntent?.tenureYears ? `${aiIntent.tenureYears} tahun` : clean(requestedMonthlyTenure(originalText, aiIntent?.businessUnit || state['Product Category']));
+  const probes = {
+    BRANCH_LOCATION: `cawangan dekat mana ${clean(aiIntent?.locationQuery)}`,
+    PROMOTION: `promosi apa ada ${clean(aiIntent?.locationQuery)}`,
+    AVAILABLE_MODELS: 'model apa yang ada',
+    OTHER_MODELS: 'ada model lain',
+    MONTHLY_INSTALMENT: `${product} berapa sebulan`,
+    DEPOSIT: `${product} deposit berapa`,
+    CASH_PRICE: `${product} harga cash berapa`,
+    TENURE: `${product} ${tenure || 'berapa tahun'} berapa sebulan`,
+    INTEREST_RATE: 'kadar loan kedai berapa peratus setahun',
+    PRODUCT_COLOUR: `${product} warna apa ada`,
+    PRODUCT_STORAGE: `${product} ${requestedProductStorage(originalText)} berapa GB ada`,
+    COMBINED_APPLICATION: 'boleh mohon motor dan handphone sekali',
+    DOCUMENT_REQUIREMENTS: 'loan kedai perlukan dokumen apa',
+    DOCUMENT_STATUS: 'dokumen saya dah lengkap atau apa lagi kurang',
+    PAYSLIP_PERIOD: 'berapa bulan slip gaji perlu',
+    SHOP_LOAN: 'loan kedai ada tak',
+    PROCESSING_TIME: 'proses loan kedai berapa lama',
+    BUDGET: 'ada pilihan ansuran lebih rendah'
+  };
+  return clean(probes[intent] || originalText);
+};
+
+const declarativeReplyPart = value => {
+  const sentences = clean(value).match(/[^.!?？]+[.!?？]?/g) || [];
+  return sentences.filter(sentence => !/[?？]\s*$/.test(sentence)).join(' ').replace(/\s{2,}/g, ' ').trim();
+};
+
+export function buildMultiQuestionSalesDecision(args = {}) {
+  const detected = approvedQuestionIntents(args.aiIntent?.questionIntents, args.text).filter(intent => MULTI_QUESTION_INTENTS.has(intent));
+  const baseDecision = args.baseDecision || buildInstantSalesDecision(args);
+  if (detected.length < 2) return { ...baseDecision, answeredQuestionKeys: detected.length ? detected : undefined };
+  const decisions = detected.map(intent => buildInstantSalesDecision({
+    ...args,
+    text: intentProbeText({ intent, originalText: args.text, state: args.state, aiIntent: args.aiIntent }),
+    aiIntent: { ...(args.aiIntent || {}), intent, questionIntents: [intent] }
+  })).filter(decision => decision?.handled && clean(decision.text));
+  const answerParts = boundedUnique(decisions.map(decision => declarativeReplyPart(decision.text)).filter(Boolean), 8);
+  if (answerParts.length < 2) return { ...baseDecision, answeredQuestionKeys: detected };
+  const language = instantLanguage(args.text, args.state || {});
+  const combinedAnswer = answerParts.join(' ').slice(0, 760).trim();
+  const continuation = profileContinuation({
+    language,
+    state: args.state || {},
+    lead: args.lead || {},
+    baseText: combinedAnswer,
+    completeStep: clean(baseDecision.nextStep) || clean(args.state?.['Current Step']) || 'STEP_03_PRODUCT'
+  });
+  const productDecision = decisions.find(decision => decision.product) || baseDecision;
+  return {
+    ...baseDecision,
+    handled: true,
+    multiQuestion: true,
+    answeredQuestionKeys: detected,
+    answerCustomerQuestionFirst: true,
+    nextStep: continuation.nextStep,
+    productUnit: clean(productDecision.productUnit || baseDecision.productUnit),
+    product: productDecision.product || baseDecision.product,
+    imageUrl: clean(productDecision.imageUrl || baseDecision.imageUrl),
+    text: continuation.text,
+    humanFollowUpRequired: decisions.some(decision => decision.humanFollowUpRequired) || baseDecision.humanFollowUpRequired || undefined
+  };
+}
+
+const replyQuestionKeys = value => {
+  const reply = clean(value), keys = [];
+  const add = key => { if (!keys.includes(key)) keys.push(key); };
+  if (/(?:nama anda|your name|称呼)/i.test(reply)) add('CUSTOMER_NAME');
+  if (/(?:bandar atau negeri|tinggal di mana|berada di mana|city or state|where (?:are|do) you|城市|州属)/i.test(reply)) add('CUSTOMER_LOCATION');
+  if (/(?:model (?:mana|yang mana)|which model|哪一款)/i.test(reply)) add('PRODUCT_MODEL');
+  if (/(?:bajet bulanan|monthly budget|月供预算)/i.test(reply)) add('MONTHLY_BUDGET');
+  const otherQuestions = (reply.match(/[^.!?？]+[?？]/g) || [])
+    .map(question => normalizedWords(question).slice(0, 100))
+    .filter(question => !/(?:nama anda|your name|称呼|bandar atau negeri|tinggal di mana|berada di mana|city or state|where are you|城市|州属)/i.test(question));
+  return boundedUnique([...keys, ...otherQuestions], 8);
+};
+
+const parseRecentMessages = value => parseJsonArray(value).map(item => typeof item === 'object' && item ? {
+  role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text)
+} : null).filter(item => item?.role && item.text);
+
+const uniqueRecentMessages = (items = []) => {
+  const seen = new Set(), result = [];
+  for (const item of items) {
+    if (!item?.role || !clean(item.text)) continue;
+    const normalized = { role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text) };
+    const key = `${normalized.role}|${normalized.at}|${normalizedWords(normalized.text)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result.slice(-MAX_RECENT_MESSAGES);
+};
+
+export function buildConversationMemoryChanges({ state = {}, lead = {}, application = {}, documents = [], text = '', decision = {}, aiIntent = null, receivedAt = '', includeAssistant = false } = {}) {
+  const answeredNow = decision.handled && !decision.humanFollowUpRequired
+    ? approvedQuestionIntents(decision.answeredQuestionKeys || aiIntent?.questionIntents, text)
+    : [];
+  const asked = boundedUnique([...parseJsonArray(state['Asked Questions JSON']), ...(includeAssistant ? replyQuestionKeys(decision.text) : [])]);
+  const answered = boundedUnique([...parseJsonArray(state['Answered Questions JSON']), ...answeredNow]);
+  const recent = uniqueRecentMessages([
+    ...parseRecentMessages(state['Recent Messages JSON']),
+    ...(clean(text) ? [{ role: 'customer', at: clean(receivedAt), text }] : []),
+    ...(includeAssistant && clean(decision.text) ? [{ role: 'assistant', at: new Date().toISOString(), text: decision.text }] : [])
+  ]);
+  const selectedProduct = [clean(decision.product?.Brand || state['Selected Product Brand'] || application['Product Brand']), clean(decision.product?.Model || state['Selected Product Model'] || application['Product Model']), clean(decision.product?.Variant || state['Selected Product Variant'] || application['Product Variant'])].filter(Boolean).join(' ');
+  const known = [
+    usableCustomerName(state['Customer Name'] || lead['Customer Name']) ? 'name' : '',
+    clean(lead['City or Area'] || lead.State) ? 'location' : '',
+    selectedProduct ? `product:${selectedProduct}` : '',
+    documents.length ? `documents:${documents.length}` : ''
+  ].filter(Boolean);
+  return {
+    'Asked Questions JSON': JSON.stringify(asked),
+    'Answered Questions JSON': JSON.stringify(answered),
+    'Recent Messages JSON': JSON.stringify(recent),
+    'Conversation Summary': `Stage ${clean(decision.nextStep || state['Current Step']) || 'STEP_01_WELCOME'}; known ${known.join(', ') || 'none'}; answered ${answered.slice(-8).join(', ') || 'none'}`.slice(0, 700),
+    'Last Next Action': clean(aiIntent?.nextBestAction || decision.nextStep || state['Last Next Action']).slice(0, 120)
+  };
+}
+
 export function guardConversationProgress({ state = {}, documents = [], text = '', decision = {} } = {}) {
   const currentStep = clean(state['Current Step']).toUpperCase();
   const nextStep = clean(decision.nextStep).toUpperCase();
@@ -2445,12 +2733,13 @@ export default async function handler(req, res) {
     if (!inboundMessages.some(message => !message.__skipDuplicate)) return res.status(200).json({ ok: true, duplicate: true });
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const [leadRows, routeRows, branchRows, stateRows, inboxRows] = await Promise.all([
+    const [leadRows, routeRows, branchRows, stateRows, inboxRows, outboxRows] = await Promise.all([
       readSheet(token, 'Leads!A:AP'),
       readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
       readSheet(token, 'Branch_Master!A1:S1000'),
       readSheet(token, 'Conversation_State!A:CZ'),
-      readSheet(token, 'Customer_Inbox!F:F')
+      readSheet(token, 'Customer_Inbox!A:AC'),
+      readSheet(token, 'Message_Outbox!A:AC')
     ]);
     const leads = objects(leadRows);
     const routes = objects(routeRows);
@@ -2470,7 +2759,8 @@ export default async function handler(req, res) {
       motorCatalog: objects(motorCatalogRows), motorPricing: objects(motorPricingRows),
       handphoneCatalog: objects(handphoneCatalogRows), handphonePricing: objects(handphonePricingRows)
     }));
-    const existingMessageIds = new Set(objects(inboxRows).map(row => clean(row['Message ID'])).filter(Boolean));
+    const inboxObjects = objects(inboxRows), outboxObjects = objects(outboxRows);
+    const existingMessageIds = new Set(inboxObjects.map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
@@ -2551,6 +2841,10 @@ export default async function handler(req, res) {
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text) || conversationalDocumentRequirement(text));
         const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
+        const shouldPreloadApplication = !!lead && (needsDocuments || !!clean(conversationState?.['Application ID']));
+        const preloadedApplications = shouldPreloadApplication ? await loadApplications() : [];
+        const applicationContext = preloadedApplications.filter(row => clean(row['Lead ID']) === clean(lead?.['Lead ID'])).at(-1) || {};
+        const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
         const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting
@@ -2558,6 +2852,9 @@ export default async function handler(req, res) {
             text,
             state: conversationState || {},
             lead: lead || {},
+            application: applicationContext,
+            documents: leadDocuments,
+            recentMessages,
             routeBusinessUnit,
             routeRegion,
             phone,
@@ -2569,6 +2866,10 @@ export default async function handler(req, res) {
         let instantDecision = buildInstantSalesDecision({
           state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
           ...catalogData, aiIntent, suppressDocumentAcknowledgement
+        });
+        instantDecision = buildMultiQuestionSalesDecision({
+          state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
+          ...catalogData, aiIntent, suppressDocumentAcknowledgement, baseDecision: instantDecision
         });
         instantDecision = guardConversationProgress({ state: conversationState || {}, documents: leadDocuments, text, decision: instantDecision });
         const progressiveProfile = buildProgressiveProfileChanges({
@@ -2593,6 +2894,10 @@ export default async function handler(req, res) {
             text: instantDecision.aiFallbackQuestion || text,
             state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },
             lead: { ...(lead || {}), ...progressiveProfile.leadChanges },
+            application: applicationContext,
+            documents: leadDocuments,
+            recentMessages,
+            groundedDraft: instantDecision.text,
             routeBusinessUnit,
             routeRegion,
             phone,
@@ -2624,7 +2929,7 @@ export default async function handler(req, res) {
         }
         const shouldEnsureApplication = mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || clean(instantDecision.nextStep).toUpperCase() === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text);
         const shouldLoadApplication = shouldEnsureApplication || !!clean(conversationState?.['Application ID']);
-        const applications = shouldLoadApplication ? await loadApplications() : [];
+        const applications = shouldLoadApplication ? await loadApplications() : preloadedApplications;
         let application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
         if (!clean(application['Application ID']) && shouldEnsureApplication) {
           application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
@@ -2718,14 +3023,26 @@ export default async function handler(req, res) {
         const decisionAudit = buildDecisionAudit({ decision: instantDecision, aiIntent });
         willReply = routeUsable && !human && instantDecision.handled;
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
+        const inboundMemoryChanges = buildConversationMemoryChanges({
+          state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },
+          lead,
+          application,
+          documents: leadDocuments,
+          text,
+          decision: instantDecision,
+          aiIntent,
+          receivedAt,
+          includeAssistant: false
+        });
         if (!conversationState) {
           conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
           Object.assign(conversationState, progressiveProfile.stateChanges);
+          Object.assign(conversationState, inboundMemoryChanges);
           if (willReply) {
             conversationState['Current Step'] = instantDecision.nextStep || conversationState['Current Step'];
             conversationState['Product Category'] = clean(instantDecision.productUnit || routeBusinessUnit);
           }
-          if (Object.keys(progressiveProfile.stateChanges).length) await ensureHeaders(token, 'Conversation_State', PROGRESSIVE_PROFILE_STATE_HEADERS);
+          await ensureHeaders(token, 'Conversation_State', [...PROGRESSIVE_PROFILE_STATE_HEADERS, ...CONVERSATION_MEMORY_HEADERS]);
           await appendObject(token, 'Conversation_State', conversationState);
           conversationStates.push(conversationState);
         } else {
@@ -2747,9 +3064,10 @@ export default async function handler(req, res) {
               'Current Step': clean(instantDecision.nextStep || conversationState['Current Step']),
               'Product Category': clean(instantDecision.productUnit || conversationState['Product Category'] || routeBusinessUnit)
             } : {}),
-            ...progressiveProfile.stateChanges
+            ...progressiveProfile.stateChanges,
+            ...inboundMemoryChanges
           };
-          if (Object.keys(progressiveProfile.stateChanges).length) await ensureHeaders(token, 'Conversation_State', PROGRESSIVE_PROFILE_STATE_HEADERS);
+          await ensureHeaders(token, 'Conversation_State', [...PROGRESSIVE_PROFILE_STATE_HEADERS, ...CONVERSATION_MEMORY_HEADERS]);
           await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'CZ');
           Object.assign(conversationState, latestInbound);
         }
@@ -2779,7 +3097,18 @@ export default async function handler(req, res) {
               'Selected Product Variant': clean(instantDecision.product?.Variant || conversationState['Selected Product Variant']),
               'Last Decision Route': decisionAudit.decisionRoute,
               'Last Reply Source': decisionAudit.replySource,
-              'Last Knowledge Version': decisionAudit.knowledgeVersion
+              'Last Knowledge Version': decisionAudit.knowledgeVersion,
+              ...buildConversationMemoryChanges({
+                state: conversationState,
+                lead,
+                application,
+                documents: leadDocuments,
+                text,
+                decision: instantDecision,
+                aiIntent,
+                receivedAt,
+                includeAssistant: true
+              })
             };
             await ensureHeaders(token, 'Conversation_State', CONVERSATION_DECISION_HEADERS);
             await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], deliveredState, 'CZ');

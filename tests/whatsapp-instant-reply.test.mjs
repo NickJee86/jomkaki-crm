@@ -8,16 +8,21 @@ import {
   buildApplicationDetailsForm,
   buildApplicationDetailsTurn,
   buildAutomaticApplication,
+  buildConversationMemoryChanges,
+  buildConversationTurnContext,
   buildDocumentProgressReply,
   buildDecisionAudit,
   buildEarlyConsentReply,
   buildImmediateAcknowledgement,
   buildInitialConversationState,
   buildInstantSalesDecision,
+  buildMultiQuestionSalesDecision,
+  buildRecentConversationMessages,
   buildMediaProxyUrl,
   buildProgressiveProfileChanges,
   CREDIT_CONSENT_TEMPLATE_URL,
   customerAskedQuestion,
+  detectCustomerQuestionIntents,
   enforceConversationReplyContract,
   extractCustomerName,
   guardConversationProgress,
@@ -1606,7 +1611,7 @@ test('approved runtime product knowledge explicitly keeps unlisted enquiries ali
   const knowledge = approvedKnowledgeForRuntime({ text: 'scooter ada tak', businessUnit: 'MOTOR' });
   assert.match(knowledge, /unlisted model or category remains a valid enquiry/i);
   assert.match(knowledge, /never reject the customer/i);
-  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-21.9');
+  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-21.10');
 });
 
 test('every customer reply can be traced to a decision route and knowledge version', () => {
@@ -1614,12 +1619,12 @@ test('every customer reply can be traced to a decision route and knowledge versi
   assert.deepEqual(deterministic, {
     decisionRoute: 'BRANCH_LOCATION',
     replySource: 'DETERMINISTIC',
-    knowledgeVersion: '2026-08-21.9'
+    knowledgeVersion: '2026-08-21.10'
   });
   const ai = buildDecisionAudit({ decision: { handled: true, aiGenerated: true }, aiIntent: { intent: 'GENERAL' } });
   assert.equal(ai.decisionRoute, 'AI_FALLBACK');
   assert.equal(ai.replySource, 'KNOWLEDGE_AI_FALLBACK');
-  assert.equal(ai.knowledgeVersion, '2026-08-21.9');
+  assert.equal(ai.knowledgeVersion, '2026-08-21.10');
 });
 
 test('the global reply contract blocks menus, profile-gating and internal identity leakage', () => {
@@ -1727,4 +1732,81 @@ test('payslip-month questions always receive the approved three-month rule direc
     assert.doesNotMatch(guarded.text, /saya boleh bantu semak model|anda mahu saya semak yang mana/i);
     assert.equal((guarded.text.match(/[?？]/g) || []).length, 0);
   }
+});
+
+test('one customer message can contain several questions and every grounded answer is returned once', () => {
+  const base = {
+    state: {
+      'Current Step': 'STEP_03_PRODUCT',
+      'Customer Name': 'Amin',
+      'Product Category': 'MOTOR',
+      'Selected Product Brand': 'Yamaha',
+      'Selected Product Model': 'Y15ZR'
+    },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'deposit berapa, 5 tahun sebulan berapa dan dokumen apa perlu?',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Approval Status': 'APPROVED' }],
+    motorPricing: [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327', 'Deposit (RM)': '500' }],
+    aiIntent: { intent: 'DEPOSIT', questionIntents: ['DEPOSIT', 'MONTHLY_INSTALMENT', 'DOCUMENT_REQUIREMENTS'], language: 'MS', confidence: 0.99 }
+  };
+  const baseDecision = buildInstantSalesDecision(base);
+  const decision = buildMultiQuestionSalesDecision({ ...base, baseDecision });
+  const guarded = enforceConversationReplyContract({ state: base.state, text: base.text, decision });
+  assert.equal(decision.multiQuestion, true);
+  assert.match(guarded.text, /RM500/);
+  assert.match(guarded.text, /RM327/);
+  assert.match(guarded.text, /IC depan dan belakang/i);
+  assert.ok((guarded.text.match(/[?？]/g) || []).length <= 1);
+  assert.deepEqual(decision.answeredQuestionKeys.slice(0, 3), ['MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE']);
+});
+
+test('AI turn context exposes all required memory inputs and redacts old personal data', () => {
+  const recentMessages = buildRecentConversationMessages({
+    phone: '60123456789',
+    inbox: [{ 'Phone Number': '60123456789', 'Received At': '2026-08-21T01:00:00Z', 'Customer Message': 'IC 860616525255 email nick@example.com https://files.example/id.pdf' }],
+    outbox: [{ 'Phone Number': '60123456789', 'Sent At': '2026-08-21T01:00:01Z', 'Message Text': 'Dokumen diterima.' }]
+  });
+  const context = buildConversationTurnContext({
+    text: 'berapa lama proses?',
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Asked Questions JSON': '["CUSTOMER_NAME"]', 'Answered Questions JSON': '["MONTHLY_INSTALMENT"]' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    application: { 'Product Brand': 'Yamaha', 'Product Model': 'Y15ZR' },
+    documents: [{ 'Document Type': 'MYKAD_FRONT', 'Verification Status': 'PENDING_AI' }],
+    recentMessages,
+    routeBusinessUnit: 'MOTOR'
+  });
+  for (const key of ['CONVERSATION_STATE', 'CUSTOMER_PROFILE', 'ASKED_QUESTIONS', 'ANSWERED_QUESTIONS', 'DOCUMENT_STATUS', 'BUSINESS_RULES', 'KNOWLEDGE_RESULTS', 'RECENT_MESSAGES']) assert.ok(Object.hasOwn(context, key), key);
+  assert.equal(context.DOCUMENT_STATUS.receivedCount, 1);
+  assert.match(JSON.stringify(context.RECENT_MESSAGES), /\[number\]|\[email\]|\[link\]/);
+  assert.doesNotMatch(JSON.stringify(context.RECENT_MESSAGES), /860616525255|nick@example\.com|files\.example/);
+});
+
+test('conversation memory prevents repeated profile questions and records answered topics', () => {
+  const state = {
+    'Current Step': 'STEP_03_PRODUCT',
+    'Asked Questions JSON': '["CUSTOMER_NAME"]',
+    'Answered Questions JSON': '["PROMOTION"]',
+    'Recent Messages JSON': '[]'
+  };
+  const changes = buildConversationMemoryChanges({
+    state,
+    lead: { Region: 'EAST_MALAYSIA' },
+    text: 'deposit berapa dan dokumen apa perlu?',
+    decision: { handled: true, nextStep: 'STEP_04_DOCUMENTS', text: 'Deposit RM500. Dokumen minimum ialah IC depan dan belakang. Anda tinggal di mana?', answeredQuestionKeys: ['DEPOSIT', 'DOCUMENT_REQUIREMENTS'] },
+    aiIntent: { questionIntents: ['DEPOSIT', 'DOCUMENT_REQUIREMENTS'], nextBestAction: 'COLLECT_LOCATION' },
+    receivedAt: '2026-08-21T02:00:00Z',
+    includeAssistant: true
+  });
+  assert.deepEqual(JSON.parse(changes['Asked Questions JSON']).slice(0, 2), ['CUSTOMER_NAME', 'CUSTOMER_LOCATION']);
+  assert.deepEqual(JSON.parse(changes['Answered Questions JSON']), ['PROMOTION', 'DEPOSIT', 'DOCUMENT_REQUIREMENTS']);
+  assert.equal(changes['Last Next Action'], 'COLLECT_LOCATION');
+  assert.equal(JSON.parse(changes['Recent Messages JSON']).length, 2);
+});
+
+test('question detector recognises topic switches, typos and multiple business questions', () => {
+  const intents = detectCustomerQuestionIntents('boss, y15 depo brp, 3 tahun sebulan berapa, slip gaji brp bulan dan kedai dekat mana?');
+  for (const expected of ['BRANCH_LOCATION', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'PAYSLIP_PERIOD']) assert.ok(intents.includes(expected), expected);
 });
