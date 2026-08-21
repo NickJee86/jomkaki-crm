@@ -1523,6 +1523,40 @@ test('other-model request suggests a small approved regional list and asks one q
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
+test('motor lain ada tak is answered directly before unlisted-product or manager fallback routes', () => {
+  const catalog = [
+    { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+    { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+  ];
+  const base = {
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' },
+    lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
+    text: 'motor lain ada tak', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: catalog,
+    aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.55 }
+  };
+  const withPricing = buildInstantSalesDecision({
+    ...base,
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340' },
+      { 'Catalog ID': 'M2', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' },
+      { 'Catalog ID': 'M3', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }
+    ]
+  });
+  assert.equal(withPricing.availableModelsIntent, true);
+  assert.match(withPricing.text, /Yamaha NMAX/);
+  assert.match(withPricing.text, /Honda RS150R/);
+  assert.doesNotMatch(withPricing.text, /pengurus|mungkin salah|Yamaha Y15ZR/i);
+  assert.equal((withPricing.text.match(/\?/g) || []).length, 1);
+
+  const withoutRegionalPricing = buildInstantSalesDecision({ ...base, motorPricing: [] });
+  assert.equal(withoutRegionalPricing.availableModelsIntent, true);
+  assert.match(withoutRegionalPricing.text, /Yamaha NMAX/);
+  assert.match(withoutRegionalPricing.text, /Honda RS150R/);
+  assert.doesNotMatch(withoutRegionalPricing.text, /pengurus|mungkin salah|Yamaha Y15ZR/i);
+});
+
 test('motor category spelling variants never fall through to the generic help menu', () => {
   for (const text of ['motor scuter ada tak', 'scooter ada tak', 'skuter ada ke']) {
     const decision = buildInstantSalesDecision({
