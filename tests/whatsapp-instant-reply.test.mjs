@@ -1927,4 +1927,3 @@ test('question detector recognises topic switches, typos and multiple business q
   const intents = detectCustomerQuestionIntents('boss, y15 depo brp, 3 tahun sebulan berapa, slip gaji brp bulan dan kedai dekat mana?');
   for (const expected of ['BRANCH_LOCATION', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'PAYSLIP_PERIOD']) assert.ok(intents.includes(expected), expected);
 });
-
