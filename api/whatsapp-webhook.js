@@ -35,6 +35,7 @@ const CONVERSATION_DECISION_HEADERS = [
   'Last Decision Route',
   'Last Reply Source',
   'Last Knowledge Version',
+  'Last Suggested Models JSON',
   'Asked Questions JSON',
   'Answered Questions JSON',
   'Recent Messages JSON',
@@ -791,6 +792,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. Its approved monthly plan still needs branch confirmation, and I can arrange that check for you.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
+      OTHER_MODELS_EXHAUSTED: 'Those are the other active options I can confirm from the current approved catalogue. If you have another model in mind, send me its name or a photo and I will still arrange a branch check for you.',
       OTHER_MODELS_CHECK: 'Yes, I can check other motorcycles too. Do you prefer a scooter, cub/moped, sport bike, or would you like suggestions based on a comfortable monthly budget?',
       AVAILABLE_MODELS: `Those are only a few popular examples, not the full catalogue. Other options I can check include ${models}. Which type do you prefer, or what monthly budget is comfortable for you?`,
       MOTOR_CATEGORY_OPTIONS: `Yes, I can check ${category} options. Approved choices currently include ${models}. Is there a specific model you prefer, or what monthly budget is comfortable for you?`,
@@ -853,6 +855,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Pelan ansuran yang diluluskan masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
+      OTHER_MODELS_EXHAUSTED: 'Itulah pilihan aktif lain yang saya boleh sahkan daripada katalog semasa. Kalau anda ada model lain dalam fikiran, hantar nama atau gambarnya dan saya tetap akan bantu minta cawangan semak.',
       OTHER_MODELS_CHECK: 'Boleh, saya boleh semak motor lain juga. Anda lebih suka skuter, kapcai/moped, motor sport, atau mahu saya cadangkan ikut bajet bulanan yang selesa?',
       AVAILABLE_MODELS: `Itu cuma beberapa pilihan popular, bukan semua model yang ada. Pilihan lain yang saya boleh semak termasuk ${models}. Anda suka jenis apa, atau bajet bulanan berapa yang selesa?`,
       MOTOR_CATEGORY_OPTIONS: `Ada pilihan ${category} yang boleh saya semak. Antara pilihan diluluskan sekarang ialah ${models}. Anda ada model tertentu, atau bajet bulanan berapa yang selesa?`,
@@ -911,6 +914,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
+      OTHER_MODELS_EXHAUSTED: '目前获批目录中可确认的其他在售选择已经列完。如果你心里还有别的型号，请发型号名称或照片给我，我仍然可以安排分行查询。',
       OTHER_MODELS_CHECK: '可以，我也能帮你查询其他摩托车。你比较喜欢踏板车、弯梁车、跑车款，还是要我按照舒服的月供预算推荐？',
       AVAILABLE_MODELS: `那些只是几款热门例子，不是全部车型。我还可以查询 ${models}。你喜欢哪种类型，或舒服的月供预算大约是多少？`,
       MOTOR_CATEGORY_OPTIONS: `可以，我能查询${category}。目前获批的选择包括 ${models}。你有指定型号，还是希望月供控制在多少？`,
@@ -2004,6 +2008,21 @@ const approvedCatalogSuggestions = (catalogRows = [], unit = '', excludedModel =
   .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim())
   .filter(Boolean);
 
+const previouslySuggestedModelKeys = (state = {}, catalogRows = []) => {
+  const recorded = parseJsonArray(state['Last Suggested Models JSON']).map(normalizedWords).filter(Boolean);
+  if (recorded.length) return new Set(recorded);
+  // Compatibility for conversations started before this field existed. Once a
+  // new alternatives reply is sent, the exact labels are persisted above.
+  const previousReply = normalizedWords(state['Last AI Message']);
+  if (!previousReply) return new Set();
+  const wrappedReply = ` ${previousReply} `;
+  return new Set(catalogRows.filter(row => {
+    const label = normalizedWords(`${clean(row.Brand)} ${clean(row.Model)}`);
+    const model = normalizedWords(row.Model);
+    return (label && wrappedReply.includes(` ${label} `)) || (model && wrappedReply.includes(` ${model} `));
+  }).map(row => normalizedWords(`${clean(row.Brand)} ${clean(row.Model)}`)).filter(Boolean));
+};
+
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], aiIntent = null, suppressDocumentAcknowledgement = false } = {}) {
   const interpretedIntent = clean(aiIntent?.intent).toUpperCase();
   const language = ['MS', 'EN', 'ZH'].includes(clean(aiIntent?.language).toUpperCase()) ? clean(aiIntent.language).toUpperCase() : instantLanguage(text, state);
@@ -2041,20 +2060,26 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const suggestionUnit = productUnitFromText(text, '') || fallbackUnit || canonicalBusinessUnit(aiIntent?.businessUnit) || 'MOTOR';
     const suggestionCatalog = allCatalogs.filter(row => row.__businessUnit === suggestionUnit);
     const suggestionPricing = suggestionUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, 4)
-      .filter(label => !selectedModel || !normalizedWords(label).endsWith(selectedModel));
+    const previousSuggestionKeys = previouslySuggestedModelKeys(state, suggestionCatalog);
+    const notPreviouslySuggested = label => !previousSuggestionKeys.has(normalizedWords(label));
+    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, Math.max(8, suggestionCatalog.length))
+      .filter(label => (!selectedModel || !normalizedWords(label).endsWith(selectedModel)) && notPreviouslySuggested(label))
+      .slice(0, 4);
     const suggestions = pricedSuggestions.length
       ? pricedSuggestions
-      : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, 4);
+      : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, Math.max(8, suggestionCatalog.length))
+        .filter(notPreviouslySuggested)
+        .slice(0, 4);
     const copyKey = suggestions.length
       ? (interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS')
-      : 'OTHER_MODELS_CHECK';
+      : (previousSuggestionKeys.size ? 'OTHER_MODELS_EXHAUSTED' : 'OTHER_MODELS_CHECK');
     const baseText = instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
     const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
     return {
       handled: true,
       availableModelsIntent: true,
       answerCustomerQuestionFirst: true,
+      suggestedModels: suggestions,
       nextStep: continuation.nextStep,
       productUnit: suggestionUnit,
       text: continuation.text
@@ -3158,6 +3183,7 @@ export default async function handler(req, res) {
               'Last Decision Route': decisionAudit.decisionRoute,
               'Last Reply Source': decisionAudit.replySource,
               'Last Knowledge Version': decisionAudit.knowledgeVersion,
+              ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(instantDecision.suggestedModels || []) } : {}),
               ...buildConversationMemoryChanges({
                 state: conversationState,
                 lead,
