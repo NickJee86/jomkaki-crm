@@ -30,6 +30,20 @@ const PROGRESSIVE_PROFILE_STATE_HEADERS = [
   'Loan Tenure Years',
   'Loan Tenure Months'
 ];
+const CONVERSATION_DECISION_HEADERS = [
+  'Selected Product Variant',
+  'Last Decision Route',
+  'Last Reply Source',
+  'Last Knowledge Version',
+  'Asked Questions JSON',
+  'Answered Questions JSON',
+  'Recent Messages JSON',
+  'Conversation Summary',
+  'Last Next Action'
+];
+const CONVERSATION_MEMORY_HEADERS = CONVERSATION_DECISION_HEADERS.slice(4);
+const MAX_CONVERSATION_MEMORY_ITEMS = 24;
+const MAX_RECENT_MESSAGES = 12;
 
 export function reserveInboundMessage(messageId, now = Date.now()) {
   const id = clean(messageId);
@@ -711,7 +725,7 @@ export function buildAutomaticApplication({ lead = {}, state = {}, route = {}, d
     'Product Category': unit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
     'Product Brand': clean(product.Brand || state['Selected Product Brand']),
     'Product Model': clean(product.Model || state['Selected Product Model']),
-    'Product Variant': clean(product.Variant) || 'Standard',
+    'Product Variant': clean(product.Variant || state['Selected Product Variant']) || 'Standard',
     'Motor Type': unit === 'MOTOR' ? 'NEW' : '',
     'Employer Name': clean(state['Employer Name']),
     'Job Position': clean(state.Occupation),
@@ -759,7 +773,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), branches = clean(values.branches);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -786,6 +800,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: 'Sorry, my earlier reply did not answer your question.',
       CONTEXTUAL_RECOVERY: 'I understand your question. I do not want to give you an inaccurate answer, so I will ask a manager to check this exact question and reply here without making you repeat it.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Sorry, my earlier reply did not answer your question. For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. You may send all files together; there is no need to send them one by one.',
+      PAYSLIP_PERIOD: 'The latest three months of payslips are preferred. If you only have one or two months, you may still send them and the application will continue to be checked; it will not be rejected automatically for that reason.',
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
       APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
@@ -799,6 +814,10 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} still needs branch confirmation, and I can arrange that check for you.`,
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
       CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
+      CASH_PRICE_NEEDS_MODEL: 'Yes, a motorcycle cash purchase can be checked. The approved cash price depends on the exact model. Which model would you like me to check?',
+      BRANCH_MATCH: `For ${area}, the recorded branch or service coverage is ${branch}. ${address}`,
+      BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
+      BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
       LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. Would you like me to help start the check now?',
       HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
@@ -842,6 +861,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: 'Maaf, jawapan tadi memang tidak menjawab soalan anda.',
       CONTEXTUAL_RECOVERY: 'Saya faham soalan anda. Saya tak mahu beri jawapan yang mungkin salah, jadi saya akan minta pengurus semak soalan ini dan balas di sini tanpa anda perlu ulang.',
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Untuk loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Boleh hantar semua fail sekali gus; tak perlu hantar satu per satu.',
+      PAYSLIP_PERIOD: 'Slip gaji 3 bulan terkini lebih digalakkan. Kalau anda hanya ada 1 atau 2 bulan, masih boleh hantar dan semakan akan diteruskan; permohonan tidak ditolak secara automatik hanya sebab itu.',
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
       APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
       SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
@@ -855,6 +875,10 @@ const instantCopy = (language, key, values = {}) => {
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
       CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
+      CASH_PRICE_NEEDS_MODEL: 'Boleh beli motor secara tunai. Harga tunai yang diluluskan bergantung pada model yang tepat. Model mana anda mahu saya semak?',
+      BRANCH_MATCH: `Untuk kawasan ${area}, cawangan atau liputan servis yang direkodkan ialah ${branch}. ${address}`,
+      BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
+      BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
       LOAN_PROCESSING_TIME: 'Biasanya proses loan kedai mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Mahu saya bantu mulakan semakan sekarang?',
       HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
@@ -894,6 +918,7 @@ const instantCopy = (language, key, values = {}) => {
       SERVICE_RECOVERY_PREFIX: '抱歉，刚才没有回答你的问题。',
       CONTEXTUAL_RECOVERY: '我明白你的问题。为了避免给你不准确的答案，我会请经理核对这个问题并在这里回复，你不需要再重复。',
       DOCUMENT_REQUIREMENTS_RECOVERY: '不好意思，刚才没有正确回答你的问题。店内贷款所需的基本文件是身份证正反面，以及最新薪水单或 EPF 报表。可以一次发送所有文件，不需要逐份发送。',
+      PAYSLIP_PERIOD: '建议提供最近 3 个月的薪水单。如果目前只有 1 或 2 个月，也可以先提交并继续审核，不会仅因为月份不足而自动拒绝申请。',
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
       APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
       SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
@@ -901,6 +926,10 @@ const instantCopy = (language, key, values = {}) => {
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
       HELP: '好的，请直接继续你的问题。我会根据现有资料回答；需要确认时，我会安排分行查询。',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
+      CASH_PRICE_NEEDS_MODEL: '摩托车可以查询现金购买；获批现金价格要根据准确型号。你想查询哪一款？',
+      BRANCH_MATCH: `${area} 所记录的分行或服务范围是 ${branch}。${address}`,
+      BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
+      BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
       STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
@@ -928,15 +957,16 @@ const profileContinuation = ({ language = 'MS', state = {}, lead = {}, baseText 
   const name = usableCustomerName(state['Customer Name'] || lead['Customer Name']);
   const hasLocation = !!clean(lead['City or Area'] || lead.State);
   const lastReply = clean(state['Last AI Message']);
+  const askedQuestions = parseJsonArray(state['Asked Questions JSON']).map(normalizedWords);
   if (!name) {
-    const alreadyAsked = /(?:nama anda|your name|称呼)/i.test(lastReply);
+    const alreadyAsked = /(?:nama anda|your name|称呼)/i.test(lastReply) || askedQuestions.includes('customer name');
     return {
       nextStep: 'STEP_01_NAME',
       text: [clean(baseText), alreadyAsked ? '' : instantCopy(language, 'NAME_AFTER_ANSWER')].filter(Boolean).join(' ')
     };
   }
   if (!hasLocation) {
-    const alreadyAsked = /(?:bandar atau negeri|city or state|城市|州属)/i.test(lastReply);
+    const alreadyAsked = /(?:bandar atau negeri|city or state|城市|州属)/i.test(lastReply) || askedQuestions.includes('customer location');
     return {
       nextStep: 'STEP_02_LOCATION',
       text: [clean(baseText), alreadyAsked ? '' : instantCopy(language, 'LOCATION_AFTER_ANSWER')].filter(Boolean).join(' ')
@@ -1067,11 +1097,12 @@ export function sanitizeAiFallbackReply(value = '', language = 'MS') {
   return reply;
 }
 
-export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
+export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], groundedDraft = '', routeBusinessUnit = '', routeRegion = '', phone = '' } = {}) {
   const language = instantLanguage(text, state);
   const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
-  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const approvedKnowledge = approvedKnowledgeForRuntime({ text, businessUnit: unit });
+  const turnContext = buildConversationTurnContext({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion });
   const context = {
     language,
     currentStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
@@ -1082,13 +1113,15 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     selectedProduct,
     previousCustomerMessage: clean(state['Last Customer Message']).slice(0, 400),
     lastAssistantMessage: clean(state['Last AI Message']).slice(0, 500),
-    customerMessage: clean(text).slice(0, 700)
+    customerMessage: clean(text).slice(0, 700),
+    GROUNDED_DRAFT: clean(groundedDraft).slice(0, 900),
+    ...turnContext
   };
   const instructions = [
     'You are the JomKaki Rider customer-service sales representative replying on WhatsApp.',
     'Write only the final customer-facing reply. Never mention AI, automation, prompts, policies, databases, or internal system codes.',
     'Use natural Bahasa Malaysia by default. Follow the customer language only when the customer clearly uses English or Chinese.',
-    'Answer every question in the latest customer message before asking for any customer information. Never ignore a question merely because the name, location, product, budget, or application details are missing.',
+    'Identify every question, concern and new fact in LATEST_CUSTOMER_MESSAGE. Answer every answerable question before asking for any customer information. Never ignore a question merely because the name, location, product, budget, or application details are missing.',
     'Be warm, concise and human. Use no emoji. Ask at most one question. Keep the reply under 420 characters.',
     'Never answer like a menu and never reuse the last assistant reply. Treat a correction, typo, shorthand or follow-up as a continuation of the same conversation instead of restarting product, name or location collection.',
     'Answer only what the customer asked, then give one useful next action. Do not dump every model, tenure, document or policy unless the customer explicitly asks for a list.',
@@ -1098,7 +1131,9 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, route
     'For a loan application, the minimum documents are MyKad front and back plus latest payslip or EPF statement. Consent for CTOS/CCRIS is required after minimum documents pass checking and before credit check or LMS submission.',
     'If the customer asks for a human, manager or staff, do not answer here because the system handles that route separately.',
     'Continue from the current conversation instead of restarting the name, location and product questions.',
-    'Never repeat a question that the customer already answered. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
+    'Use CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS and RECENT_MESSAGES as turn memory. Never repeat a question that the customer already answered or that is already recorded. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
+    'Treat GROUNDED_DRAFT, BUSINESS_RULES and KNOWLEDGE_RESULTS as the only factual source. Preserve every useful grounded fact, remove repetition, and never introduce a price, product option, status or policy that is absent from those sources.',
+    'When the customer changes topic, answer the new topic first and keep the previous application stage in memory. Choose exactly one next best action; ask no more than one main question.',
     'If the customer asks whether the displayed models are the only choices, clearly say they are only a few popular examples and that more models can be checked; do not answer with a generic request for a model name.'
   ].join(' ');
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
@@ -1124,13 +1159,144 @@ const responseOutputText = result => {
 };
 
 const AI_INTENTS = Object.freeze([
-  'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'PROMOTION', 'MODEL_SELECTION', 'UNLISTED_PRODUCT',
+  'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'BRANCH_LOCATION', 'PROMOTION', 'MODEL_SELECTION', 'UNLISTED_PRODUCT',
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
   'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
   'COMBINED_APPLICATION',
-  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
+  'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'PAYSLIP_PERIOD', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
   'OTHER_MODELS', 'BUDGET', 'THANKS', 'HUMAN_HANDOVER', 'FRUSTRATED', 'GENERAL'
 ]);
+
+const parseJsonArray = value => {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(clean(value) || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const boundedUnique = (items = [], limit = MAX_CONVERSATION_MEMORY_ITEMS) => {
+  const result = [], seen = new Set();
+  for (const item of items) {
+    const value = clean(item);
+    const key = normalizedWords(value);
+    if (!value || !key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+  return result.slice(-Math.max(1, limit));
+};
+
+const redactConversationText = value => clean(value)
+  .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[email]')
+  .replace(/\b\d{9,16}\b/g, '[number]')
+  .replace(/https?:\/\/\S+/gi, '[link]')
+  .slice(0, 500);
+
+export function detectCustomerQuestionIntents(value = '') {
+  const text = clean(value), intents = [];
+  const add = intent => { if (AI_INTENTS.includes(intent) && !intents.includes(intent)) intents.push(intent); };
+  if (!text) return intents;
+  if (asksForBranchLocation(text)) add('BRANCH_LOCATION');
+  if (asksForPromotion(text)) add('PROMOTION');
+  if (asksForAvailableModels(text)) add('AVAILABLE_MODELS');
+  if (asksForOtherModels(text)) add('OTHER_MODELS');
+  if (asksForMonthlyInstalment(text)) add('MONTHLY_INSTALMENT');
+  if (asksForDeposit(text)) add('DEPOSIT');
+  if (asksForCashPrice(text)) add('CASH_PRICE');
+  if (requestedMonthlyTenure(text)) add('TENURE');
+  if (asksForInterestRate(text)) add('INTEREST_RATE');
+  if (asksForProductColour(text)) add('PRODUCT_COLOUR');
+  if (asksForProductStorage(text)) add('PRODUCT_STORAGE');
+  if (asksForCombinedApplication(text)) add('COMBINED_APPLICATION');
+  if (asksForPayslipPeriod(text)) add('PAYSLIP_PERIOD');
+  if (conversationalDocumentRequirement(text)) add('DOCUMENT_REQUIREMENTS');
+  if (isDocumentStatusQuestion(text) && /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(text)) add('DOCUMENT_STATUS');
+  if (asksForLoanProcessingTime(text)) add('PROCESSING_TIME');
+  if (asksAboutShopLoan(text)) add('SHOP_LOAN');
+  if (raisesBudgetConcern(text)) add('BUDGET');
+  if (!intents.length && customerAskedQuestion(text)) add('GENERAL');
+  return intents;
+}
+
+const approvedQuestionIntents = (value = [], text = '') => boundedUnique([
+  ...detectCustomerQuestionIntents(text),
+  ...(Array.isArray(value) ? value : [])
+    .map(item => clean(item).toUpperCase())
+    .filter(item => AI_INTENTS.includes(item))
+], 12);
+
+const documentStatusSnapshot = (documents = []) => {
+  const received = documents.map(row => clean(row['Document Type'])).filter(Boolean);
+  const verified = documents.filter(row => ['VERIFIED', 'APPROVED', 'PASSED'].includes(clean(row['Verification Status']).toUpperCase())).map(row => clean(row['Document Type'])).filter(Boolean);
+  const pending = documents.filter(row => !['VERIFIED', 'APPROVED', 'PASSED', 'REJECTED'].includes(clean(row['Verification Status']).toUpperCase())).map(row => clean(row['Document Type'])).filter(Boolean);
+  return { received: boundedUnique(received), verified: boundedUnique(verified), pendingVerification: boundedUnique(pending), receivedCount: documents.length };
+};
+
+export function buildRecentConversationMessages({ inbox = [], outbox = [], phone = '', state = {}, limit = MAX_RECENT_MESSAGES } = {}) {
+  const target = digits(phone);
+  const rows = [
+    ...inbox.filter(row => !target || digits(row['Phone Number']) === target).map(row => ({
+      role: 'customer', at: clean(row['Received At']), text: redactConversationText(row['Customer Message'])
+    })),
+    ...outbox.filter(row => !target || digits(row['Phone Number']) === target).map(row => ({
+      role: 'assistant', at: clean(row['Sent At'] || row['Created At']), text: redactConversationText(row['Message Text'] || row['Image Caption'])
+    }))
+  ].filter(item => item.text).sort((left, right) => (Date.parse(left.at) || 0) - (Date.parse(right.at) || 0));
+  if (!rows.length) {
+    if (clean(state['Last Customer Message'])) rows.push({ role: 'customer', at: clean(state['Last Customer Reply At']), text: redactConversationText(state['Last Customer Message']) });
+    if (clean(state['Last AI Message'])) rows.push({ role: 'assistant', at: clean(state['Last AI Message At']), text: redactConversationText(state['Last AI Message']) });
+  }
+  return rows.slice(-Math.max(1, Number(limit) || MAX_RECENT_MESSAGES));
+}
+
+export function buildConversationTurnContext({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '' } = {}) {
+  const unit = canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit'] || application['Business Unit']) || 'MOTOR';
+  const selectedProduct = [clean(state['Selected Product Brand'] || application['Product Brand']), clean(state['Selected Product Model'] || application['Product Model']), clean(state['Selected Product Variant'] || application['Product Variant'])].filter(Boolean).join(' ');
+  const customerProfile = {
+    name: usableCustomerName(state['Customer Name'] || lead['Customer Name'] || application['Applicant Name']),
+    cityOrArea: clean(lead['City or Area'] || lead.State),
+    region: canonicalRegion(lead.Region || application.Region || routeRegion) || 'UNASSIGNED',
+    businessUnit: unit,
+    selectedProduct,
+    employerName: clean(application['Employer Name'] || state['Employer Name']),
+    jobPosition: clean(application['Job Position'] || state.Occupation),
+    employmentDurationMonths: clean(application['Employment Duration Months'] || state['Employment Duration Months']),
+    monthlyIncome: clean(application['Basic Salary'] || state['Monthly Income']),
+    salaryPaymentMethod: clean(application['Salary Payment Method'] || state['Salary Payment Method']),
+    loanTenureYears: clean(application['Loan Tenure Years'] || state['Loan Tenure Years']),
+    loanTenureMonths: clean(application['Loan Tenure Months'] || state['Loan Tenure Months'])
+  };
+  return {
+    CONVERSATION_STATE: {
+      currentStep: clean(state['Current Step']) || 'STEP_01_WELCOME',
+      lastNextAction: clean(state['Last Next Action']),
+      conversationSummary: clean(state['Conversation Summary']).slice(0, 700),
+      selectedProduct
+    },
+    CUSTOMER_PROFILE: customerProfile,
+    ASKED_QUESTIONS: boundedUnique(parseJsonArray(state['Asked Questions JSON'])),
+    ANSWERED_QUESTIONS: boundedUnique(parseJsonArray(state['Answered Questions JSON'])),
+    DOCUMENT_STATUS: documentStatusSnapshot(documents),
+    BUSINESS_RULES: {
+      primarySalesPath: 'LOAN_KEDAI',
+      defaultLanguage: 'MS',
+      answerAllLatestQuestionsFirst: true,
+      maximumMainQuestions: 1,
+      neverRepeatKnownQuestion: true,
+      loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
+      minimumDocuments: 'MyKad front and back plus latest payslip or EPF statement',
+      consentRequiredBeforeCreditCheckAndLms: true,
+      unlistedProductIsNotRejection: true,
+      handphoneCashPriceMustNotBeDisclosed: true
+    },
+    KNOWLEDGE_RESULTS: approvedKnowledgeForRuntime({ text, businessUnit: unit, includeTesting: false }),
+    RECENT_MESSAGES: (Array.isArray(recentMessages) ? recentMessages : []).slice(-MAX_RECENT_MESSAGES).map(item => ({ role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text) })),
+    LATEST_CUSTOMER_MESSAGE: clean(text).slice(0, 900)
+  };
+}
 
 const validAiIntent = value => {
   if (!value || typeof value !== 'object' || !AI_INTENTS.includes(clean(value.intent).toUpperCase())) return null;
@@ -1144,6 +1310,8 @@ const validAiIntent = value => {
   const employmentDurationMonths = Math.max(0, Number.parseInt(value.employmentDurationMonths, 10) || 0);
   return {
     intent: clean(value.intent).toUpperCase(),
+    questionIntents: approvedQuestionIntents(value.questionIntents, ''),
+    customerQuestions: boundedUnique(Array.isArray(value.customerQuestions) ? value.customerQuestions : [], 8).map(item => item.slice(0, 160)),
     language,
     businessUnit,
     catalogId: clean(value.catalogId),
@@ -1161,12 +1329,14 @@ const validAiIntent = value => {
     needsHuman: value.needsHuman === true,
     answerCustomerQuestionFirst: value.answerCustomerQuestionFirst !== false,
     suggestedReply: sanitizeAiFallbackReply(value.suggestedReply, language),
+    nextBestAction: clean(value.nextBestAction).slice(0, 120),
+    escalationReason: clean(value.escalationReason).slice(0, 180),
     confidence
   };
 };
 
-export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
-  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model'])].filter(Boolean).join(' ');
+export function buildAiIntentRequest({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [] } = {}) {
+  const selectedProduct = [clean(state['Selected Product Brand']), clean(state['Selected Product Model']), clean(state['Selected Product Variant'])].filter(Boolean).join(' ');
   const seenCatalogChoices = new Set();
   const catalogChoices = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
@@ -1184,6 +1354,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     variant: clean(row.Variant),
     keywords: clean(row['Search Keywords']).slice(0, 80)
   }));
+  const turnContext = buildConversationTurnContext({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion });
   const context = {
     currentStep: clean(state['Current Step']) || 'STEP_01_WELCOME',
     defaultBusinessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit) || 'MOTOR',
@@ -1200,13 +1371,14 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
       cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.'
     },
     approvedNotionKnowledge: approvedKnowledgeForRuntime({ text, businessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit), includeTesting: false }),
-    catalogChoices
+    catalogChoices,
+    ...turnContext
   };
   const instructions = [
     'Classify the latest WhatsApp customer message for JomKaki Rider. Return JSON only through the supplied schema.',
     'Understand informal Bahasa Malaysia, Sarawak/Sabah slang, abbreviations, misspellings, mixed English, and conversational follow-ups.',
     'Use the conversation context. Do not restart onboarding when the customer is asking a question. Every question in the latest customer message always takes priority over collecting name, location, or other profile details.',
-    'Classify the whole latest message, including multiple questions, corrections, shorthand and references to the prior reply. Never repeat the last assistant wording and never return a generic menu when a concrete customer request can be understood.',
+    'Classify the whole latest message, including multiple questions, corrections, shorthand and references to the prior reply. Put every distinct business-question intent in questionIntents in customer order and preserve short paraphrases in customerQuestions. Never repeat the last assistant wording and never return a generic menu when a concrete customer request can be understood.',
     'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'If the customer asks for a named product, category or type that has no safe catalog match, choose UNLISTED_PRODUCT, preserve the customer wording in normalizedModel, and set the correct businessUnit when clear. Missing from catalog is never a reason to reject the enquiry or claim the product does not exist.',
@@ -1214,18 +1386,23 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
     'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
+    'BRANCH_LOCATION means the customer asks where a branch, shop, showroom or nearest service point is. It must never be classified as PROVIDE_LOCATION or MODEL_SELECTION, even when a product was discussed in the previous turn.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
     'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
     'Understand product types and likely spelling variants such as scooter, skuter, scuter, kapcai, cub, moped, sport, naked, adventure, cruiser, touring and electric. A category question must be answered as a category enquiry, not with the generic help menu.',
     'Default to MS unless the customer clearly prefers English or Chinese. Profanity or obvious anger is FRUSTRATED, not a model name.',
     'If the customer asks a general question that is not answered by a deterministic intent, suggestedReply must directly answer all parts that can be answered safely before any follow-up. It must be concise, have no emoji, ask at most one question, never mention AI/automation/internal systems, and never invent prices, deposits, stock, promotions, approval, document status, or timelines.',
     'suggestedReply must sound like one human salesperson continuing the existing chat: answer only what was asked, preserve confirmed facts, accept corrections, and offer one useful next action instead of listing capabilities.',
+    'Use the named turn inputs CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS, BUSINESS_RULES, KNOWLEDGE_RESULTS and RECENT_MESSAGES. Do not ask for a fact already present or repeat a question in ASKED_QUESTIONS unless the previous answer was invalid.',
+    'Set nextBestAction to one concise internal action key or empty string. Set escalationReason only when facts conflict, a required approved fact is missing, or the customer explicitly requests a person.',
     'Set needsHuman when the customer explicitly asks for a person or when the request requires branch confirmation. Set answerCustomerQuestionFirst true whenever the customer asked a business question.'
   ].join(' ');
   const schema = {
     type: 'object', additionalProperties: false,
     properties: {
       intent: { type: 'string', enum: AI_INTENTS },
+      questionIntents: { type: 'array', items: { type: 'string', enum: AI_INTENTS }, maxItems: 8 },
+      customerQuestions: { type: 'array', items: { type: 'string' }, maxItems: 8 },
       language: { type: 'string', enum: ['MS', 'EN', 'ZH'] },
       businessUnit: { type: 'string', enum: ['', 'MOTOR', 'HANDPHONE'] },
       catalogId: { type: 'string' },
@@ -1243,9 +1420,11 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
       needsHuman: { type: 'boolean' },
       answerCustomerQuestionFirst: { type: 'boolean' },
       suggestedReply: { type: 'string' },
+      nextBestAction: { type: 'string' },
+      escalationReason: { type: 'string' },
       confidence: { type: 'number' }
     },
-    required: ['intent', 'language', 'businessUnit', 'catalogId', 'normalizedModel', 'tenureYears', 'monthlyBudgetRm', 'monthlyIncomeRm', 'employmentDurationMonths', 'locationQuery', 'customerName', 'employerName', 'jobPosition', 'salaryPaymentMethod', 'followUpSubject', 'needsHuman', 'answerCustomerQuestionFirst', 'suggestedReply', 'confidence']
+    required: ['intent', 'questionIntents', 'customerQuestions', 'language', 'businessUnit', 'catalogId', 'normalizedModel', 'tenureYears', 'monthlyBudgetRm', 'monthlyIncomeRm', 'employmentDurationMonths', 'locationQuery', 'customerName', 'employerName', 'jobPosition', 'salaryPaymentMethod', 'followUpSubject', 'needsHuman', 'answerCustomerQuestionFirst', 'suggestedReply', 'nextBestAction', 'escalationReason', 'confidence']
   };
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
   const model = clean(process.env.OPENAI_INTENT_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
@@ -1264,7 +1443,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, routeBu
   return request;
 }
 
-export async function requestAiIntent({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [], env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
+export async function requestAiIntent({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], routeBusinessUnit = '', routeRegion = '', phone = '', motorCatalog = [], handphoneCatalog = [], env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
   const apiKey = clean(env.OPENAI_API_KEY);
   const configuredModel = clean(env.OPENAI_INTENT_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
   if (!apiKey || !clean(text)) {
@@ -1274,7 +1453,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(700, Number(timeoutMs) || AI_FALLBACK_DEFAULT_TIMEOUT_MS));
   try {
-    const body = buildAiIntentRequest({ text, state, lead, routeBusinessUnit, routeRegion, phone, motorCatalog, handphoneCatalog });
+    const body = buildAiIntentRequest({ text, state, lead, application, documents, recentMessages, routeBusinessUnit, routeRegion, phone, motorCatalog, handphoneCatalog });
     body.model = configuredModel || body.model;
     if (!/^gpt-5\.6/i.test(body.model)) delete body.reasoning;
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
@@ -1295,6 +1474,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
     const result = await response.json().catch(() => ({}));
     const raw = responseOutputText(result);
     const parsed = validAiIntent(JSON.parse(raw));
+    if (parsed) parsed.questionIntents = approvedQuestionIntents(parsed.questionIntents, text);
     if (!parsed) console.warn('openai_intent_failed', { reason: 'INVALID_STRUCTURED_OUTPUT', model: body.model });
     return parsed;
   } catch (error) {
@@ -1305,7 +1485,7 @@ export async function requestAiIntent({ text = '', state = {}, lead = {}, routeB
   }
 }
 
-export async function requestAiFallbackReply({ text = '', state = {}, lead = {}, routeBusinessUnit = '', routeRegion = '', phone = '', env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
+export async function requestAiFallbackReply({ text = '', state = {}, lead = {}, application = {}, documents = [], recentMessages = [], groundedDraft = '', routeBusinessUnit = '', routeRegion = '', phone = '', env = process.env, fetchImpl = fetch, timeoutMs = AI_FALLBACK_DEFAULT_TIMEOUT_MS } = {}) {
   const apiKey = clean(env.OPENAI_API_KEY);
   const configuredModel = clean(env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-5.6-terra');
   if (!apiKey || !clean(text)) {
@@ -1315,7 +1495,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(500, Number(timeoutMs) || AI_FALLBACK_DEFAULT_TIMEOUT_MS));
   try {
-    const body = buildAiFallbackRequest({ text, state, lead, routeBusinessUnit, routeRegion, phone });
+    const body = buildAiFallbackRequest({ text, state, lead, application, documents, recentMessages, groundedDraft, routeBusinessUnit, routeRegion, phone });
     body.model = configuredModel || body.model;
     if (!/^(?:gpt-5|o\d)/i.test(body.model)) delete body.reasoning;
     const response = await fetchImpl('https://api.openai.com/v1/responses', {
@@ -1345,6 +1525,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
+const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
@@ -1358,6 +1539,7 @@ const requestedProductStorage = text => {
   return match ? `${match[1]}${match[2].toUpperCase()}` : '';
 };
 const asksForDocuments = text => /(?:dokumen apa|document apa|apa.*perlu.*(?:loan|apply)|what documents|documents? (?:do )?i need|(?:loan\s*(?:kedai|shop)|shop\s*loan).{0,35}(?:perlukan?|perlu|need|required|kena\s*(?:sedia|hantar)|sediakan).{0,20}(?:apa|ape|what)|(?:apa|ape|what).{0,20}(?:yang\s*)?(?:perlu|need|required|kena\s*sediakan).{0,35}(?:loan\s*(?:kedai|shop)|shop\s*loan)|需要什么文件|要什么文件)/i.test(clean(text));
+const asksForPayslipPeriod = text => /(?:\b(?:berapa|brp|how many)\s*(?:bulan|months?)\b.{0,30}\b(?:slip\s*gaji|payslips?|pay\s*slips?|salary\s*slips?)\b|\b(?:slip\s*gaji|payslips?|pay\s*slips?|salary\s*slips?)\b.{0,30}\b(?:berapa|brp|how many)\s*(?:bulan|months?)\b|薪水单.{0,15}(?:几个月|多少个月)|(?:几个月|多少个月).{0,15}薪水单)/i.test(clean(text));
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
@@ -1471,9 +1653,14 @@ const modelQueryCandidates = value => {
 
 const productAliases = row => {
   const model = normalizedWords(row.Model), brand = normalizedWords(row.Brand), words = model.split(' ').filter(Boolean);
+  const variant = normalizedWords(row.Variant);
   const aliases = new Set();
   addModelAlias(aliases, model);
   addModelAlias(aliases, `${brand} ${model}`);
+  if (variant) {
+    addModelAlias(aliases, `${model} ${variant}`);
+    addModelAlias(aliases, `${brand} ${model} ${variant}`);
+  }
   for (let start = 0; start < words.length; start += 1) {
     for (let end = start + 1; end <= words.length; end += 1) {
       const phrase = words.slice(start, end).join(' ');
@@ -1513,6 +1700,24 @@ const productAliases = row => {
   return [...aliases].filter(alias => compactModelText(alias).length >= 2);
 };
 
+const customerProductVariant = row => {
+  const variant = clean(row?.Variant);
+  return /^(?:default)$/i.test(variant) ? '' : variant;
+};
+
+const customerProductModel = (row, unit = '') => {
+  const businessUnit = canonicalBusinessUnit(unit || row?.__businessUnit);
+  return [clean(row?.Model), businessUnit === 'MOTOR' ? customerProductVariant(row) : ''].filter(Boolean).join(' ');
+};
+
+const productMatchKey = row => {
+  const unit = canonicalBusinessUnit(row?.__businessUnit);
+  const variant = unit === 'MOTOR' ? normalizedWords(customerProductVariant(row)) : '';
+  return `${unit}|${normalizedWords(row?.Model)}|${variant}`;
+};
+
+const customerProductLabel = row => [clean(row?.Brand), customerProductModel(row, row?.__businessUnit)].filter(Boolean).join(' ');
+
 const modelCore = value => normalizedWords(value).replace(/^(?:apple\s+)?iphone\s+/, '').trim();
 
 const iphoneModelTier = value => {
@@ -1537,7 +1742,7 @@ export function matchInstantProduct(text, catalogs = []) {
   const activeCatalog = catalogs.filter(row => truth(row.Active));
   const aliasModels = new Map();
   for (const row of activeCatalog) {
-    const modelKey = `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}`;
+    const modelKey = productMatchKey(row);
     for (const alias of productAliases(row)) {
       const aliasKey = compactModelText(alias);
       if (!aliasModels.has(aliasKey)) aliasModels.set(aliasKey, new Set());
@@ -1546,12 +1751,17 @@ export function matchInstantProduct(text, catalogs = []) {
   }
   const matches = activeCatalog.map(row => {
     const model = normalizedWords(row.Model), compactModel = compactModelText(row.Model);
+    const exactModelVariant = normalizedWords(customerProductModel(row, row.__businessUnit));
+    const compactModelVariant = compactModelText(exactModelVariant);
+    const modelKey = productMatchKey(row);
     const rowIphoneTier = iphoneModelTier(row.Model);
     if (requiredIphoneTier && rowIphoneTier && rowIphoneTier !== requiredIphoneTier) {
-      return { row, score: 0, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
+      return { row, score: 0, modelKey };
     }
     let score = 0;
-    if (query === model) score = 2400;
+    if (exactModelVariant && query === exactModelVariant) score = 2700;
+    else if (compactModelVariant && compactQuery === compactModelVariant) score = 2600;
+    else if (query === model) score = 2400;
     else if (compactQuery === compactModel) score = 2300;
     else if (modelCore(row.Model) && queryCandidates.some(candidate => candidate.words === modelCore(row.Model))) score = 2250;
     else if (model && includesTerm(query, model)) score = 2200;
@@ -1567,7 +1777,7 @@ export function matchInstantProduct(text, catalogs = []) {
       else if (compactAlias.length >= 3 && queryCandidates.some(candidate => candidate.compact === compactAlias)) score = Math.max(score, (lowConfidenceAlias ? 900 : sharedAlias ? 1100 : 1700) + compactAlias.length);
       else if (compactAlias.length >= 4 && queryCandidates.some(candidate => candidate.compact.length >= 4 && oneModelTypoAway(candidate.compact, compactAlias))) score = Math.max(score, 1500 + compactAlias.length);
     }
-    return { row, score, modelKey: `${clean(row.__businessUnit).toUpperCase()}|${normalizedWords(row.Model)}` };
+    return { row, score, modelKey };
   }).filter(match => match.score >= 1000);
   const bestByModel = new Map();
   for (const match of matches) if (!bestByModel.has(match.modelKey) || bestByModel.get(match.modelKey).score < match.score) bestByModel.set(match.modelKey, match);
@@ -1575,7 +1785,7 @@ export function matchInstantProduct(text, catalogs = []) {
   if (!ranked.length) return { product: null, options: [], ambiguous: false };
   const close = ranked.filter(match => match.score >= ranked[0].score - 80);
   if (close.length > 1) {
-    const options = close.slice(0, 4).map(match => `${clean(match.row.Brand)} ${clean(match.row.Model)}`.trim());
+    const options = close.slice(0, 4).map(match => customerProductLabel(match.row));
     return { product: null, options, ambiguous: true };
   }
   return { product: ranked[0].row, options: [], ambiguous: false };
@@ -1691,11 +1901,62 @@ const activeMotorPromotions = (catalogRows = [], pricingRows = [], region = '', 
 };
 
 const promotionOptionText = ({ row = {}, product = {} } = {}) => {
-  const model = [clean(product.Brand), clean(product.Model)].filter(Boolean).join(' ');
+  const model = customerProductLabel(product);
   const name = clean(row['Promotion Name']);
   const deposit = customerAmount(row['Promotion Deposit (RM)']);
   return [model, name ? `(${name})` : '', deposit ? `deposit RM${deposit}` : ''].filter(Boolean).join(' ');
 };
+
+const branchAddress = row => clean(row?.['Branch Address'] || row?.Address || row?.['Full Address'] || row?.Location);
+const branchMapUrl = row => clean(row?.['Google Maps URL'] || row?.['Map URL'] || row?.['Google Map URL']);
+const branchLabel = row => {
+  const name = clean(row?.['Branch Name']);
+  const locality = [clean(row?.City), clean(row?.State)].filter(Boolean).filter((value, index, values) => values.findIndex(item => normalizedWords(item) === normalizedWords(value)) === index).join(', ');
+  return [name, locality && normalizedWords(locality) !== normalizedWords(name) ? locality : ''].filter(Boolean).join(' — ');
+};
+
+export function buildBranchLocationDecision({ language = 'MS', state = {}, lead = {}, text = '', routeBusinessUnit = '', branches = [], aiIntent = null } = {}) {
+  const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
+  const activeBranches = branches.filter(row => truth(row.Active) && canonicalBusinessUnit(row['Business Unit']) === unit);
+  const explicitLocation = resolveCustomerLocation(aiIntent?.locationQuery || text, unit, branches);
+  const storedLocation = resolveCustomerLocation([lead['City or Area'], lead.State].filter(Boolean).join(' '), unit, branches);
+  const selectedBranchId = clean(explicitLocation?.branchId || lead['Selected Branch ID'] || state['Selected Branch ID'] || storedLocation?.branchId);
+  const selectedBranch = activeBranches.find(row => clean(row['Branch ID']) === selectedBranchId);
+  if (selectedBranch) {
+    const area = clean(explicitLocation?.city || lead['City or Area'] || lead.State || selectedBranch.City || selectedBranch.State);
+    const address = [branchAddress(selectedBranch), branchMapUrl(selectedBranch)].filter(Boolean).join(' ');
+    return {
+      handled: true,
+      branchLocationIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      location: explicitLocation || undefined,
+      text: instantCopy(language, 'BRANCH_MATCH', { area, branch: branchLabel(selectedBranch), address })
+    };
+  }
+  const requestedRegion = canonicalRegion(explicitLocation?.region || lead.Region);
+  const candidates = activeBranches.filter(row => !requestedRegion || canonicalRegion(row.Region) === requestedRegion).slice(0, 5);
+  if (candidates.length) return {
+    handled: true,
+    branchLocationIntent: true,
+    answerCustomerQuestionFirst: true,
+    nextStep: clean(state['Current Step']) || 'STEP_02_LOCATION',
+    productUnit: unit,
+    location: explicitLocation || undefined,
+    text: instantCopy(language, 'BRANCH_OPTIONS', { branches: candidates.map(branchLabel).filter(Boolean).join(language === 'ZH' ? '、' : '; ') })
+  };
+  return {
+    handled: true,
+    branchLocationIntent: true,
+    answerCustomerQuestionFirst: true,
+    nextStep: clean(state['Current Step']) || 'STEP_02_LOCATION',
+    productUnit: unit,
+    location: explicitLocation || undefined,
+    humanFollowUpRequired: activeBranches.length === 0 || undefined,
+    text: instantCopy(language, 'BRANCH_LOCATION_NEEDED')
+  };
+}
 
 const availableModelSuggestions = (catalogRows = [], pricingRows = [], unit = '', region = '', limit = 3) => catalogRows
   .filter(row => {
@@ -1730,9 +1991,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   ];
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
+  const selectedVariant = normalizedWords(state['Selected Product Variant']);
   const previousCustomerText = clean(state['Last Customer Message']);
   const frustrationDetected = interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text);
   const recoveringDocumentQuestion = frustrationDetected && conversationalDocumentRequirement(previousCustomerText);
+  const payslipPeriodQuestion = interpretedIntent === 'PAYSLIP_PERIOD' || asksForPayslipPeriod(text);
   const documentStatusQuestion = interpretedIntent === 'DOCUMENT_STATUS'
     || (isDocumentStatusQuestion(text) && (documents.length > 0 || /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(clean(text))));
   const documentRequirementQuestion = interpretedIntent === 'DOCUMENT_REQUIREMENTS'
@@ -1740,8 +2003,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     || conversationalDocumentRequirement(text)
     || wantsToApply(text)
     || (isDocumentStatusQuestion(text) && !!selectedModel);
+  if (payslipPeriodQuestion) {
+    return { handled: true, payslipPeriodIntent: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'PAYSLIP_PERIOD') };
+  }
   if (documentStatusQuestion) {
-    return { handled: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
+    return { handled: true, documentStatusIntent: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
   }
   // A combined motor + phone application is a direct business question. Answer it
   // before the broad APPLY/document rules so the customer is not diverted into a
@@ -1755,6 +2021,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: explicitUnit || fallbackUnit || 'MOTOR',
       text: instantCopy(language, 'COMBINED_APPLICATION')
     };
+  }
+  if (interpretedIntent === 'BRANCH_LOCATION' || asksForBranchLocation(text)) {
+    return buildBranchLocationDecision({ language, state, lead, text, routeBusinessUnit: explicitUnit || fallbackUnit || routeBusinessUnit, branches, aiIntent });
   }
   if (documentRequirementQuestion) {
     const continuation = profileContinuation({ language, state, lead, baseText: instantCopy(language, 'APPLY'), completeStep: 'STEP_04_DOCUMENTS' });
@@ -1826,7 +2095,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     };
   }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
-  const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand));
+  const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel
+    && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand)
+    && (!selectedVariant || normalizedWords(row.Variant) === selectedVariant));
   const deterministicProductMatch = matchInstantProduct(text, catalogPool);
   const optionProduct = deterministicProductMatch.product || storedSelectedProduct;
   const colourQuestion = interpretedIntent === 'PRODUCT_COLOUR' || asksForProductColour(text);
@@ -1864,7 +2135,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       product: optionProduct,
       text: instantCopy(language, copyKey, {
         brand: optionProduct.Brand,
-        model: optionProduct.Model,
+        model: customerProductModel(optionProduct, optionUnit),
         colours: phoneOptions.colours.join(language === 'ZH' ? '、' : ', '),
         storage: phoneOptions.storage.join(language === 'ZH' ? '、' : ', '),
         requestedStorage,
@@ -1879,6 +2150,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const cashPriceQuestion = interpretedIntent === 'CASH_PRICE' || asksForCashPrice(text);
   const depositQuestion = interpretedIntent === 'DEPOSIT' || asksForDeposit(text);
   const monthlyQuestion = interpretedIntent === 'MONTHLY_INSTALMENT' || asksForMonthlyInstalment(text);
+  if (cashPriceQuestion && !optionProduct) {
+    const unit = explicitUnit || fallbackUnit || 'MOTOR';
+    return {
+      handled: true,
+      cashPriceIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      text: instantCopy(language, unit === 'HANDPHONE' ? 'HANDPHONE_CASH_POLICY' : 'CASH_PRICE_NEEDS_MODEL')
+    };
+  }
   if ((requestedTenure || depositQuestion || cashPriceQuestion || monthlyQuestion) && optionProduct) {
     const selectedProduct = optionProduct;
     if (selectedProduct) {
@@ -1889,16 +2171,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         ? instantCopy(language, selectedUnit === 'HANDPHONE'
           ? 'HANDPHONE_CASH_POLICY'
           : requestedRate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, cashPrice: requestedRate?.cashPrice
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), cashPrice: requestedRate?.cashPrice
         })
         : depositQuestion
           ? instantCopy(language, selectedUnit === 'HANDPHONE'
           ? 'HANDPHONE_DEPOSIT_POLICY'
           : requestedRate?.deposit ? 'DEPOSIT_QUOTE' : 'DEPOSIT_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, deposit: requestedRate?.deposit
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), deposit: requestedRate?.deposit
         })
         : instantCopy(language, requestedRate ? (monthlyQuestion && !requestedTenure ? 'QUOTE_ONLY' : 'TENURE_QUOTE') : 'TENURE_UNAVAILABLE', {
-          brand: selectedProduct.Brand, model: selectedProduct.Model, tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
+          brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
         });
       const continuation = cashPriceQuestion
         ? { nextStep: step || 'STEP_04_DOCUMENTS', text: baseText }
@@ -1947,20 +2229,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (product) {
     const pricingRegion = lead.Region || routeRegion;
     let rate = instantRate(product, pricing, unit, pricingRegion);
-    if (!rate) {
-      const pricedCatalog = catalogPool.filter(row => {
-        const rowUnit = clean(row.__businessUnit).toUpperCase() || unit;
-        const rowPricing = rowUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-        return instantRate(row, rowPricing, rowUnit, pricingRegion);
-      });
-      const pricedMatch = matchInstantProduct(text, pricedCatalog);
-      if (pricedMatch.product && !pricedMatch.ambiguous) {
-        product = pricedMatch.product;
-        unit = clean(product.__businessUnit).toUpperCase() || unit;
-        pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-        rate = instantRate(product, pricing, unit, pricingRegion);
-      }
-    }
     if (cashPriceQuestion) {
       return {
         handled: true,
@@ -1972,7 +2240,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         text: instantCopy(language, unit === 'HANDPHONE'
           ? 'HANDPHONE_CASH_POLICY'
           : rate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
-          brand: product.Brand, model: product.Model, cashPrice: rate?.cashPrice
+          brand: product.Brand, model: customerProductModel(product, unit), cashPrice: rate?.cashPrice
         }),
         humanFollowUpRequired: unit === 'MOTOR' && !rate?.cashPrice ? true : undefined
       };
@@ -1980,18 +2248,20 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     if (!rate) {
       const continuation = profileContinuation({
         language, state, lead,
-        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: product.Model }),
+        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
         completeStep: 'STEP_03_PRODUCT'
       });
       return { handled: true, productIntent: true, nextStep: continuation.nextStep, productUnit: unit, product, text: continuation.text, humanFollowUpRequired: true };
     }
-    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand);
+    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
+      && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
+      && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
     const approvedImage = !sameSelectedProduct && truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
     const continuation = identityReady
-      ? { nextStep: 'STEP_04_DOCUMENTS', text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }) }
+      ? { nextStep: 'STEP_04_DOCUMENTS', text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: customerProductModel(product, unit), tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }) }
       : profileContinuation({
         language, state, lead,
-        baseText: instantCopy(language, 'QUOTE_ONLY', { brand: product.Brand, model: product.Model, tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }),
+        baseText: instantCopy(language, 'QUOTE_ONLY', { brand: product.Brand, model: customerProductModel(product, unit), tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }),
         completeStep: 'STEP_04_DOCUMENTS'
       });
     return {
@@ -2142,6 +2412,136 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   return { handled: true, aiFallback: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'HELP') };
 }
 
+const MULTI_QUESTION_INTENTS = new Set([
+  'BRANCH_LOCATION', 'PROMOTION', 'AVAILABLE_MODELS', 'OTHER_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE',
+  'INTEREST_RATE', 'PRODUCT_COLOUR', 'PRODUCT_STORAGE', 'COMBINED_APPLICATION', 'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS',
+  'PAYSLIP_PERIOD', 'SHOP_LOAN', 'PROCESSING_TIME', 'BUDGET'
+]);
+
+const intentProbeText = ({ intent, originalText = '', state = {}, aiIntent = null } = {}) => {
+  const product = clean(aiIntent?.normalizedModel || [state['Selected Product Brand'], state['Selected Product Model'], state['Selected Product Variant']].filter(Boolean).join(' '));
+  const tenure = aiIntent?.tenureYears ? `${aiIntent.tenureYears} tahun` : clean(requestedMonthlyTenure(originalText, aiIntent?.businessUnit || state['Product Category']));
+  const probes = {
+    BRANCH_LOCATION: `cawangan dekat mana ${clean(aiIntent?.locationQuery)}`,
+    PROMOTION: `promosi apa ada ${clean(aiIntent?.locationQuery)}`,
+    AVAILABLE_MODELS: 'model apa yang ada',
+    OTHER_MODELS: 'ada model lain',
+    MONTHLY_INSTALMENT: `${product} berapa sebulan`,
+    DEPOSIT: `${product} deposit berapa`,
+    CASH_PRICE: `${product} harga cash berapa`,
+    TENURE: `${product} ${tenure || 'berapa tahun'} berapa sebulan`,
+    INTEREST_RATE: 'kadar loan kedai berapa peratus setahun',
+    PRODUCT_COLOUR: `${product} warna apa ada`,
+    PRODUCT_STORAGE: `${product} ${requestedProductStorage(originalText)} berapa GB ada`,
+    COMBINED_APPLICATION: 'boleh mohon motor dan handphone sekali',
+    DOCUMENT_REQUIREMENTS: 'loan kedai perlukan dokumen apa',
+    DOCUMENT_STATUS: 'dokumen saya dah lengkap atau apa lagi kurang',
+    PAYSLIP_PERIOD: 'berapa bulan slip gaji perlu',
+    SHOP_LOAN: 'loan kedai ada tak',
+    PROCESSING_TIME: 'proses loan kedai berapa lama',
+    BUDGET: 'ada pilihan ansuran lebih rendah'
+  };
+  return clean(probes[intent] || originalText);
+};
+
+const declarativeReplyPart = value => {
+  const sentences = clean(value).match(/[^.!?？]+[.!?？]?/g) || [];
+  return sentences.filter(sentence => !/[?？]\s*$/.test(sentence)).join(' ').replace(/\s{2,}/g, ' ').trim();
+};
+
+export function buildMultiQuestionSalesDecision(args = {}) {
+  const detected = approvedQuestionIntents(args.aiIntent?.questionIntents, args.text).filter(intent => MULTI_QUESTION_INTENTS.has(intent));
+  const baseDecision = args.baseDecision || buildInstantSalesDecision(args);
+  if (detected.length < 2) return { ...baseDecision, answeredQuestionKeys: detected.length ? detected : undefined };
+  const decisions = detected.map(intent => buildInstantSalesDecision({
+    ...args,
+    text: intentProbeText({ intent, originalText: args.text, state: args.state, aiIntent: args.aiIntent }),
+    aiIntent: { ...(args.aiIntent || {}), intent, questionIntents: [intent] }
+  })).filter(decision => decision?.handled && clean(decision.text));
+  const answerParts = boundedUnique(decisions.map(decision => declarativeReplyPart(decision.text)).filter(Boolean), 8);
+  if (answerParts.length < 2) return { ...baseDecision, answeredQuestionKeys: detected };
+  const language = instantLanguage(args.text, args.state || {});
+  const combinedAnswer = answerParts.join(' ').slice(0, 760).trim();
+  const continuation = profileContinuation({
+    language,
+    state: args.state || {},
+    lead: args.lead || {},
+    baseText: combinedAnswer,
+    completeStep: clean(baseDecision.nextStep) || clean(args.state?.['Current Step']) || 'STEP_03_PRODUCT'
+  });
+  const productDecision = decisions.find(decision => decision.product) || baseDecision;
+  return {
+    ...baseDecision,
+    handled: true,
+    multiQuestion: true,
+    answeredQuestionKeys: detected,
+    answerCustomerQuestionFirst: true,
+    nextStep: continuation.nextStep,
+    productUnit: clean(productDecision.productUnit || baseDecision.productUnit),
+    product: productDecision.product || baseDecision.product,
+    imageUrl: clean(productDecision.imageUrl || baseDecision.imageUrl),
+    text: continuation.text,
+    humanFollowUpRequired: decisions.some(decision => decision.humanFollowUpRequired) || baseDecision.humanFollowUpRequired || undefined
+  };
+}
+
+const replyQuestionKeys = value => {
+  const reply = clean(value), keys = [];
+  const add = key => { if (!keys.includes(key)) keys.push(key); };
+  if (/(?:nama anda|your name|称呼)/i.test(reply)) add('CUSTOMER_NAME');
+  if (/(?:bandar atau negeri|tinggal di mana|berada di mana|city or state|where (?:are|do) you|城市|州属)/i.test(reply)) add('CUSTOMER_LOCATION');
+  if (/(?:model (?:mana|yang mana)|which model|哪一款)/i.test(reply)) add('PRODUCT_MODEL');
+  if (/(?:bajet bulanan|monthly budget|月供预算)/i.test(reply)) add('MONTHLY_BUDGET');
+  const otherQuestions = (reply.match(/[^.!?？]+[?？]/g) || [])
+    .map(question => normalizedWords(question).slice(0, 100))
+    .filter(question => !/(?:nama anda|your name|称呼|bandar atau negeri|tinggal di mana|berada di mana|city or state|where are you|城市|州属)/i.test(question));
+  return boundedUnique([...keys, ...otherQuestions], 8);
+};
+
+const parseRecentMessages = value => parseJsonArray(value).map(item => typeof item === 'object' && item ? {
+  role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text)
+} : null).filter(item => item?.role && item.text);
+
+const uniqueRecentMessages = (items = []) => {
+  const seen = new Set(), result = [];
+  for (const item of items) {
+    if (!item?.role || !clean(item.text)) continue;
+    const normalized = { role: clean(item.role), at: clean(item.at), text: redactConversationText(item.text) };
+    const key = `${normalized.role}|${normalized.at}|${normalizedWords(normalized.text)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result.slice(-MAX_RECENT_MESSAGES);
+};
+
+export function buildConversationMemoryChanges({ state = {}, lead = {}, application = {}, documents = [], text = '', decision = {}, aiIntent = null, receivedAt = '', includeAssistant = false } = {}) {
+  const answeredNow = decision.handled && !decision.humanFollowUpRequired
+    ? approvedQuestionIntents(decision.answeredQuestionKeys || aiIntent?.questionIntents, text)
+    : [];
+  const asked = boundedUnique([...parseJsonArray(state['Asked Questions JSON']), ...(includeAssistant ? replyQuestionKeys(decision.text) : [])]);
+  const answered = boundedUnique([...parseJsonArray(state['Answered Questions JSON']), ...answeredNow]);
+  const recent = uniqueRecentMessages([
+    ...parseRecentMessages(state['Recent Messages JSON']),
+    ...(clean(text) ? [{ role: 'customer', at: clean(receivedAt), text }] : []),
+    ...(includeAssistant && clean(decision.text) ? [{ role: 'assistant', at: new Date().toISOString(), text: decision.text }] : [])
+  ]);
+  const selectedProduct = [clean(decision.product?.Brand || state['Selected Product Brand'] || application['Product Brand']), clean(decision.product?.Model || state['Selected Product Model'] || application['Product Model']), clean(decision.product?.Variant || state['Selected Product Variant'] || application['Product Variant'])].filter(Boolean).join(' ');
+  const known = [
+    usableCustomerName(state['Customer Name'] || lead['Customer Name']) ? 'name' : '',
+    clean(lead['City or Area'] || lead.State) ? 'location' : '',
+    selectedProduct ? `product:${selectedProduct}` : '',
+    documents.length ? `documents:${documents.length}` : ''
+  ].filter(Boolean);
+  return {
+    'Asked Questions JSON': JSON.stringify(asked),
+    'Answered Questions JSON': JSON.stringify(answered),
+    'Recent Messages JSON': JSON.stringify(recent),
+    'Conversation Summary': `Stage ${clean(decision.nextStep || state['Current Step']) || 'STEP_01_WELCOME'}; known ${known.join(', ') || 'none'}; answered ${answered.slice(-8).join(', ') || 'none'}`.slice(0, 700),
+    'Last Next Action': clean(aiIntent?.nextBestAction || decision.nextStep || state['Last Next Action']).slice(0, 120)
+  };
+}
+
 export function guardConversationProgress({ state = {}, documents = [], text = '', decision = {} } = {}) {
   const currentStep = clean(state['Current Step']).toUpperCase();
   const nextStep = clean(decision.nextStep).toUpperCase();
@@ -2200,6 +2600,30 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
     replyContractRecovered: recovered || undefined,
     answerCustomerQuestionFirst: customerExpectsAnswer(text) || decision.answerCustomerQuestionFirst || undefined,
     humanFollowUpRequired: recovered ? true : decision.humanFollowUpRequired
+  };
+}
+
+export function buildDecisionAudit({ decision = {}, aiIntent = null } = {}) {
+  const decisionRoute = decision.branchLocationIntent ? 'BRANCH_LOCATION'
+    : decision.cashPriceIntent ? 'CASH_PRICE'
+    : decision.productOptionsIntent ? 'PRODUCT_OPTIONS'
+    : decision.productIntent ? 'PRODUCT'
+    : decision.payslipPeriodIntent ? 'PAYSLIP_PERIOD'
+    : decision.documentStatusIntent ? 'DOCUMENT_STATUS'
+    : decision.documentRequirementsIntent ? 'DOCUMENT_REQUIREMENTS'
+    : decision.documentQueued ? 'DOCUMENT_RECEIVED'
+    : decision.shopLoanIntent ? 'SHOP_LOAN'
+    : decision.loanKedaiIntent ? 'PROCESSING_TIME'
+    : decision.promotionIntent ? 'PROMOTION'
+    : decision.combinedApplicationIntent ? 'COMBINED_APPLICATION'
+    : decision.catalogReviewRequired ? 'CATALOG_REVIEW'
+    : decision.serviceRecovery ? 'SERVICE_RECOVERY'
+    : decision.aiGenerated ? 'AI_FALLBACK'
+    : clean(aiIntent?.intent).toUpperCase() || 'GENERAL';
+  return {
+    decisionRoute,
+    replySource: decision.aiGenerated ? 'KNOWLEDGE_AI_FALLBACK' : aiIntent ? 'INTENT_GROUNDED' : 'DETERMINISTIC',
+    knowledgeVersion: clean(JOMKAKI_KNOWLEDGE.version)
   };
 }
 
@@ -2309,12 +2733,13 @@ export default async function handler(req, res) {
     if (!inboundMessages.some(message => !message.__skipDuplicate)) return res.status(200).json({ ok: true, duplicate: true });
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const [leadRows, routeRows, branchRows, stateRows, inboxRows] = await Promise.all([
+    const [leadRows, routeRows, branchRows, stateRows, inboxRows, outboxRows] = await Promise.all([
       readSheet(token, 'Leads!A:AP'),
       readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
       readSheet(token, 'Branch_Master!A1:S1000'),
       readSheet(token, 'Conversation_State!A:CZ'),
-      readSheet(token, 'Customer_Inbox!F:F')
+      readSheet(token, 'Customer_Inbox!A:AC'),
+      readSheet(token, 'Message_Outbox!A:AC')
     ]);
     const leads = objects(leadRows);
     const routes = objects(routeRows);
@@ -2334,7 +2759,8 @@ export default async function handler(req, res) {
       motorCatalog: objects(motorCatalogRows), motorPricing: objects(motorPricingRows),
       handphoneCatalog: objects(handphoneCatalogRows), handphonePricing: objects(handphonePricingRows)
     }));
-    const existingMessageIds = new Set(objects(inboxRows).map(row => clean(row['Message ID'])).filter(Boolean));
+    const inboxObjects = objects(inboxRows), outboxObjects = objects(outboxRows);
+    const existingMessageIds = new Set(inboxObjects.map(row => clean(row['Message ID'])).filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
@@ -2415,6 +2841,10 @@ export default async function handler(req, res) {
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text) || conversationalDocumentRequirement(text));
         const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
+        const shouldPreloadApplication = !!lead && (needsDocuments || !!clean(conversationState?.['Application ID']));
+        const preloadedApplications = shouldPreloadApplication ? await loadApplications() : [];
+        const applicationContext = preloadedApplications.filter(row => clean(row['Lead ID']) === clean(lead?.['Lead ID'])).at(-1) || {};
+        const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
         const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting
@@ -2422,6 +2852,9 @@ export default async function handler(req, res) {
             text,
             state: conversationState || {},
             lead: lead || {},
+            application: applicationContext,
+            documents: leadDocuments,
+            recentMessages,
             routeBusinessUnit,
             routeRegion,
             phone,
@@ -2433,6 +2866,10 @@ export default async function handler(req, res) {
         let instantDecision = buildInstantSalesDecision({
           state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
           ...catalogData, aiIntent, suppressDocumentAcknowledgement
+        });
+        instantDecision = buildMultiQuestionSalesDecision({
+          state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
+          ...catalogData, aiIntent, suppressDocumentAcknowledgement, baseDecision: instantDecision
         });
         instantDecision = guardConversationProgress({ state: conversationState || {}, documents: leadDocuments, text, decision: instantDecision });
         const progressiveProfile = buildProgressiveProfileChanges({
@@ -2457,6 +2894,10 @@ export default async function handler(req, res) {
             text: instantDecision.aiFallbackQuestion || text,
             state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },
             lead: { ...(lead || {}), ...progressiveProfile.leadChanges },
+            application: applicationContext,
+            documents: leadDocuments,
+            recentMessages,
+            groundedDraft: instantDecision.text,
             routeBusinessUnit,
             routeRegion,
             phone,
@@ -2488,7 +2929,7 @@ export default async function handler(req, res) {
         }
         const shouldEnsureApplication = mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || clean(instantDecision.nextStep).toUpperCase() === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text);
         const shouldLoadApplication = shouldEnsureApplication || !!clean(conversationState?.['Application ID']);
-        const applications = shouldLoadApplication ? await loadApplications() : [];
+        const applications = shouldLoadApplication ? await loadApplications() : preloadedApplications;
         let application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
         if (!clean(application['Application ID']) && shouldEnsureApplication) {
           application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
@@ -2579,16 +3020,29 @@ export default async function handler(req, res) {
           willReply = true;
         }
         instantDecision = enforceConversationReplyContract({ state: conversationState || {}, text, decision: instantDecision });
+        const decisionAudit = buildDecisionAudit({ decision: instantDecision, aiIntent });
         willReply = routeUsable && !human && instantDecision.handled;
         conversationState = conversationState || conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1);
+        const inboundMemoryChanges = buildConversationMemoryChanges({
+          state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },
+          lead,
+          application,
+          documents: leadDocuments,
+          text,
+          decision: instantDecision,
+          aiIntent,
+          receivedAt,
+          includeAssistant: false
+        });
         if (!conversationState) {
           conversationState = buildInitialConversationState({ lead, application, route, phone, text, messageId: message.id, receivedAt, numberId, displayNumber, entryId: entry.id, channelId, businessUnit: routeBusinessUnit, teamId });
           Object.assign(conversationState, progressiveProfile.stateChanges);
+          Object.assign(conversationState, inboundMemoryChanges);
           if (willReply) {
             conversationState['Current Step'] = instantDecision.nextStep || conversationState['Current Step'];
             conversationState['Product Category'] = clean(instantDecision.productUnit || routeBusinessUnit);
           }
-          if (Object.keys(progressiveProfile.stateChanges).length) await ensureHeaders(token, 'Conversation_State', PROGRESSIVE_PROFILE_STATE_HEADERS);
+          await ensureHeaders(token, 'Conversation_State', [...PROGRESSIVE_PROFILE_STATE_HEADERS, ...CONVERSATION_MEMORY_HEADERS]);
           await appendObject(token, 'Conversation_State', conversationState);
           conversationStates.push(conversationState);
         } else {
@@ -2610,9 +3064,10 @@ export default async function handler(req, res) {
               'Current Step': clean(instantDecision.nextStep || conversationState['Current Step']),
               'Product Category': clean(instantDecision.productUnit || conversationState['Product Category'] || routeBusinessUnit)
             } : {}),
-            ...progressiveProfile.stateChanges
+            ...progressiveProfile.stateChanges,
+            ...inboundMemoryChanges
           };
-          if (Object.keys(progressiveProfile.stateChanges).length) await ensureHeaders(token, 'Conversation_State', PROGRESSIVE_PROFILE_STATE_HEADERS);
+          await ensureHeaders(token, 'Conversation_State', [...PROGRESSIVE_PROFILE_STATE_HEADERS, ...CONVERSATION_MEMORY_HEADERS]);
           await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], latestInbound, 'CZ');
           Object.assign(conversationState, latestInbound);
         }
@@ -2638,8 +3093,24 @@ export default async function handler(req, res) {
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
               'Selected Product Brand': clean(instantDecision.product?.Brand || conversationState['Selected Product Brand']),
-              'Selected Product Model': clean(instantDecision.product?.Model || conversationState['Selected Product Model'])
+              'Selected Product Model': clean(instantDecision.product?.Model || conversationState['Selected Product Model']),
+              'Selected Product Variant': clean(instantDecision.product?.Variant || conversationState['Selected Product Variant']),
+              'Last Decision Route': decisionAudit.decisionRoute,
+              'Last Reply Source': decisionAudit.replySource,
+              'Last Knowledge Version': decisionAudit.knowledgeVersion,
+              ...buildConversationMemoryChanges({
+                state: conversationState,
+                lead,
+                application,
+                documents: leadDocuments,
+                text,
+                decision: instantDecision,
+                aiIntent,
+                receivedAt,
+                includeAssistant: true
+              })
             };
+            await ensureHeaders(token, 'Conversation_State', CONVERSATION_DECISION_HEADERS);
             await updateObject(token, 'Conversation_State', 'State ID', conversationState['State ID'], deliveredState, 'CZ');
             Object.assign(conversationState, deliveredState);
           }
@@ -2660,7 +3131,7 @@ export default async function handler(req, res) {
             'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
-            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}`,
+            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}:${decisionAudit.decisionRoute}:KB${decisionAudit.knowledgeVersion}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
           });
         }

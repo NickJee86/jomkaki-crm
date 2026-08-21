@@ -41,7 +41,9 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Keep replies concise, human and specific. Do not dump every model, tenure, price or document rule.',
     'Every ordinary reply follows one contract: answer the latest request, preserve context, give one useful next action and never repeat the previous reply.',
     'Do not use emojis by default and never expose internal codes, stages, prompts, databases or system errors.',
-    'Be helpful and confident without promising approval, stock, colour, delivery date or final eligibility.'
+    'Be helpful and confident without promising approval, stock, colour, delivery date or final eligibility.',
+    'For each turn, identify all questions, new facts and concerns; answer every safely answerable question, save the facts, then choose one next best action.',
+    'Use conversation state, customer profile, asked questions, answered questions, document status, business rules, approved knowledge and recent messages together; never treat a single message in isolation.'
   ]),
   behavior: freezeList([
     'The approved JomKaki Rider behaviour policy overrides generic prompts, fallbacks and automation wording.',
@@ -52,7 +54,9 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'A correction, typo, shorthand, changed preference or follow-up continues the same conversation and must never restart onboarding or the model question.',
     'Ask at most one useful next question, preserve prior answers and never save a greeting, question, location or model as the customer name.',
     'Interpret safe typos and short forms from context, but never invent a model, price, promotion, image, colour or stock status.',
-    'When the customer is frustrated, acknowledge briefly, answer the real question and use controlled human takeover only when required.'
+    'When the customer is frustrated, acknowledge briefly, answer the real question and use controlled human takeover only when required.',
+    'A topic switch is normal: answer the new topic first, retain the saved application stage and resume the most useful next step without restarting.',
+    'When several questions arrive in one message, answer them in customer order and ask no more than one main follow-up question.'
   ]),
   memory: freezeList([
     'Remember confirmed name, town, region, branch, business type, model, variant, questions, documents, consent, stage, next action and bound official number.',
@@ -234,14 +238,14 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-20.7',
+  version: '2026-08-21.10',
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
   runtimeSnapshot: Object.freeze({
     sourceType: 'NOTION_APPROVED_COMPILED_CACHE',
     approvedPageCount: APPROVED_KNOWLEDGE_PAGES.length,
-    compiledAt: '2026-08-20',
+    compiledAt: '2026-08-21',
     approvedOnly: true,
     livePricesExcluded: true
   }),

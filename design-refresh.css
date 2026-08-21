@@ -308,6 +308,24 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   box-shadow:var(--shadow-sm);
   scrollbar-color:#b8c9cf #edf2f4;
 }
+.table-scroll-dock{
+  position:fixed;
+  bottom:10px;
+  z-index:125;
+  height:19px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  border:1px solid #c8d8dd;
+  border-radius:10px;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 8px 26px rgba(8,30,45,.18);
+  scrollbar-color:#8daeb7 #e8f0f2;
+  scrollbar-width:auto;
+}
+.table-scroll-dock[hidden]{display:none}
+.table-scroll-dock-track{height:1px;pointer-events:none}
+.table-scroll-dock:focus-visible{outline:3px solid rgba(14,159,140,.24);outline-offset:2px}
+.view:has(.table-card){padding-bottom:76px}
 .data-table{border-spacing:0;min-width:100%}
 .data-table th{
   min-height:47px;
