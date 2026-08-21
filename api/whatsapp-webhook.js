@@ -2023,6 +2023,11 @@ const previouslySuggestedModelKeys = (state = {}, catalogRows = []) => {
   }).map(row => normalizedWords(`${clean(row.Brand)} ${clean(row.Model)}`)).filter(Boolean));
 };
 
+export const mergeSuggestedModelHistory = (state = {}, suggestions = []) => boundedUnique([
+  ...parseJsonArray(state['Last Suggested Models JSON']),
+  ...(Array.isArray(suggestions) ? suggestions : [])
+], 200);
+
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], aiIntent = null, suppressDocumentAcknowledgement = false } = {}) {
   const interpretedIntent = clean(aiIntent?.intent).toUpperCase();
   const language = ['MS', 'EN', 'ZH'].includes(clean(aiIntent?.language).toUpperCase()) ? clean(aiIntent.language).toUpperCase() : instantLanguage(text, state);
@@ -3183,7 +3188,7 @@ export default async function handler(req, res) {
               'Last Decision Route': decisionAudit.decisionRoute,
               'Last Reply Source': decisionAudit.replySource,
               'Last Knowledge Version': decisionAudit.knowledgeVersion,
-              ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(instantDecision.suggestedModels || []) } : {}),
+              ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(mergeSuggestedModelHistory(conversationState, instantDecision.suggestedModels)) } : {}),
               ...buildConversationMemoryChanges({
                 state: conversationState,
                 lead,

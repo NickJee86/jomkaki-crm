@@ -35,6 +35,7 @@ import {
   isExpiredInboundMessage,
   isStaleInboundMessage,
   matchInstantProduct,
+  mergeSuggestedModelHistory,
   parseApplicationDetailsForm,
   releaseEarlyConsentDispatch,
   releaseInboundMessage,
@@ -1797,14 +1798,23 @@ test('successive alternative-model questions page through fresh approved suggest
   const state = { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' };
   const lead = { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' };
   const first = buildInstantSalesDecision({ state, lead, text: 'motor lain ada apa', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
-  const secondState = { ...state, 'Last AI Message': first.text, 'Last Suggested Models JSON': JSON.stringify(first.suggestedModels) };
+  const firstHistory = mergeSuggestedModelHistory(state, first.suggestedModels);
+  const secondState = { ...state, 'Last AI Message': first.text, 'Last Suggested Models JSON': JSON.stringify(firstHistory) };
   const second = buildInstantSalesDecision({ state: secondState, lead, text: 'selain dari model ni ada apa lagi', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
+  const secondHistory = mergeSuggestedModelHistory(secondState, second.suggestedModels);
+  const thirdState = { ...secondState, 'Last AI Message': second.text, 'Last Suggested Models JSON': JSON.stringify(secondHistory) };
+  const third = buildInstantSalesDecision({ state: thirdState, lead, text: 'ada apa model lain lagi', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
 
   assert.deepEqual(first.suggestedModels, ['Yamaha NMAX', 'Honda RS150R', 'Honda ADV160', 'Yamaha LC135']);
   assert.deepEqual(second.suggestedModels, ['Yamaha Y16ZR', 'Honda Wave Alpha']);
+  assert.deepEqual(secondHistory, [...first.suggestedModels, ...second.suggestedModels]);
   assert.doesNotMatch(second.text, /Yamaha NMAX|Honda RS150R|Honda ADV160|Yamaha LC135/);
   assert.match(second.text, /Yamaha Y16ZR/);
   assert.match(second.text, /Honda Wave Alpha/);
+  assert.deepEqual(third.suggestedModels, []);
+  assert.match(third.text, /Itulah pilihan aktif lain/);
+  assert.doesNotMatch(third.text, /Yamaha NMAX|Honda RS150R|Honda ADV160|Yamaha LC135|Yamaha Y16ZR|Honda Wave Alpha/);
+  assert.match(source, /Last Suggested Models JSON': JSON\.stringify\(mergeSuggestedModelHistory\(conversationState, instantDecision\.suggestedModels\)\)/);
 });
 
 test('ordinary structured workflows remain intact while the global contract governs every normal chat reply', () => {
