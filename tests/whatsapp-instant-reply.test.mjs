@@ -1575,7 +1575,11 @@ test('indirect Malay alternative-model questions override stale document and app
   };
   const phrases = [
     'selain dari model ni ada apa lagi',
+    'selain dari model ni ada apa model lagi',
     'selain daripada model ini ada apa lagi',
+    'selain model ni model apa lagi ada',
+    'model apa lagi selain ni',
+    'ada lagi model tak',
     'yang lain ada tak',
     'apa lagi pilihan motor yang ada',
     'model selain ni ada?'
@@ -1594,6 +1598,20 @@ test('indirect Malay alternative-model questions override stale document and app
     assert.ok(detected.includes('OTHER_MODELS'), text);
     assert.ok(!detected.includes('DOCUMENT_REQUIREMENTS'), text);
     assert.ok(!detected.includes('DOCUMENT_STATUS'), text);
+  }
+});
+
+test('other-model semantics do not steal document, deposit or colour questions', () => {
+  const cases = [
+    ['apa lagi perlu untuk loan', ['DOCUMENT_REQUIREMENTS']],
+    ['dokumen apa lagi kurang', ['DOCUMENT_STATUS']],
+    ['model ni deposit berapa', ['DEPOSIT']],
+    ['model ni warna apa', ['PRODUCT_COLOUR']]
+  ];
+  for (const [text, expected] of cases) {
+    const detected = detectCustomerQuestionIntents(text);
+    assert.ok(!detected.includes('OTHER_MODELS'), text);
+    for (const intent of expected) assert.ok(detected.includes(intent), `${text}: ${intent}`);
   }
 });
 
