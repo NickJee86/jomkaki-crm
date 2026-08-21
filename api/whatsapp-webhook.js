@@ -1216,7 +1216,10 @@ export function detectCustomerQuestionIntents(value = '') {
   if (asksForCombinedApplication(text)) add('COMBINED_APPLICATION');
   if (asksForPayslipPeriod(text)) add('PAYSLIP_PERIOD');
   if (conversationalDocumentRequirement(text)) add('DOCUMENT_REQUIREMENTS');
-  if (isDocumentStatusQuestion(text) && /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(text)) add('DOCUMENT_STATUS');
+  // "apa lagi" can mean either "what else is available" or "what document is
+  // still missing". Once the message is clearly about alternative products,
+  // do not let the generic document-status detector create a competing intent.
+  if (!intents.includes('OTHER_MODELS') && isDocumentStatusQuestion(text) && /\b(?:dah|sudah|semua|lagi|kurang|missing|lengkap|complete|status|semak|check)\b/i.test(text)) add('DOCUMENT_STATUS');
   if (asksForLoanProcessingTime(text)) add('PROCESSING_TIME');
   if (asksAboutShopLoan(text)) add('SHOP_LOAN');
   if (raisesBudgetConcern(text)) add('BUDGET');
@@ -1385,7 +1388,8 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'If the customer asks for a named product, category or type that has no safe catalog match, choose UNLISTED_PRODUCT, preserve the customer wording in normalizedModel, and set the correct businessUnit when clear. Missing from catalog is never a reason to reject the enquiry or claim the product does not exist.',
-    'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, or ada model lain, resolve the intent against the selected product and last assistant message.',
+    'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, ada model lain, selain dari model ni ada apa lagi, yang lain ada tak, or apa lagi pilihan, resolve the intent against the selected product and last assistant message.',
+    'Any wording that asks for alternatives to the current product must be OTHER_MODELS, even during the document or application stage. The latest customer question overrides a stale DOCUMENT_REQUIREMENTS, DOCUMENT_STATUS, APPLY, onboarding, or prior-product intent. Never answer an alternatives question by requesting documents.',
     'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
@@ -1546,7 +1550,7 @@ const asksForPayslipPeriod = text => /(?:\b(?:berapa|brp|how many)\s*(?:bulan|mo
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
-const asksForOtherModels = text => /(model lain|motor lain|phone lain|telefon lain|apa model.*(?:ada|lain)|other models?|what else.*(?:available|have)|其他型号|别的型号)/i.test(clean(text));
+const asksForOtherModels = text => /(?:\b(?:model|motor|motosikal|phone|handphone|telefon)\s+lain\b|\b(?:model|motor|motosikal|phone|handphone|telefon)\s+selain\s+(?:ini|ni|itu|tu)\b|\b(?:selain|lain\s+daripada?)\b.{0,40}\b(?:model|motor|motosikal|phone|handphone|telefon|yang\s+(?:ini|ni|itu|tu))\b|\bselain\s+(?:dari|daripada)\s+(?:model|motor|motosikal|phone|handphone|telefon|yang)?\s*(?:ini|ni|itu|tu)?\b.{0,35}\b(?:apa\s+lagi|ada\s+(?:apa|tak|lagi))\b|\b(?:apa\s+lagi|yang\s+lain|pilihan\s+lain)\b.{0,35}\b(?:model|motor|motosikal|phone|handphone|telefon|ada)\b|\b(?:model|motor|motosikal|phone|handphone|telefon)\b.{0,35}\b(?:apa\s+lagi|yang\s+lain|pilihan\s+lain)\b|\bapa\s+model\b.*\b(?:ada|lain)\b|\bother\s+models?\b|\bwhat\s+else\b.*\b(?:available|have)\b|其他型号|别的型号)/i.test(clean(text));
 const asksForAvailableModels = text => /(?:\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b|\b(?:hanya|cuma|only)\b.*\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu|sahaja|saja|only)\b|\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu)\b.*\b(?:sahaja|saja|only)\b|\b(?:berapa banyak|how many)\b.*\b(?:model|pilihan|choice|option)\b)/i.test(clean(text));
 const MOTOR_CATEGORY_GROUPS = Object.freeze([
   Object.freeze({ key: 'SCOOTER', labels: Object.freeze({ MS: 'skuter', EN: 'scooter', ZH: '踏板摩托' }), terms: Object.freeze(['scooter', 'skuter', 'scuter', 'scootr']) }),
@@ -2006,6 +2010,36 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
   const selectedVariant = normalizedWords(state['Selected Product Variant']);
   const previousCustomerText = clean(state['Last Customer Message']);
+  const otherModelsIntent = !asksForPromotion(text) && (
+    ['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent)
+      || asksForOtherModels(text)
+      || asksForAvailableModels(text)
+  );
+  if (otherModelsIntent) {
+    // A direct request for alternatives is a current-turn sales question. Resolve
+    // it before any stale application/document intent returned by the model.
+    const suggestionUnit = productUnitFromText(text, '') || fallbackUnit || canonicalBusinessUnit(aiIntent?.businessUnit) || 'MOTOR';
+    const suggestionCatalog = allCatalogs.filter(row => row.__businessUnit === suggestionUnit);
+    const suggestionPricing = suggestionUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
+    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, 4)
+      .filter(label => !selectedModel || !normalizedWords(label).endsWith(selectedModel));
+    const suggestions = pricedSuggestions.length
+      ? pricedSuggestions
+      : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, 4);
+    const copyKey = suggestions.length
+      ? (interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS')
+      : 'OTHER_MODELS_CHECK';
+    const baseText = instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
+    const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
+    return {
+      handled: true,
+      availableModelsIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: continuation.nextStep,
+      productUnit: suggestionUnit,
+      text: continuation.text
+    };
+  }
   const frustrationDetected = interpretedIntent === 'FRUSTRATED' || customerIsFrustrated(text);
   const recoveringDocumentQuestion = frustrationDetected && conversationalDocumentRequirement(previousCustomerText);
   const payslipPeriodQuestion = interpretedIntent === 'PAYSLIP_PERIOD' || asksForPayslipPeriod(text);
@@ -2314,32 +2348,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: 'MOTOR',
       requestedProductCategory: motorCategory.key,
       text: instantCopy(language, 'MOTOR_CATEGORY_CHECK', { category: categoryLabel })
-    };
-  }
-  const otherModelsIntent = ['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent)
-    || asksForOtherModels(text)
-    || asksForAvailableModels(text);
-  if (otherModelsIntent) {
-    const suggestionUnit = explicitUnit || fallbackUnit || productUnitFromText(text, '') || 'MOTOR';
-    const suggestionCatalog = allCatalogs.filter(row => row.__businessUnit === suggestionUnit);
-    const suggestionPricing = suggestionUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, 4)
-      .filter(label => !selectedModel || !normalizedWords(label).endsWith(selectedModel));
-    const suggestions = pricedSuggestions.length
-      ? pricedSuggestions
-      : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, 4);
-    const copyKey = suggestions.length
-      ? (interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS')
-      : 'OTHER_MODELS_CHECK';
-    const baseText = instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
-    const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
-    return {
-      handled: true,
-      availableModelsIntent: true,
-      answerCustomerQuestionFirst: true,
-      nextStep: continuation.nextStep,
-      productUnit: suggestionUnit,
-      text: continuation.text
     };
   }
   const unlistedProductIntent = interpretedIntent === 'UNLISTED_PRODUCT'
