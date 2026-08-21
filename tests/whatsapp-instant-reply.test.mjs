@@ -1761,7 +1761,7 @@ test('the global reply contract prevents duplicate normal replies and caps every
   assert.doesNotMatch(multiQuestion.text, /😊/u);
 });
 
-test('rephrasing the same alternative-model question may repeat the same grounded answer without manager fallback', () => {
+test('rephrasing the same alternative-model question does not repeat the same list or fall back to a manager', () => {
   const catalog = [
     { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Active: 'TRUE', 'Approval Status': 'APPROVED' },
     { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
@@ -1774,16 +1774,37 @@ test('rephrasing the same alternative-model question may repeat the same grounde
   const state = { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' };
   const lead = { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' };
   const first = buildInstantSalesDecision({ state, lead, text: 'selain dari model ni ada apa model lagi', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
-  const repeatedState = { ...state, 'Last AI Message': first.text };
+  const repeatedState = { ...state, 'Last AI Message': first.text, 'Last Suggested Models JSON': JSON.stringify(first.suggestedModels) };
   const second = buildInstantSalesDecision({ state: repeatedState, lead, text: 'ada apa model selain dari berapa ni', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
   const guarded = enforceConversationReplyContract({ state: repeatedState, text: 'ada apa model selain dari berapa ni', decision: second });
 
   assert.equal(second.availableModelsIntent, true);
   assert.equal(guarded.replyContractRecovered, undefined);
   assert.equal(guarded.humanFollowUpRequired, undefined);
-  assert.match(guarded.text, /Yamaha NMAX/);
-  assert.match(guarded.text, /Honda RS150R/);
+  assert.doesNotMatch(guarded.text, /Yamaha NMAX|Honda RS150R/);
+  assert.match(guarded.text, /Itulah pilihan aktif lain/);
   assert.doesNotMatch(guarded.text, /pengurus|mungkin salah|tanpa anda perlu ulang/i);
+});
+
+test('successive alternative-model questions page through fresh approved suggestions', () => {
+  const models = [
+    ['M1', 'Yamaha', 'Y15ZR'], ['M2', 'Yamaha', 'NMAX'], ['M3', 'Honda', 'RS150R'],
+    ['M4', 'Honda', 'ADV160'], ['M5', 'Yamaha', 'LC135'], ['M6', 'Yamaha', 'Y16ZR'],
+    ['M7', 'Honda', 'Wave Alpha']
+  ];
+  const catalog = models.map(([id, brand, model]) => ({ 'Catalog ID': id, Brand: brand, Model: model, Active: 'TRUE', 'Approval Status': 'APPROVED' }));
+  const pricing = models.slice(1).map(([id]) => ({ 'Catalog ID': id, 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '299' }));
+  const state = { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' };
+  const lead = { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' };
+  const first = buildInstantSalesDecision({ state, lead, text: 'motor lain ada apa', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
+  const secondState = { ...state, 'Last AI Message': first.text, 'Last Suggested Models JSON': JSON.stringify(first.suggestedModels) };
+  const second = buildInstantSalesDecision({ state: secondState, lead, text: 'selain dari model ni ada apa lagi', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing });
+
+  assert.deepEqual(first.suggestedModels, ['Yamaha NMAX', 'Honda RS150R', 'Honda ADV160', 'Yamaha LC135']);
+  assert.deepEqual(second.suggestedModels, ['Yamaha Y16ZR', 'Honda Wave Alpha']);
+  assert.doesNotMatch(second.text, /Yamaha NMAX|Honda RS150R|Honda ADV160|Yamaha LC135/);
+  assert.match(second.text, /Yamaha Y16ZR/);
+  assert.match(second.text, /Honda Wave Alpha/);
 });
 
 test('ordinary structured workflows remain intact while the global contract governs every normal chat reply', () => {
