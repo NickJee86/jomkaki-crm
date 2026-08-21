@@ -1389,7 +1389,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
     'If the customer asks for a named product, category or type that has no safe catalog match, choose UNLISTED_PRODUCT, preserve the customer wording in normalizedModel, and set the correct businessUnit when clear. Missing from catalog is never a reason to reject the enquiry or claim the product does not exist.',
     'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, ada model lain, selain dari model ni ada apa lagi, yang lain ada tak, or apa lagi pilihan, resolve the intent against the selected product and last assistant message.',
-    'Any wording that asks for alternatives to the current product must be OTHER_MODELS, even during the document or application stage. The latest customer question overrides a stale DOCUMENT_REQUIREMENTS, DOCUMENT_STATUS, APPLY, onboarding, or prior-product intent. Never answer an alternatives question by requesting documents.',
+    'Any wording that asks for alternatives to the current product must be OTHER_MODELS, regardless of word order, repeated nouns, shorthand, or grammar, including selain dari model ni ada apa model lagi, model apa lagi ada, and ada lagi model tak. This remains true during the document or application stage. The latest customer question overrides a stale DOCUMENT_REQUIREMENTS, DOCUMENT_STATUS, APPLY, onboarding, or prior-product intent. Never answer an alternatives question by requesting documents or promising a manager reply.',
     'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
@@ -1550,7 +1550,27 @@ const asksForPayslipPeriod = text => /(?:\b(?:berapa|brp|how many)\s*(?:bulan|mo
 const wantsToApply = text => /(nak|mahu|want|ready|boleh).*(apply|proceed|teruskan|mohon|loan)|怎么申请|要申请/i.test(clean(text));
 const asksAboutShopLoan = text => /(?:\bloan\s*(?:kedai|shop)\b|\b(?:under|bawah)\s*(?:kedai|shop)\b|\bin[ -]?house\s*(?:loan|financing)\b|\bkedai\s*(?:boleh|dapat|dpt|ada)\b)/i.test(clean(text));
 const raisesBudgetConcern = text => /(mahal|too expensive|expensive|lebih murah|cheaper|bajet|budget|贵|便宜)/i.test(clean(text));
-const asksForOtherModels = text => /(?:\b(?:model|motor|motosikal|phone|handphone|telefon)\s+lain\b|\b(?:model|motor|motosikal|phone|handphone|telefon)\s+selain\s+(?:ini|ni|itu|tu)\b|\b(?:selain|lain\s+daripada?)\b.{0,40}\b(?:model|motor|motosikal|phone|handphone|telefon|yang\s+(?:ini|ni|itu|tu))\b|\bselain\s+(?:dari|daripada)\s+(?:model|motor|motosikal|phone|handphone|telefon|yang)?\s*(?:ini|ni|itu|tu)?\b.{0,35}\b(?:apa\s+lagi|ada\s+(?:apa|tak|lagi))\b|\b(?:apa\s+lagi|yang\s+lain|pilihan\s+lain)\b.{0,35}\b(?:model|motor|motosikal|phone|handphone|telefon|ada)\b|\b(?:model|motor|motosikal|phone|handphone|telefon)\b.{0,35}\b(?:apa\s+lagi|yang\s+lain|pilihan\s+lain)\b|\bapa\s+model\b.*\b(?:ada|lain)\b|\bother\s+models?\b|\bwhat\s+else\b.*\b(?:available|have)\b|其他型号|别的型号)/i.test(clean(text));
+const asksForOtherModels = value => {
+  const raw = clean(value), text = normalizedWords(raw);
+  if (!text) return false;
+  if (/(?:其他|其它|别的|另外).{0,8}(?:型号|款|选择)|(?:型号|款).{0,8}(?:还有|其他|其它|别的)/u.test(raw)) return true;
+
+  const productContext = /\b(?:model|motor|motosikal|motorcycle|phone|handphone|telefon|iphone|product|produk)\b/.test(text);
+  const explicitAlternative = /\b(?:lain|selain|alternatif|alternative|alternatives|other|others|else)\b/.test(text);
+  const choiceLanguage = /\b(?:pilihan|choice|choices|option|options)\b/.test(text);
+  const extraLanguage = /\b(?:lagi|more)\b/.test(text);
+  const availabilityLanguage = /\b(?:ada|available|have|apa|ape|what|which|tak|ke|kah|lagi|more)\b/.test(text);
+  const currentReference = /\b(?:ini|ni|itu|tu|yang)\b/.test(text);
+
+  // Treat the words as a semantic combination instead of depending on one
+  // fixed sentence order. This covers natural variants such as:
+  // "selain dari model ni ada apa model lagi" and "model apa lagi ada".
+  if (productContext && (explicitAlternative || (extraLanguage && availabilityLanguage) || (choiceLanguage && availabilityLanguage))) return true;
+  if ((/\byang\s+lain\b/.test(text) || /\bpilihan\s+lain\b/.test(text)) && availabilityLanguage) return true;
+  if (/\bselain\b/.test(text) && currentReference && availabilityLanguage) return true;
+  if (/\bwhat\s+else\b/.test(text) && availabilityLanguage) return true;
+  return false;
+};
 const asksForAvailableModels = text => /(?:\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b|\b(?:hanya|cuma|only)\b.*\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu|sahaja|saja|only)\b|\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu)\b.*\b(?:sahaja|saja|only)\b|\b(?:berapa banyak|how many)\b.*\b(?:model|pilihan|choice|option)\b)/i.test(clean(text));
 const MOTOR_CATEGORY_GROUPS = Object.freeze([
   Object.freeze({ key: 'SCOOTER', labels: Object.freeze({ MS: 'skuter', EN: 'scooter', ZH: '踏板摩托' }), terms: Object.freeze(['scooter', 'skuter', 'scuter', 'scootr']) }),
