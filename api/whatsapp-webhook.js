@@ -791,6 +791,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. Its approved monthly plan still needs branch confirmation, and I can arrange that check for you.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
+      OTHER_MODELS_CHECK: 'Yes, I can check other motorcycles too. Do you prefer a scooter, cub/moped, sport bike, or would you like suggestions based on a comfortable monthly budget?',
       AVAILABLE_MODELS: `Those are only a few popular examples, not the full catalogue. Other options I can check include ${models}. Which type do you prefer, or what monthly budget is comfortable for you?`,
       MOTOR_CATEGORY_OPTIONS: `Yes, I can check ${category} options. Approved choices currently include ${models}. Is there a specific model you prefer, or what monthly budget is comfortable for you?`,
       MOTOR_CATEGORY_CHECK: `Yes, I can help check a ${category}. If your preferred choice is not on the current list yet, I will still ask the branch to check it for you. Do you have a model, photo, or monthly budget in mind?`,
@@ -852,6 +853,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Pelan ansuran yang diluluskan masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
+      OTHER_MODELS_CHECK: 'Boleh, saya boleh semak motor lain juga. Anda lebih suka skuter, kapcai/moped, motor sport, atau mahu saya cadangkan ikut bajet bulanan yang selesa?',
       AVAILABLE_MODELS: `Itu cuma beberapa pilihan popular, bukan semua model yang ada. Pilihan lain yang saya boleh semak termasuk ${models}. Anda suka jenis apa, atau bajet bulanan berapa yang selesa?`,
       MOTOR_CATEGORY_OPTIONS: `Ada pilihan ${category} yang boleh saya semak. Antara pilihan diluluskan sekarang ialah ${models}. Anda ada model tertentu, atau bajet bulanan berapa yang selesa?`,
       MOTOR_CATEGORY_CHECK: `Boleh, ${category} pun saya boleh bantu semak. Kalau pilihan yang anda mahu belum ada dalam senarai semasa, saya tetap akan minta cawangan semak. Anda ada model, gambar atau bajet bulanan yang sesuai?`,
@@ -909,6 +911,7 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
+      OTHER_MODELS_CHECK: '可以，我也能帮你查询其他摩托车。你比较喜欢踏板车、弯梁车、跑车款，还是要我按照舒服的月供预算推荐？',
       AVAILABLE_MODELS: `那些只是几款热门例子，不是全部车型。我还可以查询 ${models}。你喜欢哪种类型，或舒服的月供预算大约是多少？`,
       MOTOR_CATEGORY_OPTIONS: `可以，我能查询${category}。目前获批的选择包括 ${models}。你有指定型号，还是希望月供控制在多少？`,
       MOTOR_CATEGORY_CHECK: `可以，我能帮你查询${category}。即使你想要的款式暂时不在现有清单里，我也会请分行继续确认。你有型号、照片或月供预算吗？`,
@@ -1967,6 +1970,16 @@ const availableModelSuggestions = (catalogRows = [], pricingRows = [], unit = ''
   .slice(0, limit)
   .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim());
 
+const approvedCatalogSuggestions = (catalogRows = [], unit = '', excludedModel = '', limit = 4) => catalogRows
+  .filter(row => {
+    const rowUnit = clean(row.__businessUnit).toUpperCase() || canonicalBusinessUnit(unit);
+    return rowUnit === canonicalBusinessUnit(unit) && approvedCatalogRow(row) && normalizedWords(row.Model) !== normalizedWords(excludedModel);
+  })
+  .filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
+  .slice(0, limit)
+  .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim())
+  .filter(Boolean);
+
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], aiIntent = null, suppressDocumentAcknowledgement = false } = {}) {
   const interpretedIntent = clean(aiIntent?.intent).toUpperCase();
   const language = ['MS', 'EN', 'ZH'].includes(clean(aiIntent?.language).toUpperCase()) ? clean(aiIntent.language).toUpperCase() : instantLanguage(text, state);
@@ -2303,6 +2316,32 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       text: instantCopy(language, 'MOTOR_CATEGORY_CHECK', { category: categoryLabel })
     };
   }
+  const otherModelsIntent = ['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent)
+    || asksForOtherModels(text)
+    || asksForAvailableModels(text);
+  if (otherModelsIntent) {
+    const suggestionUnit = explicitUnit || fallbackUnit || productUnitFromText(text, '') || 'MOTOR';
+    const suggestionCatalog = allCatalogs.filter(row => row.__businessUnit === suggestionUnit);
+    const suggestionPricing = suggestionUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
+    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, 4)
+      .filter(label => !selectedModel || !normalizedWords(label).endsWith(selectedModel));
+    const suggestions = pricedSuggestions.length
+      ? pricedSuggestions
+      : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, 4);
+    const copyKey = suggestions.length
+      ? (interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS')
+      : 'OTHER_MODELS_CHECK';
+    const baseText = instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
+    const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
+    return {
+      handled: true,
+      availableModelsIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: continuation.nextStep,
+      productUnit: suggestionUnit,
+      text: continuation.text
+    };
+  }
   const unlistedProductIntent = interpretedIntent === 'UNLISTED_PRODUCT'
     || (interpretedIntent === 'MODEL_SELECTION' && !!clean(aiIntent?.normalizedModel))
     || looksLikeProductAvailabilityQuestion(text);
@@ -2363,22 +2402,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: unit,
       text: instantCopy(language, 'SERVICE_RECOVERY')
     };
-  }
-  const suggestionPricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
-  const suggestions = availableModelSuggestions(catalogPool, suggestionPricing, unit, lead.Region || routeRegion);
-  const suggestionText = suggestions.join(language === 'ZH' ? '、' : ', ');
-  if (['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent) || asksForOtherModels(text) || asksForAvailableModels(text)) {
-    if (suggestions.length) {
-      const baseText = instantCopy(language, interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS', { models: suggestionText });
-      const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
-      return {
-        handled: true,
-        availableModelsIntent: true,
-        nextStep: continuation.nextStep,
-        productUnit: unit,
-        text: continuation.text
-      };
-    }
   }
   if (interpretedIntent === 'THANKS' || saysThanks(text)) return { handled: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: unit, text: instantCopy(language, 'THANKS') };
   const questionPriority = customerAskedQuestion(text)
