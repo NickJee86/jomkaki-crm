@@ -2633,7 +2633,16 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
   const language = instantLanguage(text, state);
   const priorReply = clean(state['Last AI Message']);
   let reply = stripEmoji(decision.text).replace(/\s{2,}/g, ' ').trim();
-  const repeatedReply = !!priorReply && replyFingerprint(priorReply) === replyFingerprint(reply);
+  const groundedIntentReply = [
+    'availableModelsIntent', 'branchLocationIntent', 'cashPriceIntent', 'combinedApplicationIntent',
+    'documentRequirementsIntent', 'documentStatusIntent', 'interestRateIntent', 'loanKedaiIntent',
+    'payslipPeriodIntent', 'productCategoryIntent', 'productIntent', 'productOptionsIntent',
+    'promotionIntent', 'shopLoanIntent', 'unlistedProductIntent'
+  ].some(key => decision[key] === true);
+  // A customer may repeat or rephrase the same question. When the router has
+  // produced a grounded intent-specific answer, sending the same facts again is
+  // correct and must not be replaced with an unnecessary manager handover.
+  const repeatedReply = !!priorReply && replyFingerprint(priorReply) === replyFingerprint(reply) && !groundedIntentReply;
   const failedAnswerFirst = customerExpectsAnswer(text) && (genericMenuReply(reply) || profileOnlyReply(reply));
   const leakedInternalIdentity = /\b(?:as an ai|i am an ai|chatbot|bot reply|automated assistant|saya (?:ialah|adalah) ai|saya bot|我是.*(?:ai|机器人))\b/i.test(reply);
   const recovered = repeatedReply || failedAnswerFirst || leakedInternalIdentity;
@@ -3228,3 +3237,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
