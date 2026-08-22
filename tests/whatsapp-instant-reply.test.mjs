@@ -307,8 +307,7 @@ test('every customer question bypasses onboarding gates and gets an answer-first
   assert.equal(customerAskedQuestion('hanya ada berapa model ni sahaja?'), true);
   assert.equal(decision.availableModelsIntent, true);
   assert.match(decision.text, /model motor yang ada sekarang/i);
-  assert.match(decision.text, /Yamaha Y15ZR/);
-  assert.match(decision.text, /Yamaha NMAX/);
+  assert.match(decision.text, /\*Yamaha\*\n• Y15ZR\n• NMAX/);
   assert.doesNotMatch(decision.text, /^Model motor atau telefon/i);
 });
 
@@ -729,9 +728,8 @@ test('a casual available-motor question returns real options instead of repeatin
     ]
   });
   assert.equal(decision.availableModelsIntent, true);
-  assert.match(decision.text, /Yamaha Y15ZR/);
-  assert.match(decision.text, /Yamaha NMAX/);
-  assert.match(decision.text, /Honda RS150R/);
+  assert.match(decision.text, /\*Yamaha\*\n• Y15ZR\n• NMAX/);
+  assert.match(decision.text, /\*Honda\*\n• RS150R/);
   assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
@@ -754,11 +752,32 @@ test('a full model-list request returns every active approved catalogue model ev
   });
   assert.equal(decision.availableModelsIntent, true);
   assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160']);
-  assert.match(decision.text, /Yamaha Y15ZR Standard/);
-  assert.match(decision.text, /Yamaha NMAX/);
-  assert.match(decision.text, /Honda ADV160/);
+  assert.match(decision.text, /\*Yamaha\*\n• Y15ZR Standard\n• NMAX/);
+  assert.match(decision.text, /\*Honda\*\n• ADV160/);
   assert.doesNotMatch(decision.text, /Honda RS150R|Honda Wave Alpha|bukan semua|popular|pengesahan cawangan/i);
+  assert.doesNotMatch(decision.text, /Y15ZR Standard, Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a contextual listout follow-up without repeating motor is treated as a full catalogue request and stays readable', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'MOTOR', 'Last Customer Message': 'motor' },
+    lead: { 'Customer Name': 'Nick', Region: 'WEST_MALAYSIA', 'City or Area': 'Kuala Lumpur' },
+    text: 'listout apa model yg ada skg', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'ADV160', Active: 'TRUE', 'Approval Status': 'APPROVED' }
+    ],
+    aiIntent: { intent: 'UNLISTED_PRODUCT', language: 'MS', businessUnit: 'MOTOR', normalizedModel: '' }
+  });
+  assert.equal(decision.availableModelsIntent, true);
+  assert.equal(decision.unlistedProductIntent, undefined);
+  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160']);
+  assert.match(decision.text, /^Model motor yang ada sekarang:/);
+  assert.match(decision.text, /\*Yamaha\*\n• Y15ZR Standard\n• NMAX/);
+  assert.match(decision.text, /\*Honda\*\n• ADV160/);
+  assert.doesNotMatch(decision.text, /Walaupun belum ada|cawangan sahkan/i);
 });
 
 test('repeating only motor offers real options instead of repeating the same model prompt', () => {

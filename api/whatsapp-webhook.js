@@ -1592,7 +1592,11 @@ const asksForOtherModels = value => {
   if (/\bwhat\s+else\b/.test(text) && availabilityLanguage) return true;
   return false;
 };
-const asksForAvailableModels = text => /(?:\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b|\b(?:hanya|cuma|only)\b.*\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu|sahaja|saja|only)\b|\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu)\b.*\b(?:sahaja|saja|only)\b|\b(?:berapa banyak|how many)\b.*\b(?:model|pilihan|choice|option)\b)/i.test(clean(text));
+const asksForAvailableModels = value => {
+  const text = clean(value);
+  if (!text) return false;
+  return /(?:\b(?:list\s*out|listout|listkan|senarai(?:kan)?|list\s+all|show\s+all)\b.*\b(?:model|motor|motosikal|motorcycle|phone|telefon|handphone|pilihan|option)\b|\b(?:apa|ape|what|which)\b.*\bmodel\b.*\b(?:ada|available|have)\b|\bmodel\b.*\b(?:apa|ape|what|which)\b.*\b(?:ada|available|have)\b|\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b.*\b(?:ada|available|have)\b|\b(?:apa|what|which)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:ada|available|have)\b|\b(?:ada|available|have)\b.*\b(?:motor|motosikal|motorcycle|phone|telefon|handphone)\b.*\b(?:apa|what|which)\b|\b(?:hanya|cuma|only)\b.*\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu|sahaja|saja|only)\b|\b(?:model|pilihan|choice|option)\b.*\b(?:ini|ni|itu|tu)\b.*\b(?:sahaja|saja|only)\b|\b(?:berapa banyak|how many)\b.*\b(?:model|pilihan|choice|option)\b)/i.test(text);
+};
 const MOTOR_CATEGORY_GROUPS = Object.freeze([
   Object.freeze({ key: 'SCOOTER', labels: Object.freeze({ MS: 'skuter', EN: 'scooter', ZH: '踏板摩托' }), terms: Object.freeze(['scooter', 'skuter', 'scuter', 'scootr']) }),
   Object.freeze({ key: 'CUB_MOPED', labels: Object.freeze({ MS: 'kapcai atau moped', EN: 'cub or moped', ZH: '弯梁车或轻便摩托' }), terms: Object.freeze(['kapcai', 'kap chai', 'cub', 'moped', 'mopet']) }),
@@ -1765,6 +1769,37 @@ const productMatchKey = row => {
 };
 
 const customerProductLabel = row => [clean(row?.Brand), customerProductModel(row, row?.__businessUnit)].filter(Boolean).join(' ');
+
+const formattedApprovedCatalogue = (language = 'MS', rows = [], unit = 'MOTOR') => {
+  const businessUnit = canonicalBusinessUnit(unit) || 'MOTOR';
+  const groups = new Map(), seen = new Set();
+  for (const row of rows) {
+    if (!approvedCatalogRow(row)) continue;
+    const rowUnit = clean(row.__businessUnit).toUpperCase() || businessUnit;
+    if (rowUnit !== businessUnit) continue;
+    const key = productMatchKey({ ...row, __businessUnit: rowUnit });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const brand = clean(row.Brand) || (language === 'ZH' ? '其他品牌' : language === 'EN' ? 'Other brands' : 'Jenama lain');
+    if (!groups.has(brand)) groups.set(brand, []);
+    groups.get(brand).push(customerProductModel(row, rowUnit) || clean(row.Model));
+  }
+  const sections = [...groups.entries()]
+    .map(([brand, models]) => `*${brand}*\n${models.map(model => `• ${model}`).join('\n')}`)
+    .filter(Boolean);
+  if (!sections.length) return '';
+  const heading = language === 'ZH'
+    ? `目前可选的${businessUnit === 'HANDPHONE' ? '手机' : '摩托车'}型号：`
+    : language === 'EN'
+      ? `${businessUnit === 'HANDPHONE' ? 'Phone' : 'Motorcycle'} models available now:`
+      : `Model ${businessUnit === 'HANDPHONE' ? 'telefon' : 'motor'} yang ada sekarang:`;
+  const closing = language === 'ZH'
+    ? '你想先查看哪一款？'
+    : language === 'EN'
+      ? 'Which model would you like me to check first?'
+      : 'Anda mahu saya semak model yang mana dulu?';
+  return `${heading}\n\n${sections.join('\n\n')}\n\n${closing}`;
+};
 
 const modelCore = value => normalizedWords(value).replace(/^(?:apple\s+)?iphone\s+/, '').trim();
 
@@ -2100,7 +2135,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const copyKey = suggestions.length
       ? (interpretedIntent === 'AVAILABLE_MODELS' || asksForAvailableModels(text) ? 'AVAILABLE_MODELS' : 'OTHER_MODELS')
       : (previousSuggestionKeys.size ? 'OTHER_MODELS_EXHAUSTED' : 'OTHER_MODELS_CHECK');
-    const baseText = instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
+    const baseText = fullCatalogueRequested && suggestions.length
+      ? formattedApprovedCatalogue(language, suggestionCatalog, suggestionUnit)
+      : instantCopy(language, copyKey, { models: suggestions.join(language === 'ZH' ? '、' : ', ') });
     const continuation = profileContinuation({ language, state, lead, baseText, completeStep: 'STEP_03_PRODUCT' });
     return {
       handled: true,
