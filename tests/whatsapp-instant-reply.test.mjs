@@ -780,6 +780,28 @@ test('a contextual listout follow-up without repeating motor is treated as a ful
   assert.doesNotMatch(decision.text, /Walaupun belum ada|cawangan sahkan/i);
 });
 
+test('a full phone catalogue request lists every approved model with its colours and storage', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'HANDPHONE' },
+    lead: { 'Customer Name': 'Nick', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'listout model handphone dan warna yg ada skg', messageType: 'text', routeBusinessUnit: 'HANDPHONE',
+    handphoneCatalog: [
+      { 'Catalog ID': 'HP-17-256-BLK', Brand: 'Apple', Model: 'iPhone 17', Variant: '256GB · Black', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17-512-LAV', Brand: 'Apple', Model: 'iPhone 17', Variant: '512GB · Lavender', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17P-256-SI', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '256GB · Silver', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17P-512-BLU', Brand: 'Apple', Model: 'iPhone 17 Pro', Variant: '512GB · Deep Blue', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-17PM-1TB-OR', Brand: 'Apple', Model: 'iPhone 17 Pro Max', Variant: '1TB · Cosmic Orange', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'HP-PENDING', Brand: 'Apple', Model: 'iPhone Pending', Variant: '128GB · Red', Active: 'TRUE', 'Approval Status': 'PENDING_APPROVAL' }
+    ]
+  });
+  assert.equal(decision.availableModelsIntent, true);
+  assert.match(decision.text, /\*Apple\*\n• iPhone 17\n  Warna: Black, Lavender\n  Kapasiti: 256GB, 512GB/);
+  assert.match(decision.text, /• iPhone 17 Pro\n  Warna: Deep Blue, Silver\n  Kapasiti: 256GB, 512GB/);
+  assert.match(decision.text, /• iPhone 17 Pro Max\n  Warna: Cosmic Orange\n  Kapasiti: 1TB/);
+  assert.doesNotMatch(decision.text, /iPhone Pending|128GB|Red/);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
 test('repeating only motor offers real options instead of repeating the same model prompt', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Last Customer Message': 'motor' },
