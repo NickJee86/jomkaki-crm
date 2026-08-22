@@ -1782,10 +1782,22 @@ const formattedApprovedCatalogue = (language = 'MS', rows = [], unit = 'MOTOR') 
     seen.add(key);
     const brand = clean(row.Brand) || (language === 'ZH' ? '其他品牌' : language === 'EN' ? 'Other brands' : 'Jenama lain');
     if (!groups.has(brand)) groups.set(brand, []);
-    groups.get(brand).push(customerProductModel(row, rowUnit) || clean(row.Model));
+    const model = customerProductModel(row, rowUnit) || clean(row.Model);
+    if (businessUnit !== 'HANDPHONE') {
+      groups.get(brand).push(`• ${model}`);
+      continue;
+    }
+    const options = approvedPhoneOptions(row, rows);
+    const colourLabel = language === 'ZH' ? '颜色' : language === 'EN' ? 'Colours' : 'Warna';
+    const storageLabel = language === 'ZH' ? '容量' : language === 'EN' ? 'Storage' : 'Kapasiti';
+    const details = [
+      options.colours.length ? `  ${colourLabel}: ${options.colours.join(', ')}` : '',
+      options.storage.length ? `  ${storageLabel}: ${options.storage.join(', ')}` : ''
+    ].filter(Boolean);
+    groups.get(brand).push([`• ${model}`, ...details].join('\n'));
   }
   const sections = [...groups.entries()]
-    .map(([brand, models]) => `*${brand}*\n${models.map(model => `• ${model}`).join('\n')}`)
+    .map(([brand, models]) => `*${brand}*\n${models.join('\n')}`)
     .filter(Boolean);
   if (!sections.length) return '';
   const heading = language === 'ZH'
