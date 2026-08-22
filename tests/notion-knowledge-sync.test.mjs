@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  approvedFilterForProperty,
   auditKnowledgePages,
   blockPlainText,
   buildNotionSnapshot,
@@ -24,6 +25,12 @@ test('Notion properties and blocks become stable plain text', () => {
   assert.equal(propertyText(property('status', 'Approved')), 'Approved');
   assert.equal(blockPlainText({ type: 'heading_2', heading_2: { rich_text: rich('Eligibility') } }), '# Eligibility');
   assert.equal(blockPlainText({ type: 'bulleted_list_item', bulleted_list_item: { rich_text: rich('No licence may start') } }), '- No licence may start');
+});
+
+test('Approved filter follows the live Notion Status property type', () => {
+  assert.deepEqual(approvedFilterForProperty({ type: 'select' }), { property: 'Status', select: { equals: 'Approved' } });
+  assert.deepEqual(approvedFilterForProperty({ type: 'status' }), { property: 'Status', status: { equals: 'Approved' } });
+  assert.throws(() => approvedFilterForProperty({ type: 'rich_text' }), /must be a status or select field/);
 });
 
 test('normalized pages retain source identity and split into bounded chunks', () => {
@@ -74,6 +81,9 @@ test('build sync queries only Approved pages, retrieves content and excludes tes
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
+    if (url.includes('/data_sources/') && options.method !== 'POST') {
+      return new Response(JSON.stringify({ properties: { Status: { type: 'select' } } }), { status: 200 });
+    }
     if (url.includes('/data_sources/')) return new Response(JSON.stringify({ results: pages, has_more: false, next_cursor: null }), { status: 200 });
     const pageNumber = Number(url.match(/page-(\d+)/)?.[1] || 0);
     return new Response(JSON.stringify({
@@ -87,8 +97,9 @@ test('build sync queries only Approved pages, retrieves content and excludes tes
   assert.equal(snapshot.chunks.length, 9);
   assert.ok(snapshot.chunks.every(chunk => chunk.knowledgeId !== 'KB-TEST-001'));
   assert.match(snapshot.version, /^notion-2026-08-21-/);
-  const queryBody = JSON.parse(calls[0].options.body);
-  assert.deepEqual(queryBody.filter, { property: 'Status', status: { equals: 'Approved' } });
+  const queryCall = calls.find(call => call.url.endsWith('/query'));
+  const queryBody = JSON.parse(queryCall.options.body);
+  assert.deepEqual(queryBody.filter, { property: 'Status', select: { equals: 'Approved' } });
   assert.match(generatedModule(snapshot), /NOTION_SYNCED_KNOWLEDGE/);
 });
 
