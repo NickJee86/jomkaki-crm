@@ -83,13 +83,21 @@ async function notionRequest(fetchImpl, apiKey, pathname, options = {}, attempts
   throw lastError || new Error('Notion request failed');
 }
 
+export function approvedFilterForProperty(property = {}) {
+  if (property?.type === 'status') return { property: 'Status', status: { equals: 'Approved' } };
+  if (property?.type === 'select') return { property: 'Status', select: { equals: 'Approved' } };
+  throw new Error(`Notion Status property must be a status or select field; received ${clean(property?.type) || 'unknown'}`);
+}
+
 async function queryApprovedPages({ fetchImpl, apiKey, dataSourceId }) {
   const pages = [];
   let cursor = '';
+  const dataSource = await notionRequest(fetchImpl, apiKey, `/data_sources/${encodeURIComponent(dataSourceId)}`);
+  const approvedFilter = approvedFilterForProperty(dataSource?.properties?.Status);
   do {
     const body = {
       page_size: 100,
-      filter: { property: 'Status', status: { equals: 'Approved' } }
+      filter: approvedFilter
     };
     if (cursor) body.start_cursor = cursor;
     const result = await notionRequest(fetchImpl, apiKey, `/data_sources/${encodeURIComponent(dataSourceId)}/query`, {
