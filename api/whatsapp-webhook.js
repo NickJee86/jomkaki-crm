@@ -644,6 +644,23 @@ const activeBranchDirectory = (branches = [], businessUnit = '') => {
   return DEFAULT_BRANCH_DIRECTORY.map(row => ({ ...row, 'Business Unit': unit }));
 };
 
+const canonicalPhysicalBranchFromText = value => {
+  const text = normalizedWords(value);
+  if (!text) return null;
+  const aliases = [
+    ['BR-SWK-KSM', ['kota samarahan', 'samarahan', 'desa ilmu']],
+    ['BR-SWK-BKW', ['batu kawa', 'taman desa wira', '15 shoppe']],
+    ['BR-SWK-STK', ['kuching satok', 'satok', 'jalan kulas', 'kampung bandarshah']],
+    ['BR-SWK-BTU', ['bintulu', 'sk one garden city']],
+    ['BR-WM-PJ', ['kuala lumpur', 'petaling jaya', 'sungai way', 'klang valley', 'kl', 'pj']]
+  ];
+  const match = aliases
+    .flatMap(([branchId, names]) => names.map(name => ({ branchId, name, score: normalizedWords(name).length })))
+    .filter(item => includesTerm(text, item.name))
+    .sort((a, b) => b.score - a.score)[0];
+  return match ? DEFAULT_BRANCH_DIRECTORY.find(row => clean(row['Branch ID']) === match.branchId) || null : null;
+};
+
 export function resolveCustomerLocation(value = '', businessUnit = '', branches = []) {
   const text = normalizedWords(value), unit = canonicalBusinessUnit(businessUnit);
   if (!text || text.length > 100) return null;
@@ -1567,7 +1584,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
-const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b|\b(?:alamat|address)\b.{0,25}\b(?:cawangan|branch|kedai|showroom)\b|\b(?:cawangan|branch|kedai|showroom)\b.{0,25}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|kuching|satok|samarahan|batu\s+kawa|bintulu)\b)/i.test(clean(text));
+const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b|\b(?:alamat|address)\b.{0,25}\b(?:cawangan|branch|kedai|showroom)\b|\b(?:cawangan|branch|kedai|showroom)\b.{0,25}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|kuching|satok|samarahan|batu\s+kawa|bintulu)\b|\b(?:alamat|address)\b.{0,30}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|satok|samarahan|batu\s+kawa|bintulu)\b)/i.test(clean(text));
 const asksForKnownBranchAddress = text => /(?:\b(?:boleh|blh|can)?\s*(?:bagi|beri|share|send|hantar|give)\s*(?:saya|sy|i|me)?\s*(?:alamat|address)\b|\b(?:alamat|address)\s*(?:penuh|full)?\s*(?:apa|mana|please|pls)?\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
@@ -2038,6 +2055,29 @@ const branchLabel = row => {
 export function buildBranchLocationDecision({ language = 'MS', state = {}, lead = {}, text = '', routeBusinessUnit = '', branches = [], aiIntent = null } = {}) {
   const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
   const activeBranches = activeBranchDirectory(branches, unit);
+  const canonicalBranch = canonicalPhysicalBranchFromText([text, aiIntent?.locationQuery].filter(Boolean).join(' '));
+  if (canonicalBranch) {
+    const configuredMatch = activeBranches.find(row => clean(row['Branch ID']) === clean(canonicalBranch['Branch ID']));
+    const selectedBranch = { ...(configuredMatch || {}), ...canonicalBranch, 'Business Unit': unit };
+    const location = {
+      region: canonicalRegion(selectedBranch.Region),
+      state: clean(selectedBranch.State),
+      city: clean(selectedBranch.City),
+      branchId: clean(selectedBranch['Branch ID']),
+      teamId: clean(configuredMatch?.['Team ID']),
+      resolved: true
+    };
+    const address = [branchAddress(selectedBranch), branchMapUrl(selectedBranch)].filter(Boolean).join(' ');
+    return {
+      handled: true,
+      branchLocationIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
+      productUnit: unit,
+      location,
+      text: instantCopy(language, 'BRANCH_MATCH', { area: selectedBranch.City || selectedBranch.State, branch: branchLabel(selectedBranch), address })
+    };
+  }
   const explicitLocation = resolveCustomerLocation(aiIntent?.locationQuery || text, unit, branches);
   const storedLocation = resolveCustomerLocation([lead['City or Area'], lead.State].filter(Boolean).join(' '), unit, branches);
   const selectedBranchId = clean(explicitLocation?.branchId || lead['Selected Branch ID'] || state['Selected Branch ID'] || storedLocation?.branchId);
