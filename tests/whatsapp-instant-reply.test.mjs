@@ -604,6 +604,35 @@ test('KL branch shorthand returns the canonical Petaling Jaya address even when 
   }
 });
 
+test('physical branch names override internal sales-team rows for customer-facing addresses', () => {
+  const misleadingTeams = [{
+    Active: 'TRUE', 'Business Unit': 'HANDPHONE', Region: 'SARAWAK', State: 'Sarawak', City: 'Kuching',
+    'Branch ID': 'TEAM-IPHONE-SARAWAK', 'Branch Name': 'Loan iPhone Sarawak Team',
+    'Direct Coverage Areas': 'Kuching|Sarawak'
+  }];
+  const satok = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE' },
+    lead: {}, text: 'i nak alamat kuching satok', messageType: 'text', routeBusinessUnit: 'HANDPHONE',
+    branches: misleadingTeams,
+    aiIntent: { intent: 'BRANCH_LOCATION', language: 'MS', businessUnit: 'HANDPHONE', locationQuery: 'Kuching Satok', confidence: 0.9 }
+  });
+  assert.match(satok.text, /Kuching Satok branch/i);
+  assert.match(satok.text, /LOT 442, Ground Floor Section 11/i);
+  assert.doesNotMatch(satok.text, /Loan iPhone Sarawak Team|bandar atau negeri/i);
+  assert.equal((satok.text.match(/\?/g) || []).length, 0);
+
+  const kl = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE' },
+    lead: {}, text: 'alamat kl', messageType: 'text', routeBusinessUnit: 'HANDPHONE',
+    branches: misleadingTeams,
+    aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'HANDPHONE', confidence: 0.55 }
+  });
+  assert.match(kl.text, /KL Petaling Jaya branch/i);
+  assert.match(kl.text, /15, Ground Floor 10th Mile, Lebuhraya Persekutuan/i);
+  assert.doesNotMatch(kl.text, /Loan iPhone Sarawak Team|bandar atau negeri/i);
+  assert.equal((kl.text.match(/\?/g) || []).length, 0);
+});
+
 test('a KL answer is accepted during location collection even when AI labels it GENERAL', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
