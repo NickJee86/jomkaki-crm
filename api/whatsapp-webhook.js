@@ -816,7 +816,7 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
 
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
-  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), branches = clean(values.branches);
+  const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), googleMapsUrl = clean(values.googleMapsUrl), wazeUrl = clean(values.wazeUrl), branches = clean(values.branches);
   const localizedTenure = language === 'MS'
     ? tenure.replace(/\byears?\b/i, 'tahun').replace(/\bmonths?\b/i, 'bulan')
     : tenure;
@@ -861,6 +861,7 @@ const instantCopy = (language, key, values = {}) => {
       CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
       CASH_PRICE_NEEDS_MODEL: 'Yes, a motorcycle cash purchase can be checked. The approved cash price depends on the exact model. Which model would you like me to check?',
       BRANCH_MATCH: `${branch}${area ? ` is the nearest branch for ${area}` : ''}. The full address is ${address}.`,
+      BRANCH_ADDRESS: `Sure. Here is the address for ${branch}:\n${address}${googleMapsUrl ? `\nGoogle Maps: ${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze: ${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
       BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
@@ -925,6 +926,7 @@ const instantCopy = (language, key, values = {}) => {
       CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
       CASH_PRICE_NEEDS_MODEL: 'Boleh beli motor secara tunai. Harga tunai yang diluluskan bergantung pada model yang tepat. Model mana anda mahu saya semak?',
       BRANCH_MATCH: `${branch}${area ? ` ialah cawangan paling dekat untuk kawasan ${area}` : ''}. Alamat penuh: ${address}.`,
+      BRANCH_ADDRESS: `Boleh. Ini alamat ${branch}:\n${address}${googleMapsUrl ? `\nGoogle Maps: ${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze: ${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
       BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
@@ -979,6 +981,7 @@ const instantCopy = (language, key, values = {}) => {
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
       CASH_PRICE_NEEDS_MODEL: '摩托车可以查询现金购买；获批现金价格要根据准确型号。你想查询哪一款？',
       BRANCH_MATCH: `${branch}${area ? ` 是距离 ${area} 最近的分行` : ''}。完整地址：${address}。`,
+      BRANCH_ADDRESS: `可以，这是${branch}的地址：\n${address}${googleMapsUrl ? `\nGoogle Maps：${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze：${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
       BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
@@ -2046,10 +2049,35 @@ const promotionOptionText = ({ row = {}, product = {} } = {}) => {
 
 const branchAddress = row => clean(row?.['Branch Address'] || row?.Address || row?.['Full Address'] || row?.Location);
 const branchMapUrl = row => clean(row?.['Google Maps URL'] || row?.['Map URL'] || row?.['Google Map URL']);
+const branchGoogleMapsUrl = row => {
+  const configuredUrl = branchMapUrl(row);
+  const address = branchAddress(row);
+  return configuredUrl || (address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '');
+};
+const branchWazeUrl = row => {
+  const configuredUrl = clean(row?.['Waze URL'] || row?.['Waze Link']);
+  const address = branchAddress(row);
+  return configuredUrl || (address ? `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes` : '');
+};
 const branchLabel = row => {
   const name = clean(row?.['Branch Name']);
   const locality = [clean(row?.City), clean(row?.State)].filter(Boolean).filter((value, index, values) => values.findIndex(item => normalizedWords(item) === normalizedWords(value)) === index).join(', ');
   return [name, locality && normalizedWords(locality) !== normalizedWords(name) ? locality : ''].filter(Boolean).join(' — ');
+};
+
+const customerFacingBranchLabel = (row, language = 'MS') => {
+  const names = {
+    'BR-SWK-STK': 'Kuching Satok',
+    'BR-SWK-KSM': 'Kota Samarahan',
+    'BR-SWK-BKW': 'Kuching Batu Kawa',
+    'BR-SWK-BTU': 'Bintulu',
+    'BR-WM-PJ': 'Petaling Jaya'
+  };
+  const name = names[clean(row?.['Branch ID'])];
+  if (!name) return branchLabel(row);
+  if (language === 'ZH') return `JomKaki Rider ${name} 分行`;
+  if (language === 'EN') return `the JomKaki Rider ${name} branch`;
+  return `cawangan JomKaki Rider ${name}`;
 };
 
 export function buildBranchLocationDecision({ language = 'MS', state = {}, lead = {}, text = '', routeBusinessUnit = '', branches = [], aiIntent = null } = {}) {
@@ -2067,7 +2095,9 @@ export function buildBranchLocationDecision({ language = 'MS', state = {}, lead 
       teamId: clean(configuredMatch?.['Team ID']),
       resolved: true
     };
-    const address = [branchAddress(selectedBranch), branchMapUrl(selectedBranch)].filter(Boolean).join(' ');
+    const address = branchAddress(selectedBranch);
+    const googleMapsUrl = branchGoogleMapsUrl(selectedBranch);
+    const wazeUrl = branchWazeUrl(selectedBranch);
     return {
       handled: true,
       branchLocationIntent: true,
@@ -2075,7 +2105,7 @@ export function buildBranchLocationDecision({ language = 'MS', state = {}, lead 
       nextStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
       productUnit: unit,
       location,
-      text: instantCopy(language, 'BRANCH_MATCH', { area: selectedBranch.City || selectedBranch.State, branch: branchLabel(selectedBranch), address })
+      text: instantCopy(language, 'BRANCH_ADDRESS', { branch: customerFacingBranchLabel(selectedBranch, language), address, googleMapsUrl, wazeUrl })
     };
   }
   const explicitLocation = resolveCustomerLocation(aiIntent?.locationQuery || text, unit, branches);
@@ -2084,7 +2114,10 @@ export function buildBranchLocationDecision({ language = 'MS', state = {}, lead 
   const selectedBranch = activeBranches.find(row => clean(row['Branch ID']) === selectedBranchId);
   if (selectedBranch) {
     const area = clean(explicitLocation?.city || lead['City or Area'] || lead.State || selectedBranch.City || selectedBranch.State);
-    const address = [branchAddress(selectedBranch), branchMapUrl(selectedBranch)].filter(Boolean).join(' ');
+    const address = branchAddress(selectedBranch);
+    const googleMapsUrl = branchGoogleMapsUrl(selectedBranch);
+    const wazeUrl = branchWazeUrl(selectedBranch);
+    const directAddressQuestion = asksForKnownBranchAddress(text);
     return {
       handled: true,
       branchLocationIntent: true,
@@ -2092,7 +2125,9 @@ export function buildBranchLocationDecision({ language = 'MS', state = {}, lead 
       nextStep: clean(state['Current Step']) || 'STEP_03_PRODUCT',
       productUnit: unit,
       location: explicitLocation || undefined,
-      text: instantCopy(language, 'BRANCH_MATCH', { area, branch: branchLabel(selectedBranch), address })
+      text: directAddressQuestion
+        ? instantCopy(language, 'BRANCH_ADDRESS', { branch: customerFacingBranchLabel(selectedBranch, language), address, googleMapsUrl, wazeUrl })
+        : instantCopy(language, 'BRANCH_MATCH', { area, branch: branchLabel(selectedBranch), address })
     };
   }
   const requestedRegion = canonicalRegion(explicitLocation?.region || lead.Region);
