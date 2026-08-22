@@ -38,6 +38,8 @@ Production CRM for JomKaki Rider, deployed on Vercel and connected to the existi
 - `CRM_WEST_MANAGER_PASSWORD`
 - `CRM_WEST_MANAGER_NAME` (optional)
 - `CRM_SESSION_SECRET`
+- `NOTION_API_KEY` (Sensitive; read-only Notion integration shared only with the JomKaki AI Knowledge Base)
+- `NOTION_KB_DATA_SOURCE_ID` (defaults to `92e306aa-31a4-4729-8f24-09b826c95b4d`)
 - `JOMKAKI_SPREADSHEET_ID`
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL`
 - `GOOGLE_PROJECT_NUMBER`
@@ -58,6 +60,15 @@ Production CRM for JomKaki Rider, deployed on Vercel and connected to the existi
 - `META_APP_SECRET` (Sensitive; used to verify webhook signatures)
 
 Meta webhook callback URL: `https://jomkaki-rider.vercel.app/api/whatsapp-webhook`
+
+## Approved Notion knowledge build sync
+
+- Every production build runs `npm run build`, which reads every `Approved` record from the JomKaki AI Knowledge Base and generates `api/_notion-knowledge.generated.js`.
+- The Notion integration must have read-content access and the JomKaki AI Knowledge Base database must be shared with that integration.
+- Runtime replies use the most relevant synced Notion sections together with compiled safety rules. Live catalogue, colour, storage, price, deposit, promotion, stock and image data remain in CRM / Operations Sheet.
+- If the Notion secret is unavailable during an emergency build, deployment keeps the checked-in safe snapshot instead of replacing it with empty data.
+- Run `npm run sync:notion` locally or in CI to require a successful sync. The command refuses to replace the snapshot when fewer than ten Approved pages are returned.
+- Sync warnings include duplicate knowledge IDs, thin pages and conflicting Consent trigger policies. Resolve warnings in Notion before calling a release production-ready.
 
 Current Meta staging status (11 August 2026):
 
@@ -138,3 +149,4 @@ Drag this entire folder into the existing `jomkaki-crm` Vercel project. Do not u
 - The business-aware Make blueprints are prepared and tested locally. Keep new or replaced scenarios OFF until their Google/OpenAI connections are reselected after import and one synthetic run passes.
 
 See `./JomKaki External Integration Activation Runbook.md` for the prepared WhatsApp Cloud, SharePoint and LMSPRO activation checklists. The provider-neutral LMSPRO field and document readiness adapter is in `api/_lmspro.js`; it performs no network request and remains disabled until the official vendor contract is approved.
+
