@@ -31,6 +31,11 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Main motor brands are Yamaha, Honda, Modenas and BMW, subject to active approved catalogue records.',
     'Published operating hours are 8:30 AM to 5:30 PM; operating days and public-holiday rules are not yet confirmed.',
     'Confirmed service areas include Kuala Lumpur, Selangor, Klang Valley, Seremban, Nilai, Penang, Kuching, Serian, Sri Aman, Sibu, Bintulu and Miri.',
+    'Kuching Satok branch: LOT 442, Ground Floor Section 11, KTLD, Jln Kulas, Kampung Bandarshah, 93400 Kuching, Sarawak.',
+    'Kuching Kota Samarahan branch: SL No.10 Lots 2280 & 3792, MTLD Desa Ilmu Commercial Kota Samarahan, 94300 Kuching, Sarawak.',
+    'Kuching Batu Kawa branch: Ground Floor, Sublot 2, 15 Shoppe, Jalan Batu Kawa, Taman Desa Wira, 93250 Kuching, Sarawak.',
+    'Bintulu branch: Unit No. A-L1-11, SK One Garden City, Jln Sultan Iskandar, 97000 Bintulu, Sarawak.',
+    'KL Petaling Jaya branch: 15, Ground Floor 10th Mile, Lebuhraya Persekutuan, Sungai Way Free Trade Industrial Zone, 47300 Petaling Jaya, Selangor.',
     'Delivery may be arranged outside physical-branch areas, but never promise a date, fee or free delivery.'
   ]),
   conversation: freezeList([

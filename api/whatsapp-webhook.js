@@ -619,6 +619,31 @@ const stateAliases = [
 ];
 const includesTerm = (text, term) => (` ${text} `).includes(` ${normalizedWords(term)} `);
 
+const DEFAULT_BRANCH_DIRECTORY = Object.freeze([
+  Object.freeze({ 'Branch ID': 'BR-SWK-STK', 'Branch Name': 'Kuching Satok branch', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Kuching', 'Direct Coverage Areas': 'Satok|Jalan Kulas|Kampung Bandarshah', 'Branch Address': 'LOT 442, Ground Floor Section 11, KTLD, Jln Kulas, Kampung Bandarshah, 93400 Kuching, Sarawak', Active: 'TRUE' }),
+  Object.freeze({ 'Branch ID': 'BR-SWK-KSM', 'Branch Name': 'Kuching Kota Samarahan branch', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Kota Samarahan', 'Direct Coverage Areas': 'Kota Samarahan|Samarahan|Desa Ilmu', 'Branch Address': 'SL No.10 Lots 2280 & 3792, MTLD Desa Ilmu Commercial Kota Samarahan, 94300 Kuching, Sarawak', Active: 'TRUE' }),
+  Object.freeze({ 'Branch ID': 'BR-SWK-BKW', 'Branch Name': 'Kuching Batu Kawa branch', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Kuching', 'Direct Coverage Areas': 'Batu Kawa|Taman Desa Wira|15 Shoppe', 'Branch Address': 'Ground Floor, Sublot 2, 15 Shoppe, Jalan Batu Kawa, Taman Desa Wira, 93250 Kuching, Sarawak', Active: 'TRUE' }),
+  Object.freeze({ 'Branch ID': 'BR-SWK-BTU', 'Branch Name': 'Bintulu branch', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Bintulu', 'Direct Coverage Areas': 'Bintulu|SK One Garden City', 'Branch Address': 'Unit No. A-L1-11, SK One Garden City, Jln Sultan Iskandar, 97000 Bintulu, Sarawak', Active: 'TRUE' }),
+  Object.freeze({ 'Branch ID': 'BR-WM-PJ', 'Branch Name': 'KL Petaling Jaya branch', Region: 'WEST_MALAYSIA', State: 'Selangor', City: 'Petaling Jaya', 'Direct Coverage Areas': 'Kuala Lumpur|KL|Petaling Jaya|PJ|Selangor|Klang Valley', 'Branch Address': '15, Ground Floor 10th Mile, Lebuhraya Persekutuan, Sungai Way Free Trade Industrial Zone, 47300 Petaling Jaya, Selangor', Active: 'TRUE' })
+]);
+
+const activeBranchDirectory = (branches = [], businessUnit = '') => {
+  const unit = canonicalBusinessUnit(businessUnit) || 'MOTOR';
+  const liveRows = [];
+  let hasConfiguredRows = false;
+  for (const row of branches) {
+    const rowUnit = canonicalBusinessUnit(row['Business Unit']);
+    if (rowUnit && rowUnit !== unit) continue;
+    hasConfiguredRows = true;
+    if (truth(row.Active)) liveRows.push({ ...row, 'Business Unit': rowUnit || unit });
+  }
+  // The configured branch sheet remains authoritative whenever it has rows.
+  // The bundled directory is only a continuity fallback for an empty/unavailable
+  // sheet so it cannot silently replace existing branch IDs or routing teams.
+  if (hasConfiguredRows) return liveRows;
+  return DEFAULT_BRANCH_DIRECTORY.map(row => ({ ...row, 'Business Unit': unit }));
+};
+
 export function resolveCustomerLocation(value = '', businessUnit = '', branches = []) {
   const text = normalizedWords(value), unit = canonicalBusinessUnit(businessUnit);
   if (!text || text.length > 100) return null;
@@ -637,7 +662,7 @@ export function resolveCustomerLocation(value = '', businessUnit = '', branches 
   const { region, state, alias } = locationMatch;
   const area = ({ kch: 'kuching', kk: 'kota kinabalu', kl: 'kuala lumpur', pj: 'petaling jaya', jb: 'johor bahru' })[normalizedWords(alias)] || alias;
   const resolvedAreaText = normalizedWords(area);
-  const active = branches.filter(branch => truth(branch.Active) && canonicalBusinessUnit(branch['Business Unit']) === unit);
+  const active = activeBranchDirectory(branches, unit);
   const directMatches = active.map(branch => {
     const terms = [branch['Branch Name'], branch.City, ...clean(branch['Direct Coverage Areas']).split('|')].filter(Boolean);
     const score = Math.max(0, ...terms.filter(term => includesTerm(text, term) || includesTerm(resolvedAreaText, term) || includesTerm(normalizedWords(term), area)).map(term => normalizedWords(term).length));
@@ -1542,7 +1567,7 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
-const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b)/i.test(clean(text));
+const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b|\b(?:alamat|address)\b.{0,25}\b(?:cawangan|branch|kedai|showroom)\b|\b(?:cawangan|branch|kedai|showroom)\b.{0,25}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|kuching|satok|samarahan|batu\s+kawa|bintulu)\b)/i.test(clean(text));
 const asksForKnownBranchAddress = text => /(?:\b(?:boleh|blh|can)?\s*(?:bagi|beri|share|send|hantar|give)\s*(?:saya|sy|i|me)?\s*(?:alamat|address)\b|\b(?:alamat|address)\s*(?:penuh|full)?\s*(?:apa|mana|please|pls)?\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
@@ -2012,7 +2037,7 @@ const branchLabel = row => {
 
 export function buildBranchLocationDecision({ language = 'MS', state = {}, lead = {}, text = '', routeBusinessUnit = '', branches = [], aiIntent = null } = {}) {
   const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
-  const activeBranches = branches.filter(row => truth(row.Active) && canonicalBusinessUnit(row['Business Unit']) === unit);
+  const activeBranches = activeBranchDirectory(branches, unit);
   const explicitLocation = resolveCustomerLocation(aiIntent?.locationQuery || text, unit, branches);
   const storedLocation = resolveCustomerLocation([lead['City or Area'], lead.State].filter(Boolean).join(' '), unit, branches);
   const selectedBranchId = clean(explicitLocation?.branchId || lead['Selected Branch ID'] || state['Selected Branch ID'] || storedLocation?.branchId);

@@ -589,6 +589,21 @@ test('a saved KL location makes a plain address follow-up return the full branch
   assert.equal((decision.text.match(/\?/g) || []).length, 0);
 });
 
+test('KL branch shorthand returns the canonical Petaling Jaya address even when the live branch sheet is temporarily empty', () => {
+  for (const text of ['branch kl kat mana', 'branch kl', 'alamat branch kl']) {
+    const decision = buildInstantSalesDecision({
+      state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+      lead: {}, text, messageType: 'text', routeBusinessUnit: 'MOTOR', branches: [],
+      aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.6 }
+    });
+    assert.equal(decision.branchLocationIntent, true, text);
+    assert.match(decision.text, /KL Petaling Jaya branch/i, text);
+    assert.match(decision.text, /15, Ground Floor 10th Mile, Lebuhraya Persekutuan/i, text);
+    assert.doesNotMatch(decision.text, /bandar atau negeri|bergantung pada kawasan|teruskan saja/i, text);
+    assert.equal((decision.text.match(/\?/g) || []).length, 0, text);
+  }
+});
+
 test('a KL answer is accepted during location collection even when AI labels it GENERAL', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
