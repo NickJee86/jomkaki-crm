@@ -794,7 +794,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
       OTHER_MODELS_EXHAUSTED: 'Those are the other active options I can confirm from the current approved catalogue. If you have another model in mind, send me its name or a photo and I will still arrange a branch check for you.',
       OTHER_MODELS_CHECK: 'Yes, I can check other motorcycles too. Do you prefer a scooter, cub/moped, sport bike, or would you like suggestions based on a comfortable monthly budget?',
-      AVAILABLE_MODELS: `Those are only a few popular examples, not the full catalogue. Other options I can check include ${models}. Which type do you prefer, or what monthly budget is comfortable for you?`,
+      AVAILABLE_MODELS: `The motorcycle models available now are ${models}. Which one would you like me to check?`,
       MOTOR_CATEGORY_OPTIONS: `Yes, I can check ${category} options. Approved choices currently include ${models}. Is there a specific model you prefer, or what monthly budget is comfortable for you?`,
       MOTOR_CATEGORY_CHECK: `Yes, I can help check a ${category}. If your preferred choice is not on the current list yet, I will still ask the branch to check it for you. Do you have a model, photo, or monthly budget in mind?`,
       UNLISTED_PRODUCT_CHECK: `Yes, I can check ${model || 'that choice'} for you. Even if it is not on the current list yet, I will still ask the branch to confirm the exact model and plan. Can you send the full model name or a photo?`,
@@ -809,7 +809,7 @@ const instantCopy = (language, key, values = {}) => {
       SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
       SHOP_LOAN_MODEL: 'Which motorcycle model would you like to check?',
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
-      HELP: 'All right—continue with your question. I will answer from the current information or arrange a branch check when confirmation is needed.',
+      HELP: 'Sure. Tell me what you would like to know and I will check it for you.',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
       TENURE_QUOTE: `For ${brand} ${model}, the ${localizedTenure.replace(/\s+(year|month)s?$/i, '-$1')} instalment is RM${amount} per month, subject to branch confirmation.`,
       TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
@@ -818,7 +818,7 @@ const instantCopy = (language, key, values = {}) => {
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
       CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
       CASH_PRICE_NEEDS_MODEL: 'Yes, a motorcycle cash purchase can be checked. The approved cash price depends on the exact model. Which model would you like me to check?',
-      BRANCH_MATCH: `For ${area}, the recorded branch or service coverage is ${branch}. ${address}`,
+      BRANCH_MATCH: `${branch}${area ? ` is the nearest branch for ${area}` : ''}. The full address is ${address}.`,
       BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
       BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
@@ -830,6 +830,7 @@ const instantCopy = (language, key, values = {}) => {
       PROMOTION_MODEL: 'Which model would you like me to check in detail?',
       HANDPHONE_DEPOSIT_POLICY: `For phones, I can only share the approved monthly instalment. The deposit and selling price are not quoted to customers.`,
       INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using the Hire Purchase method. The actual monthly instalment depends on the approved model, deposit and tenure.',
+      DRIVING_LICENCE_ELIGIBILITY: 'Yes, you may start the application even if you do not have a driving licence yet. Final eligibility is still subject to checking. If you are ready, I can help start the application check.',
       COLOUR_OPTIONS: `For ${brand} ${model}, the approved catalogue colours are ${colours}.`,
       STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}.`,
       STORAGE_AVAILABLE: `Yes, ${brand} ${model} is available in ${requestedStorage}. The approved storage options are ${storage}.`,
@@ -847,9 +848,9 @@ const instantCopy = (language, key, values = {}) => {
       NAME_RETRY: 'Maaf, boleh saya tahu nama anda supaya saya boleh teruskan semakan?',
       LOCATION: `Salam kenal${name ? `, ${name}` : ''}. Anda tinggal di bandar atau negeri mana?`,
       LOCATION_RETRY: 'Boleh beritahu anda sekarang tinggal di bandar atau negeri mana?',
-      PRODUCT: `Terima kasih${location ? `, lokasi ${location} sudah dicatat` : ''}. Anda sedang cari motor atau telefon? Boleh terus beritahu model yang anda mahu.`,
+      PRODUCT: `Baik${location ? `, saya dah catat ${location}` : ''}. Anda nak cari motor atau telefon? Kalau dah ada model, terus bagi nama model ya.`,
       MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
-      MOTOR_MODEL: 'Baik, motor. Ada model tertentu yang anda sedang cari? Kalau belum pasti, beritahu bajet bulanan yang selesa dan saya boleh cadangkan beberapa pilihan.',
+      MOTOR_MODEL: 'Baik, nak cari motor ya. Ada model yang anda minat, atau mahu saya cadangkan ikut bajet bulanan?',
       HANDPHONE_MODEL: 'Baik, telefon. Model mana yang anda sedang cari? Kalau belum pasti, beritahu bajet bulanan yang selesa dan saya boleh cadangkan beberapa pilihan.',
       RETURNING_GREETING: `Hai${name ? `, ${name}` : ''}. Selamat kembali ke JomKaki Rider. Apa yang anda mahu saya semak hari ini?`,
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
@@ -857,7 +858,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
       OTHER_MODELS_EXHAUSTED: 'Itulah pilihan aktif lain yang saya boleh sahkan daripada katalog semasa. Kalau anda ada model lain dalam fikiran, hantar nama atau gambarnya dan saya tetap akan bantu minta cawangan semak.',
       OTHER_MODELS_CHECK: 'Boleh, saya boleh semak motor lain juga. Anda lebih suka skuter, kapcai/moped, motor sport, atau mahu saya cadangkan ikut bajet bulanan yang selesa?',
-      AVAILABLE_MODELS: `Itu cuma beberapa pilihan popular, bukan semua model yang ada. Pilihan lain yang saya boleh semak termasuk ${models}. Anda suka jenis apa, atau bajet bulanan berapa yang selesa?`,
+      AVAILABLE_MODELS: `Model motor yang ada sekarang ialah ${models}. Yang mana satu anda mahu saya semak?`,
       MOTOR_CATEGORY_OPTIONS: `Ada pilihan ${category} yang boleh saya semak. Antara pilihan diluluskan sekarang ialah ${models}. Anda ada model tertentu, atau bajet bulanan berapa yang selesa?`,
       MOTOR_CATEGORY_CHECK: `Boleh, ${category} pun saya boleh bantu semak. Kalau pilihan yang anda mahu belum ada dalam senarai semasa, saya tetap akan minta cawangan semak. Anda ada model, gambar atau bajet bulanan yang sesuai?`,
       UNLISTED_PRODUCT_CHECK: `Boleh, saya akan semak ${model || 'pilihan itu'} untuk anda. Walaupun belum ada dalam senarai semasa, saya tetap akan minta cawangan sahkan model dan pelannya. Boleh hantar nama penuh model atau gambar?`,
@@ -872,7 +873,7 @@ const instantCopy = (language, key, values = {}) => {
       SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
       SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
-      HELP: 'Baik, teruskan saja dengan soalan anda. Saya akan jawab berdasarkan maklumat semasa atau minta cawangan semak jika perlukan pengesahan.',
+      HELP: 'Boleh. Beritahu saja apa yang anda mahu tahu, saya semak untuk anda.',
       DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; dokumen yang masih kurang boleh dihantar kemudian.',
       TENURE_QUOTE: `Untuk ${brand} ${model}, ansuran ${localizedTenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       TENURE_UNAVAILABLE: `Ansuran ${localizedTenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
@@ -881,7 +882,7 @@ const instantCopy = (language, key, values = {}) => {
       CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
       CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
       CASH_PRICE_NEEDS_MODEL: 'Boleh beli motor secara tunai. Harga tunai yang diluluskan bergantung pada model yang tepat. Model mana anda mahu saya semak?',
-      BRANCH_MATCH: `Untuk kawasan ${area}, cawangan atau liputan servis yang direkodkan ialah ${branch}. ${address}`,
+      BRANCH_MATCH: `${branch}${area ? ` ialah cawangan paling dekat untuk kawasan ${area}` : ''}. Alamat penuh: ${address}.`,
       BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
       BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
@@ -893,6 +894,7 @@ const instantCopy = (language, key, values = {}) => {
       PROMOTION_MODEL: 'Model mana satu anda mahu saya semak dengan lebih lanjut?',
       HANDPHONE_DEPOSIT_POLICY: `Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Deposit dan harga jualan tidak diberikan kepada pelanggan.`,
       INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran bulanan sebenar ikut model, deposit dan tempoh yang diluluskan.',
+      DRIVING_LICENCE_ELIGIBILITY: 'Boleh mula memohon walaupun belum ada lesen memandu. Kelayakan akhir masih tertakluk pada semakan. Kalau anda mahu, saya boleh bantu mulakan semakan permohonan.',
       COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang direkodkan dalam katalog diluluskan ialah ${colours}.`,
       STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}.`,
       STORAGE_AVAILABLE: `Ada. ${brand} ${model} tersedia dalam ${requestedStorage}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
@@ -916,7 +918,7 @@ const instantCopy = (language, key, values = {}) => {
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
       OTHER_MODELS_EXHAUSTED: '目前获批目录中可确认的其他在售选择已经列完。如果你心里还有别的型号，请发型号名称或照片给我，我仍然可以安排分行查询。',
       OTHER_MODELS_CHECK: '可以，我也能帮你查询其他摩托车。你比较喜欢踏板车、弯梁车、跑车款，还是要我按照舒服的月供预算推荐？',
-      AVAILABLE_MODELS: `那些只是几款热门例子，不是全部车型。我还可以查询 ${models}。你喜欢哪种类型，或舒服的月供预算大约是多少？`,
+      AVAILABLE_MODELS: `目前有的摩托车型是：${models}。你想先查看哪一款？`,
       MOTOR_CATEGORY_OPTIONS: `可以，我能查询${category}。目前获批的选择包括 ${models}。你有指定型号，还是希望月供控制在多少？`,
       MOTOR_CATEGORY_CHECK: `可以，我能帮你查询${category}。即使你想要的款式暂时不在现有清单里，我也会请分行继续确认。你有型号、照片或月供预算吗？`,
       UNLISTED_PRODUCT_CHECK: `可以，我会帮你查询 ${model || '这款产品'}。即使暂时不在现有清单里，我也会请分行确认准确型号和方案。可以发完整型号或照片吗？`,
@@ -931,13 +933,14 @@ const instantCopy = (language, key, values = {}) => {
       SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
       SHOP_LOAN_MODEL: '你想查询哪一款摩托？',
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
-      HELP: '好的，请直接继续你的问题。我会根据现有资料回答；需要确认时，我会安排分行查询。',
+      HELP: '可以。请直接告诉我你想了解什么，我帮你查询。',
       DOCUMENT: '文件已经收到。我正在核对这份申请的所有文件，目前不需要重新发送；如果还有缺少，我会清楚告诉您。',
       CASH_PRICE_NEEDS_MODEL: '摩托车可以查询现金购买；获批现金价格要根据准确型号。你想查询哪一款？',
-      BRANCH_MATCH: `${area} 所记录的分行或服务范围是 ${branch}。${address}`,
+      BRANCH_MATCH: `${branch}${area ? ` 是距离 ${area} 最近的分行` : ''}。完整地址：${address}。`,
       BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
       BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
+      DRIVING_LICENCE_ELIGIBILITY: '还没有驾照也可以先申请，最终资格仍需审核。如果你准备好了，我可以帮你开始申请审核。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
       STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
       STORAGE_AVAILABLE: `有，${brand} ${model} 提供 ${requestedStorage}。已获批容量有：${storage}。`,
@@ -1134,14 +1137,14 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, appli
     'Answer only what the customer asked, then give one useful next action. Do not dump every model, tenure, document or policy unless the customer explicitly asks for a list.',
     'Never state, estimate or guess a cash price, selling price or deposit. Never invent a monthly instalment. If no approved monthly amount is supplied, say you can check it and ask only the one detail needed.',
     'A product, model or category missing from the approved catalogue is not a rejection. Say it can still be checked with the branch, do not claim it is unavailable, and ask at most one useful clue such as the full model, a photo or monthly budget.',
-    'Never promise loan approval, stock availability, document completeness, credit-check completion or application status unless that fact appears in the context.',
+    'Never promise loan approval, document completeness, credit-check completion or application status unless that fact appears in the context. An Active catalogue row with Approval Status APPROVED is available stock and must be described as available without asking the branch to reconfirm it.',
     'For a loan application, the minimum documents are MyKad front and back plus latest payslip or EPF statement. Consent for CTOS/CCRIS is required after minimum documents pass checking and before credit check or LMS submission.',
     'If the customer asks for a human, manager or staff, do not answer here because the system handles that route separately.',
     'Continue from the current conversation instead of restarting the name, location and product questions.',
     'Use CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS and RECENT_MESSAGES as turn memory. Never repeat a question that the customer already answered or that is already recorded. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
     'Treat GROUNDED_DRAFT, BUSINESS_RULES and KNOWLEDGE_RESULTS as the only factual source. Preserve every useful grounded fact, remove repetition, and never introduce a price, product option, status or policy that is absent from those sources.',
     'When the customer changes topic, answer the new topic first and keep the previous application stage in memory. Choose exactly one next best action; ask no more than one main question.',
-    'If the customer asks whether the displayed models are the only choices, clearly say they are only a few popular examples and that more models can be checked; do not answer with a generic request for a model name.'
+    'If the customer asks what models are available or asks for a list, return every Active and Approved model in the relevant catalogue. Never call the list a few popular examples, never hide models merely because regional pricing is incomplete, and never say an approved model may be unavailable.'
   ].join(' ');
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
   const model = clean(process.env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-4.1-mini');
@@ -1168,6 +1171,7 @@ const responseOutputText = result => {
 const AI_INTENTS = Object.freeze([
   'GREETING', 'PROVIDE_NAME', 'PROVIDE_LOCATION', 'BRANCH_LOCATION', 'PROMOTION', 'MODEL_SELECTION', 'UNLISTED_PRODUCT',
   'AVAILABLE_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE', 'INTEREST_RATE',
+  'DRIVING_LICENCE_ELIGIBILITY',
   'PRODUCT_COLOUR', 'PRODUCT_STORAGE',
   'COMBINED_APPLICATION',
   'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS', 'PAYSLIP_PERIOD', 'APPLY', 'SHOP_LOAN', 'PROCESSING_TIME', 'FOLLOW_UP_TIME',
@@ -1215,6 +1219,7 @@ export function detectCustomerQuestionIntents(value = '') {
   if (asksForCashPrice(text)) add('CASH_PRICE');
   if (requestedMonthlyTenure(text)) add('TENURE');
   if (asksForInterestRate(text)) add('INTEREST_RATE');
+  if (asksAboutDrivingLicenceEligibility(text)) add('DRIVING_LICENCE_ELIGIBILITY');
   if (asksForProductColour(text)) add('PRODUCT_COLOUR');
   if (asksForProductStorage(text)) add('PRODUCT_STORAGE');
   if (asksForCombinedApplication(text)) add('COMBINED_APPLICATION');
@@ -1396,6 +1401,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     'Any wording that asks for alternatives to the current product must be OTHER_MODELS, regardless of word order, repeated nouns, shorthand, or grammar, including selain dari model ni ada apa model lagi, model apa lagi ada, and ada lagi model tak. This remains true during the document or application stage. The latest customer question overrides a stale DOCUMENT_REQUIREMENTS, DOCUMENT_STATUS, APPLY, onboarding, or prior-product intent. Never answer an alternatives question by requesting documents or promising a manager reply.',
     'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
+    'DRIVING_LICENCE_ELIGIBILITY means the customer asks whether an application or purchase can start without a driving licence. The approved answer is yes: the application may start, while final eligibility remains subject to checking.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
     'BRANCH_LOCATION means the customer asks where a branch, shop, showroom or nearest service point is. It must never be classified as PROVIDE_LOCATION or MODEL_SELECTION, even when a product was discussed in the previous turn.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
@@ -1537,12 +1543,23 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
 const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b)/i.test(clean(text));
+const asksForKnownBranchAddress = text => /(?:\b(?:boleh|blh|can)?\s*(?:bagi|beri|share|send|hantar|give)\s*(?:saya|sy|i|me)?\s*(?:alamat|address)\b|\b(?:alamat|address)\s*(?:penuh|full)?\s*(?:apa|mana|please|pls)?\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
 const followsPendingBranchCheck = state => /(?:semak|pengesahan|confirmation|check).*(?:cawangan|branch)|(?:cawangan|branch).*(?:semak|pengesahan|confirmation|check)|belum ada dalam sistem/i.test(clean(state['Last AI Message']));
 const asksForDeposit = text => /(?:\bdeposit\b|\bdepo\b|down\s*payment|downpayment|duit\s*muka|bayaran\s*muka|首付|头期)/i.test(clean(text));
 const asksForMonthlyInstalment = text => /(?:\b(?:ansuran|bayaran)\s*(?:bulanan|sebulan)\b|\bberapa\s*(?:sebulan|bulanannya?)\b|\bsebulan\s*berapa\b|\bmonthly\s*(?:instalment|installment|payment|berapa|how much)?\b|每月多少|月供多少|多少月供)/i.test(clean(text));
 const asksForInterestRate = text => /(?:\b(?:kadar|faedah|interest)\b.{0,25}\b(?:loan|pinjaman|kedai|berapa|peratus|percent|%|setahun|tahun)\b|\b(?:loan|pinjaman|kedai)\b.{0,25}\b(?:kadar|faedah|interest|peratus|percent|%)\b|利率|年利率)/i.test(clean(text));
+const asksAboutDrivingLicenceEligibility = value => {
+  const raw = clean(value), text = normalizedWords(raw);
+  if (!text) return false;
+  if (/(?:没有|没|未有).{0,8}(?:驾照|驾驶执照).{0,12}(?:申请|贷款|买|购买|可以|能)|(?:驾照|驾驶执照).{0,8}(?:没有|没|未有).{0,12}(?:申请|贷款|买|购买|可以|能)/u.test(raw)) return true;
+  const hasLicence = /\b(?:lesen(?:\s+memandu)?|driving\s+licen[cs]e|licen[cs]e)\b/.test(text);
+  const missingLicence = /\b(?:takde|tak\s+ada|tiada|belum\s+ada|blm\s+ada|x\s+ada|without|no|dont\s+have|do\s+not\s+have)\b.{0,24}\b(?:lesen|licen[cs]e)\b/.test(text)
+    || /\b(?:lesen|licen[cs]e)\b.{0,24}\b(?:takde|tak\s+ada|tiada|belum\s+ada|blm\s+ada|x\s+ada|without|no|dont\s+have|do\s+not\s+have)\b/.test(text);
+  const asksEligibility = /\b(?:boleh|dapat|dpt|can|may|apply|mohon|permohonan|loan|pinjaman|beli|buy|ambil)\b/.test(text);
+  return hasLicence && missingLicence && asksEligibility;
+};
 const asksForProductColour = text => /(?:\b(?:warna|colour|color|colours|colors)\b|什么颜色|有哪些颜色|颜色)/i.test(clean(text));
 const asksForProductStorage = text => /(?:\b(?:\d+\s*)?(?:gb|tb)\b|\b(?:berapa|brp|what|which|available|ada)\s*(?:gb|tb)\b|\b(?:storage|capacity|kapasiti|memory|memori)\b|多少\s*(?:gb|tb)|什么容量|容量)/i.test(clean(text));
 const requestedProductStorage = text => {
@@ -1770,7 +1787,7 @@ export function matchInstantProduct(text, catalogs = []) {
   const query = normalizedWords(text), compactQuery = compactModelText(text), queryCandidates = modelQueryCandidates(text);
   const requiredIphoneTier = requestedIphoneTier(text);
   if (!query || !compactQuery) return { product: null, options: [], ambiguous: false };
-  const activeCatalog = catalogs.filter(row => truth(row.Active));
+  const activeCatalog = catalogs.filter(approvedCatalogRow);
   const aliasModels = new Map();
   for (const row of activeCatalog) {
     const modelKey = productMatchKey(row);
@@ -1908,7 +1925,7 @@ const instantRate = (product, pricingRows = [], unit = '', region = '', requeste
 
 const activeMotorPromotions = (catalogRows = [], pricingRows = [], region = '', today = new Date().toISOString().slice(0, 10)) => {
   const normalizedRegion = canonicalRegion(region);
-  const products = new Map(catalogRows.filter(row => truth(row.Active)).map(row => [clean(row['Catalog ID']), row]));
+  const products = new Map(catalogRows.filter(approvedCatalogRow).map(row => [clean(row['Catalog ID']), row]));
   const promotions = pricingRows.filter(row => {
     const zone = clean(row['Price Zone']).toUpperCase();
     const appliesToRegion = !normalizedRegion || canonicalRegion(zone) === normalizedRegion || ['ALL_BRANCHES', 'ALL'].includes(zone);
@@ -1989,23 +2006,24 @@ export function buildBranchLocationDecision({ language = 'MS', state = {}, lead 
   };
 }
 
-const availableModelSuggestions = (catalogRows = [], pricingRows = [], unit = '', region = '', limit = 3) => catalogRows
+const availableModelSuggestions = (catalogRows = [], _pricingRows = [], unit = '', _region = '', limit = 3) => catalogRows
   .filter(row => {
     const rowUnit = clean(row.__businessUnit).toUpperCase() || canonicalBusinessUnit(unit);
-    return rowUnit === canonicalBusinessUnit(unit) && instantRate(row, pricingRows, rowUnit, region);
+    return rowUnit === canonicalBusinessUnit(unit) && approvedCatalogRow(row);
   })
-  .filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
+  .filter((row, index, rows) => rows.findIndex(item => productMatchKey(item) === productMatchKey(row)) === index)
   .slice(0, limit)
-  .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim());
+  .map(customerProductLabel)
+  .filter(Boolean);
 
 const approvedCatalogSuggestions = (catalogRows = [], unit = '', excludedModel = '', limit = 4) => catalogRows
   .filter(row => {
     const rowUnit = clean(row.__businessUnit).toUpperCase() || canonicalBusinessUnit(unit);
     return rowUnit === canonicalBusinessUnit(unit) && approvedCatalogRow(row) && normalizedWords(row.Model) !== normalizedWords(excludedModel);
   })
-  .filter((row, index, rows) => rows.findIndex(item => normalizedWords(item.Model) === normalizedWords(row.Model)) === index)
+  .filter((row, index, rows) => rows.findIndex(item => productMatchKey(item) === productMatchKey(row)) === index)
   .slice(0, limit)
-  .map(row => `${clean(row.Brand)} ${clean(row.Model)}`.trim())
+  .map(customerProductLabel)
   .filter(Boolean);
 
 const previouslySuggestedModelKeys = (state = {}, catalogRows = []) => {
@@ -2049,7 +2067,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const allCatalogs = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
-  ];
+  ].filter(approvedCatalogRow);
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
   const selectedVariant = normalizedWords(state['Selected Product Variant']);
@@ -2065,13 +2083,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const suggestionUnit = productUnitFromText(text, '') || fallbackUnit || canonicalBusinessUnit(aiIntent?.businessUnit) || 'MOTOR';
     const suggestionCatalog = allCatalogs.filter(row => row.__businessUnit === suggestionUnit);
     const suggestionPricing = suggestionUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-    const previousSuggestionKeys = previouslySuggestedModelKeys(state, suggestionCatalog);
+    const fullCatalogueRequested = interpretedIntent === 'AVAILABLE_MODELS' || (asksForAvailableModels(text) && !asksForOtherModels(text));
+    const previousSuggestionKeys = fullCatalogueRequested ? new Set() : previouslySuggestedModelKeys(state, suggestionCatalog);
     const notPreviouslySuggested = label => !previousSuggestionKeys.has(normalizedWords(label));
-    const pricedSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, Math.max(8, suggestionCatalog.length))
+    const availableSuggestions = availableModelSuggestions(suggestionCatalog, suggestionPricing, suggestionUnit, lead.Region || routeRegion, Math.max(8, suggestionCatalog.length))
       .filter(label => (!selectedModel || !normalizedWords(label).endsWith(selectedModel)) && notPreviouslySuggested(label))
-      .slice(0, 4);
-    const suggestions = pricedSuggestions.length
-      ? pricedSuggestions
+      .slice(0, fullCatalogueRequested ? Math.max(1, suggestionCatalog.length) : 4);
+    const fullCatalogueSuggestions = approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, '', Math.max(1, suggestionCatalog.length));
+    const suggestions = fullCatalogueRequested
+      ? fullCatalogueSuggestions
+      : availableSuggestions.length
+      ? availableSuggestions
       : approvedCatalogSuggestions(suggestionCatalog, suggestionUnit, selectedModel, Math.max(8, suggestionCatalog.length))
         .filter(notPreviouslySuggested)
         .slice(0, 4);
@@ -2119,7 +2141,21 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       text: instantCopy(language, 'COMBINED_APPLICATION')
     };
   }
-  if (interpretedIntent === 'BRANCH_LOCATION' || asksForBranchLocation(text)) {
+  // Eligibility questions must be resolved before the broad APPLY/document
+  // rules; otherwise words such as "apply" turn a clear licence question into
+  // an unrelated document checklist.
+  if (interpretedIntent === 'DRIVING_LICENCE_ELIGIBILITY' || asksAboutDrivingLicenceEligibility(text)) {
+    return {
+      handled: true,
+      drivingLicenceEligibilityIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: step || 'STEP_03_PRODUCT',
+      productUnit: explicitUnit || fallbackUnit || 'MOTOR',
+      text: instantCopy(language, 'DRIVING_LICENCE_ELIGIBILITY')
+    };
+  }
+  const hasKnownLocation = !!clean(lead['Selected Branch ID'] || lead['City or Area'] || lead.State || state['Selected Branch ID']);
+  if (interpretedIntent === 'BRANCH_LOCATION' || asksForBranchLocation(text) || (hasKnownLocation && asksForKnownBranchAddress(text))) {
     return buildBranchLocationDecision({ language, state, lead, text, routeBusinessUnit: explicitUnit || fallbackUnit || routeBusinessUnit, branches, aiIntent });
   }
   if (documentRequirementQuestion) {
@@ -2181,7 +2217,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       text: [continuation.text, needsModelQuestion ? instantCopy(language, 'PROMOTION_MODEL') : ''].filter(Boolean).join(' ')
     };
   }
-  if (step === 'STEP_02_LOCATION' && (!interpretedIntent || interpretedIntent === 'PROVIDE_LOCATION')) {
+  if (step === 'STEP_02_LOCATION') {
     const location = resolveCustomerLocation(aiIntent?.locationQuery || text, productUnitFromText(text, routeBusinessUnit), branches);
     if (location) return {
       handled: true,
@@ -2483,7 +2519,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       ? { handled: true, nextStep: 'STEP_02_LOCATION', customerName: name, text: instantCopy(language, 'LOCATION', { name }) }
       : { handled: true, nextStep: 'STEP_01_NAME', text: instantCopy(language, 'NAME_RETRY') };
   }
-  if (step === 'STEP_02_LOCATION' && (!interpretedIntent || interpretedIntent === 'PROVIDE_LOCATION')) {
+  if (step === 'STEP_02_LOCATION') {
     const location = resolveCustomerLocation(aiIntent?.locationQuery || text, productUnitFromText(text, routeBusinessUnit), branches);
     return location
       ? { handled: true, nextStep: 'STEP_03_PRODUCT', location, text: instantCopy(language, 'PRODUCT', { location: location.city || location.state }) }
@@ -2496,7 +2532,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
 const MULTI_QUESTION_INTENTS = new Set([
   'BRANCH_LOCATION', 'PROMOTION', 'AVAILABLE_MODELS', 'OTHER_MODELS', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'CASH_PRICE', 'TENURE',
   'INTEREST_RATE', 'PRODUCT_COLOUR', 'PRODUCT_STORAGE', 'COMBINED_APPLICATION', 'DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS',
-  'PAYSLIP_PERIOD', 'SHOP_LOAN', 'PROCESSING_TIME', 'BUDGET'
+  'DRIVING_LICENCE_ELIGIBILITY', 'PAYSLIP_PERIOD', 'SHOP_LOAN', 'PROCESSING_TIME', 'BUDGET'
 ]);
 
 const intentProbeText = ({ intent, originalText = '', state = {}, aiIntent = null } = {}) => {
@@ -2512,6 +2548,7 @@ const intentProbeText = ({ intent, originalText = '', state = {}, aiIntent = nul
     CASH_PRICE: `${product} harga cash berapa`,
     TENURE: `${product} ${tenure || 'berapa tahun'} berapa sebulan`,
     INTEREST_RATE: 'kadar loan kedai berapa peratus setahun',
+    DRIVING_LICENCE_ELIGIBILITY: 'takde lesen memandu boleh mohon tak',
     PRODUCT_COLOUR: `${product} warna apa ada`,
     PRODUCT_STORAGE: `${product} ${requestedProductStorage(originalText)} berapa GB ada`,
     COMBINED_APPLICATION: 'boleh mohon motor dan handphone sekali',
@@ -3268,3 +3305,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+

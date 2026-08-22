@@ -306,7 +306,9 @@ test('every customer question bypasses onboarding gates and gets an answer-first
   });
   assert.equal(customerAskedQuestion('hanya ada berapa model ni sahaja?'), true);
   assert.equal(decision.availableModelsIntent, true);
-  assert.match(decision.text, /bukan semua model/i);
+  assert.match(decision.text, /model motor yang ada sekarang/i);
+  assert.match(decision.text, /Yamaha Y15ZR/);
+  assert.match(decision.text, /Yamaha NMAX/);
   assert.doesNotMatch(decision.text, /^Model motor atau telefon/i);
 });
 
@@ -569,6 +571,43 @@ test('a branch-location question overrides stale product context and answers the
   assert.equal((decision.text.match(/\?/g) || []).length, 0);
 });
 
+test('a saved KL location makes a plain address follow-up return the full branch address immediately', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'MOTOR', 'Selected Branch ID': 'BR-WM-PJ' },
+    lead: { 'Customer Name': 'Nick', Region: 'WEST_MALAYSIA', State: 'Selangor', 'City or Area': 'Kuala Lumpur', 'Selected Branch ID': 'BR-WM-PJ' },
+    text: 'boleh bagi alamat', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [{
+      Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'WEST_MALAYSIA', State: 'Selangor', City: 'Petaling Jaya',
+      'Branch ID': 'BR-WM-PJ', 'Branch Name': 'KL Petaling Jaya branch',
+      'Branch Address': '15, Ground Floor 10th Mile, Lebuhraya Persekutuan, Sungai Way Free Trade Industrial Zone, 47300 Petaling Jaya, Selangor'
+    }],
+    aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.6 }
+  });
+  assert.equal(decision.branchLocationIntent, true);
+  assert.match(decision.text, /15, Ground Floor 10th Mile/);
+  assert.match(decision.text, /Alamat penuh/i);
+  assert.doesNotMatch(decision.text, /direkodkan|liputan servis|pengesahan|bandar atau negeri/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 0);
+});
+
+test('a KL answer is accepted during location collection even when AI labels it GENERAL', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_02_LOCATION', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Nick' },
+    text: 'kl', messageType: 'text', routeBusinessUnit: 'MOTOR',
+    branches: [{
+      Active: 'TRUE', 'Business Unit': 'MOTOR', Region: 'WEST_MALAYSIA', State: 'Selangor', City: 'Petaling Jaya',
+      'Branch ID': 'BR-WM-PJ', 'Team ID': 'TEAM-WEST', 'Branch Name': 'KL Petaling Jaya branch',
+      'Direct Coverage Areas': 'Kuala Lumpur|KL|Selangor'
+    }],
+    aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.55 }
+  });
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.location.branchId, 'BR-WM-PJ');
+  assert.match(decision.text, /dah catat Kuala Lumpur/i);
+  assert.doesNotMatch(decision.text, /teruskan saja dengan soalan|bandar atau negeri/i);
+});
+
 test('a branch-location question without an area lists recorded choices and asks only for location', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Model': 'Y15ZR' },
@@ -694,6 +733,31 @@ test('a casual available-motor question returns real options instead of repeatin
   assert.match(decision.text, /Yamaha NMAX/);
   assert.match(decision.text, /Honda RS150R/);
   assert.doesNotMatch(decision.text, /Model motor atau telefon yang mana/i);
+  assert.equal((decision.text.match(/\?/g) || []).length, 1);
+});
+
+test('a full model-list request returns every active approved catalogue model even when some prices are not filled', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
+    lead: { 'Customer Name': 'Nick', Region: 'WEST_MALAYSIA', 'City or Area': 'Kuala Lumpur' },
+    text: 'motor model apa yg ada skg listout bagi i', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'WEST_MALAYSIA',
+    motorCatalog: [
+      { 'Catalog ID': 'M1', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M2', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M3', Brand: 'Honda', Model: 'ADV160', Active: 'TRUE', 'Approval Status': 'APPROVED' },
+      { 'Catalog ID': 'M4', Brand: 'Honda', Model: 'RS150R', Active: 'TRUE', 'Approval Status': 'PENDING_APPROVAL' },
+      { 'Catalog ID': 'M5', Brand: 'Honda', Model: 'Wave Alpha', Active: 'FALSE', 'Approval Status': 'APPROVED' }
+    ],
+    motorPricing: [
+      { 'Catalog ID': 'M1', 'Price Zone': 'WEST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '327' }
+    ]
+  });
+  assert.equal(decision.availableModelsIntent, true);
+  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160']);
+  assert.match(decision.text, /Yamaha Y15ZR Standard/);
+  assert.match(decision.text, /Yamaha NMAX/);
+  assert.match(decision.text, /Honda ADV160/);
+  assert.doesNotMatch(decision.text, /Honda RS150R|Honda Wave Alpha|bukan semua|popular|pengesahan cawangan/i);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
