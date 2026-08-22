@@ -567,7 +567,7 @@ test('a branch-location question overrides stale product context and answers the
   assert.match(decision.text, /Kuching Rider Centre/);
   assert.match(decision.text, /Jalan Pending/);
   assert.doesNotMatch(decision.text, /Dash 125|Maksud anda|model/i);
-  assert.equal((decision.text.match(/\?/g) || []).length, 0);
+  assert.equal((decision.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 });
 
 test('a saved KL location makes a plain address follow-up return the full branch address immediately', () => {
@@ -583,10 +583,12 @@ test('a saved KL location makes a plain address follow-up return the full branch
     aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.6 }
   });
   assert.equal(decision.branchLocationIntent, true);
+  assert.match(decision.text, /Boleh\. Ini alamat cawangan JomKaki Rider Petaling Jaya:/i);
   assert.match(decision.text, /15, Ground Floor 10th Mile/);
-  assert.match(decision.text, /Alamat penuh/i);
-  assert.doesNotMatch(decision.text, /direkodkan|liputan servis|pengesahan|bandar atau negeri/i);
-  assert.equal((decision.text.match(/\?/g) || []).length, 0);
+  assert.match(decision.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=15%2C%20Ground%20Floor/i);
+  assert.match(decision.text, /Waze: https:\/\/waze\.com\/ul\?q=15%2C%20Ground%20Floor.*&navigate=yes/i);
+  assert.doesNotMatch(decision.text, /Alamat penuh|cawangan paling dekat|kawasan Petaling Jaya|KL Petaling Jaya branch|—|direkodkan|liputan servis|pengesahan|bandar atau negeri/i);
+  assert.equal((decision.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 });
 
 test('KL branch shorthand returns the canonical Petaling Jaya address even when the live branch sheet is temporarily empty', () => {
@@ -597,10 +599,12 @@ test('KL branch shorthand returns the canonical Petaling Jaya address even when 
       aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'MOTOR', confidence: 0.6 }
     });
     assert.equal(decision.branchLocationIntent, true, text);
-    assert.match(decision.text, /KL Petaling Jaya branch/i, text);
+    assert.match(decision.text, /cawangan JomKaki Rider Petaling Jaya/i, text);
     assert.match(decision.text, /15, Ground Floor 10th Mile, Lebuhraya Persekutuan/i, text);
+    assert.match(decision.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\//i, text);
+    assert.match(decision.text, /Waze: https:\/\/waze\.com\/ul\?/i, text);
     assert.doesNotMatch(decision.text, /bandar atau negeri|bergantung pada kawasan|teruskan saja/i, text);
-    assert.equal((decision.text.match(/\?/g) || []).length, 0, text);
+    assert.equal((decision.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0, text);
   }
 });
 
@@ -616,10 +620,12 @@ test('physical branch names override internal sales-team rows for customer-facin
     branches: misleadingTeams,
     aiIntent: { intent: 'BRANCH_LOCATION', language: 'MS', businessUnit: 'HANDPHONE', locationQuery: 'Kuching Satok', confidence: 0.9 }
   });
-  assert.match(satok.text, /Kuching Satok branch/i);
+  assert.match(satok.text, /cawangan JomKaki Rider Kuching Satok/i);
   assert.match(satok.text, /LOT 442, Ground Floor Section 11/i);
+  assert.match(satok.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\//i);
+  assert.match(satok.text, /Waze: https:\/\/waze\.com\/ul\?/i);
   assert.doesNotMatch(satok.text, /Loan iPhone Sarawak Team|bandar atau negeri/i);
-  assert.equal((satok.text.match(/\?/g) || []).length, 0);
+  assert.equal((satok.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 
   const kl = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'HANDPHONE' },
@@ -627,10 +633,10 @@ test('physical branch names override internal sales-team rows for customer-facin
     branches: misleadingTeams,
     aiIntent: { intent: 'GENERAL', language: 'MS', businessUnit: 'HANDPHONE', confidence: 0.55 }
   });
-  assert.match(kl.text, /KL Petaling Jaya branch/i);
+  assert.match(kl.text, /cawangan JomKaki Rider Petaling Jaya/i);
   assert.match(kl.text, /15, Ground Floor 10th Mile, Lebuhraya Persekutuan/i);
   assert.doesNotMatch(kl.text, /Loan iPhone Sarawak Team|bandar atau negeri/i);
-  assert.equal((kl.text.match(/\?/g) || []).length, 0);
+  assert.equal((kl.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 });
 
 test('a KL answer is accepted during location collection even when AI labels it GENERAL', () => {
