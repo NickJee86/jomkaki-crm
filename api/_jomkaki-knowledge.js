@@ -1,3 +1,5 @@
+import { NOTION_SYNCED_KNOWLEDGE } from './_notion-knowledge.generated.js';
+
 const freezeList = values => Object.freeze([...values]);
 
 export const APPROVED_KNOWLEDGE_PAGES = freezeList([
@@ -191,6 +193,85 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
   ])
 });
 
+const KNOWLEDGE_STOP_WORDS = new Set([
+  'a', 'ada', 'adalah', 'akan', 'anda', 'apa', 'atau', 'boleh', 'dan', 'dari', 'di', 'for', 'i', 'ini', 'is', 'itu', 'ke', 'kah',
+  'kalau', 'kat', 'macam', 'mahu', 'mana', 'me', 'minta', 'my', 'nak', 'ni', 'of', 'on', 'saya', 'sekarang', 'sini', 'tak', 'the', 'to',
+  'untuk', 'yang', 'you'
+]);
+
+const KNOWLEDGE_ALIASES = freezeList([
+  freezeList(['lesen', 'licence', 'license', 'driving']),
+  freezeList(['gaji', 'salary', 'income', 'payslip', 'pendapatan']),
+  freezeList(['kerja', 'employment', 'employer', 'occupation', 'pekerjaan']),
+  freezeList(['dokumen', 'document', 'documents', 'file', 'files']),
+  freezeList(['ansuran', 'instalment', 'installment', 'monthly', 'sebulan', 'bayaran']),
+  freezeList(['deposit', 'depo', 'downpayment', 'muka']),
+  freezeList(['cawangan', 'branch', 'kedai', 'showroom']),
+  freezeList(['lokasi', 'location', 'alamat', 'address', 'bandar', 'city', 'negeri', 'state']),
+  freezeList(['warna', 'colour', 'color']),
+  freezeList(['gb', 'storage', 'capacity', 'kapasiti']),
+  freezeList(['jaminan', 'warranty', 'waranti']),
+  freezeList(['insurans', 'insurance']),
+  freezeList(['refund', 'bayaran balik', 'pemulangan']),
+  freezeList(['consent', 'persetujuan', 'ctos', 'ccris']),
+  freezeList(['tempoh', 'tenure', 'tahun', 'year', 'years']),
+  freezeList(['berapa lama', 'processing', 'process', 'proses', 'duration']),
+  freezeList(['telefon', 'phone', 'handphone', 'iphone']),
+  freezeList(['motor', 'motorcycle', 'motosikal'])
+]);
+
+const normalizedKnowledgeText = value => String(value ?? '')
+  .toLowerCase()
+  .normalize('NFKD')
+  .replace(/[^\p{L}\p{N}%]+/gu, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const expandedKnowledgeTerms = value => {
+  const normalized = normalizedKnowledgeText(value);
+  const terms = new Set(normalized.split(' ').filter(term => term.length > 1 && !KNOWLEDGE_STOP_WORDS.has(term)));
+  for (const aliases of KNOWLEDGE_ALIASES) {
+    if (aliases.some(alias => normalized.includes(alias))) aliases.forEach(alias => normalizedKnowledgeText(alias).split(' ').forEach(term => terms.add(term)));
+  }
+  return [...terms];
+};
+
+const syncedKnowledgeForRuntime = ({ text = '', intent = '', businessUnit = '' } = {}) => {
+  const chunks = Array.isArray(NOTION_SYNCED_KNOWLEDGE?.chunks) ? NOTION_SYNCED_KNOWLEDGE.chunks : [];
+  if (!chunks.length) return '';
+  const query = `${intent} ${businessUnit} ${text}`;
+  const terms = expandedKnowledgeTerms(query);
+  const scored = chunks.map((chunk, index) => {
+    const title = normalizedKnowledgeText(`${chunk.knowledgeId} ${chunk.title} ${chunk.category} ${chunk.type} ${(chunk.tags || []).join(' ')}`);
+    const body = normalizedKnowledgeText(chunk.text);
+    let score = 0;
+    for (const term of terms) {
+      if (title.includes(term)) score += 7;
+      if (body.includes(term)) score += 2;
+    }
+    if (/KB-(?:BEHAVIOR|AI|FAQ|SALES)-/i.test(String(chunk.knowledgeId))) score += 1;
+    return { chunk, index, score };
+  }).sort((a, b) => b.score - a.score || a.index - b.index);
+  const selected = scored.filter(item => item.score > 0).slice(0, 10);
+  const selectedKeys = new Set(selected.map(item => `${item.chunk.pageId}:${item.index}`));
+  for (const knowledgeId of ['KB-BEHAVIOR-001', 'KB-FAQ-001']) {
+    const core = scored.find(item => item.chunk.knowledgeId === knowledgeId && !selectedKeys.has(`${item.chunk.pageId}:${item.index}`));
+    if (core) {
+      selected.push(core);
+      selectedKeys.add(`${core.chunk.pageId}:${core.index}`);
+    }
+  }
+  let used = 0;
+  const result = [];
+  for (const { chunk } of selected) {
+    const entry = `[${chunk.knowledgeId || 'NOTION'} | ${chunk.title}]\n${String(chunk.text || '').trim()}`;
+    if (!entry.trim() || used + entry.length > 9000) continue;
+    used += entry.length;
+    result.push(entry);
+  }
+  return result.length ? `[notion_live_approved_sync]\n${result.join('\n\n')}` : '';
+};
+
 const runtimeTopics = ({ text = '', intent = '', businessUnit = '', includeTesting = false } = {}) => {
   const message = `${String(intent)} ${String(text)}`.toLowerCase();
   const topics = new Set(['company', 'conversation', 'behavior', 'memory', 'faq', 'sales', 'sop', 'governance']);
@@ -230,24 +311,31 @@ const runtimeTopics = ({ text = '', intent = '', businessUnit = '', includeTesti
 };
 
 export function approvedKnowledgeForRuntime(options = {}) {
-  return runtimeTopics(options).map(topic => {
+  const compiledSafeguards = runtimeTopics(options).map(topic => {
     const rules = APPROVED_RUNTIME_KNOWLEDGE[topic] || [];
     return `[${topic}]\n${rules.map(rule => `- ${rule}`).join('\n')}`;
   }).join('\n');
+  const syncedKnowledge = syncedKnowledgeForRuntime(options);
+  return [compiledSafeguards, syncedKnowledge].filter(Boolean).join('\n\n');
 }
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: '2026-08-21.10',
+  version: String(NOTION_SYNCED_KNOWLEDGE?.version || '2026-08-21.11'),
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
   runtimeSnapshot: Object.freeze({
-    sourceType: 'NOTION_APPROVED_COMPILED_CACHE',
-    approvedPageCount: APPROVED_KNOWLEDGE_PAGES.length,
-    compiledAt: '2026-08-21',
+    sourceType: Array.isArray(NOTION_SYNCED_KNOWLEDGE?.pages) && NOTION_SYNCED_KNOWLEDGE.pages.length
+      ? 'NOTION_APPROVED_BUILD_SYNC_WITH_COMPILED_SAFEGUARDS'
+      : 'NOTION_APPROVED_COMPILED_CACHE',
+    approvedPageCount: Array.isArray(NOTION_SYNCED_KNOWLEDGE?.pages) && NOTION_SYNCED_KNOWLEDGE.pages.length
+      ? NOTION_SYNCED_KNOWLEDGE.pages.length
+      : APPROVED_KNOWLEDGE_PAGES.length,
+    compiledAt: String(NOTION_SYNCED_KNOWLEDGE?.syncedAt || '2026-08-21'),
     approvedOnly: true,
-    livePricesExcluded: true
+    livePricesExcluded: true,
+    syncWarnings: freezeList(Array.isArray(NOTION_SYNCED_KNOWLEDGE?.warnings) ? NOTION_SYNCED_KNOWLEDGE.warnings : [])
   }),
   conversation: Object.freeze({
     defaultLanguage: 'MS',
@@ -319,3 +407,4 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
+

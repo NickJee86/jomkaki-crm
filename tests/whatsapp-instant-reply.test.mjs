@@ -92,7 +92,7 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   ]);
   assert.equal(APPROVED_KNOWLEDGE_PAGES.length, 19);
   assert.equal(JOMKAKI_KNOWLEDGE.approvedSources.length, 19);
-  assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, 'NOTION_APPROVED_COMPILED_CACHE');
+  assert.match(JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, /^NOTION_APPROVED_(?:BUILD_SYNC_WITH_COMPILED_SAFEGUARDS|COMPILED_CACHE)$/);
   assert.equal(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, 19);
   const productKnowledge = approvedKnowledgeForRuntime({ text: 'apa model motor ada', businessUnit: 'MOTOR' });
   assert.match(productKnowledge, /\[conversation\]/);
@@ -1704,7 +1704,7 @@ test('approved runtime product knowledge explicitly keeps unlisted enquiries ali
   const knowledge = approvedKnowledgeForRuntime({ text: 'scooter ada tak', businessUnit: 'MOTOR' });
   assert.match(knowledge, /unlisted model or category remains a valid enquiry/i);
   assert.match(knowledge, /never reject the customer/i);
-  assert.equal(JOMKAKI_KNOWLEDGE.version, '2026-08-21.10');
+  assert.match(JOMKAKI_KNOWLEDGE.version, /^(?:notion-\d{4}-\d{2}-\d{2}-[a-f0-9]+|2026-08-21\.11)$/);
 });
 
 test('every customer reply can be traced to a decision route and knowledge version', () => {
@@ -1712,12 +1712,12 @@ test('every customer reply can be traced to a decision route and knowledge versi
   assert.deepEqual(deterministic, {
     decisionRoute: 'BRANCH_LOCATION',
     replySource: 'DETERMINISTIC',
-    knowledgeVersion: '2026-08-21.10'
+    knowledgeVersion: JOMKAKI_KNOWLEDGE.version
   });
   const ai = buildDecisionAudit({ decision: { handled: true, aiGenerated: true }, aiIntent: { intent: 'GENERAL' } });
   assert.equal(ai.decisionRoute, 'AI_FALLBACK');
   assert.equal(ai.replySource, 'KNOWLEDGE_AI_FALLBACK');
-  assert.equal(ai.knowledgeVersion, '2026-08-21.10');
+  assert.equal(ai.knowledgeVersion, JOMKAKI_KNOWLEDGE.version);
 });
 
 test('the global reply contract blocks menus, profile-gating and internal identity leakage', () => {
@@ -1958,3 +1958,33 @@ test('question detector recognises topic switches, typos and multiple business q
   const intents = detectCustomerQuestionIntents('boss, y15 depo brp, 3 tahun sebulan berapa, slip gaji brp bulan dan kedai dekat mana?');
   for (const expected of ['BRANCH_LOCATION', 'MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'PAYSLIP_PERIOD']) assert.ok(intents.includes(expected), expected);
 });
+
+test('approved Notion licence rule answers directly across natural wording instead of generic fallback', () => {
+  for (const message of [
+    'takde lesen boleh beli tak',
+    'belum ada lesen memandu boleh apply loan kedai?',
+    'no driving licence can I apply?'
+  ]) {
+    assert.ok(detectCustomerQuestionIntents(message).includes('DRIVING_LICENCE_ELIGIBILITY'), message);
+    const decision = buildInstantSalesDecision({
+      state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Jmbat', 'Last AI Message': 'Baik, teruskan saja dengan soalan anda.' },
+      lead: { 'Customer Name': 'Jmbat', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+      text: message,
+      messageType: 'text',
+      routeBusinessUnit: 'MOTOR',
+      routeRegion: 'EAST_MALAYSIA',
+      aiIntent: { intent: 'GENERAL', language: /no driving/i.test(message) ? 'EN' : 'MS', confidence: 0.9 }
+    });
+    assert.equal(decision.drivingLicenceEligibilityIntent, true, message);
+    assert.match(decision.text, /(?:belum ada lesen memandu|do not have a driving licence)/i, message);
+    assert.doesNotMatch(decision.text, /(?:pengurus semak|manager|teruskan saja dengan soalan)/i, message);
+  }
+});
+
+test('licence eligibility is grounded in the approved Notion runtime snapshot', () => {
+  const knowledge = approvedKnowledgeForRuntime({ text: 'takde lesen memandu boleh beli tak', businessUnit: 'MOTOR' });
+  assert.match(knowledge, /may start without a driving licence/i);
+  assert.match(knowledge, /never guarantee approval/i);
+  assert.match(JOMKAKI_KNOWLEDGE.version, /^(?:notion-\d{4}-\d{2}-\d{2}-[a-f0-9]+|2026-08-21\.11)$/);
+});
+
