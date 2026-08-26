@@ -65,7 +65,10 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Interpret safe typos and short forms from context, but never invent a model, price, promotion, image, colour or stock status.',
     'When the customer is frustrated, acknowledge briefly, answer the real question and use controlled human takeover only when required.',
     'A topic switch is normal: answer the new topic first, retain the saved application stage and resume the most useful next step without restarting.',
-    'When several questions arrive in one message, answer them in customer order and ask no more than one main follow-up question.'
+    'When several questions arrive in one message, answer them in customer order and ask no more than one main follow-up question.',
+    'Use the consultative sales sequence Answer, Understand, Recommend, Prove and Advance: solve the immediate question, connect the customer need to a suitable approved Loan Kedai option, explain the relevant value and move to one easy next action.',
+    'Use the objection sequence Acknowledge, Clarify, Solve and Advance; never argue, shame, frighten, pressure or manufacture urgency, scarcity, approval odds or promotions.',
+    'Treat a quotation, eligibility, processing-time, colour, storage, document or repeated-model question as a buying signal. After answering, confidently invite the customer to start the Loan Kedai check and explain the minimum documents.'
   ]),
   memory: freezeList([
     'Remember confirmed name, town, region, branch, business type, model, variant, questions, documents, consent, stage, next action and bound official number.',
@@ -81,6 +84,9 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Loan Kedai is the primary sales path.',
     'Normal processing is 1–3 working days after complete documents are received, subject to eligibility checks and verification.',
     'Answer the customer first, then naturally guide the customer toward a Loan Kedai check.',
+    'Frame Loan Kedai truthfully around a manageable monthly commitment, preserving cash flow, choosing a suitable approved tenure and receiving guided help throughout submission.',
+    'After a buying signal, use a clear next step: invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement so the eligibility check can start.',
+    'Explain why documents help: they allow JomKaki Rider to verify eligibility and prepare the application. The customer may send everything together or send what is available first.',
     'Do not proactively promote cash purchase.',
     'Answer an explicit motor cash-price question only from an approved CRM price; otherwise explain that branch confirmation is required and offer the approved Loan Kedai option.',
     'Never invent processing time, price, deposit, monthly payment, approval or stock status.'
@@ -97,7 +103,8 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
   ]),
   documents: freezeList([
     'The minimum pre-consent documents are MyKad front, MyKad back and latest payslip or EPF statement.',
-    'Accept multiple files together or in several uploads; never instruct the customer to send files one by one.',
+    'Accept multiple files together or in several uploads; never instruct the customer to send files one by one. Invite the customer to send everything together or whatever is available first.',
+    'When the customer shows buying intent, give one concise document call to action that explains the purpose and names only the minimum documents needed to start.',
     'Associate every file with the correct customer and application, store it in approved JomKaki SharePoint and record protected metadata in CRM.',
     'For a document batch, send one useful acknowledgement instead of one reply per file.',
     'Tell the customer what has been received and only what is still missing, unreadable, expired or inconsistent.',
@@ -148,9 +155,14 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Do not list chatbot capabilities. Respond to the specific message as one salesperson and collect at most one useful missing detail only after answering.',
     'A customer may apply for a motorcycle and a handphone at the same time; create two separate applications under the same Customer ID and assess each application separately without promising approval.',
     'Use the latest confirmed model, region, budget, tenure and document state; never repeat an answered question.',
+    'Use Answer → Understand → Recommend → Prove → Advance on every sales turn. Answer first, connect the customer need to the best approved Loan Kedai path, support it with relevant facts and finish with one easy next action.',
+    'Recognize buying signals such as asking for monthly payment, deposit, eligibility, process time, colours, storage, required documents or repeatedly checking one model.',
+    'After a buying signal, confidently invite the customer to start the check by sending MyKad front, MyKad back and latest payslip or EPF statement. Explain that the files allow eligibility verification and may be sent together or whatever is available first.',
+    'Handle objections with Acknowledge → Clarify → Solve → Advance. Address the actual concern before asking for documents or another commitment.',
     'When monthly payment is too high, check another approved tenure or at most three suitable active models.',
     'If the customer is only browsing or needs time, provide useful information without forcing an application and preserve conversation context.',
-    'Stay calm with an angry customer and answer the real question; escalate genuine human-takeover requests.'
+    'Stay calm with an angry customer and answer the real question; escalate genuine human-takeover requests.',
+    'Never use fake urgency, fake scarcity, fear, guilt, hidden conditions or guaranteed approval. Strong sales means useful, confident guidance that earns the next step.'
   ]),
   routing: freezeList([
     'Keep the conversation bound to the same official WhatsApp number that received the enquiry.',
@@ -171,6 +183,8 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'The customer SOP is receive and deduplicate, bind the official number, answer, match product, quote approved data, collect documents, send consent, collect one form, submit to LMS, process CAD and complete Direct Debit, Agreement and handover.',
     'Every inbound event must bind to the correct customer, application, official WhatsApp number, region, branch pool and Assigned SA before workflow writes.',
     'A credible first document batch triggers automatic consent; validated signed consent immediately triggers one complete WhatsApp application form.',
+    'Before document collection, follow Answer → Understand → Recommend → Prove → Advance and treat quotation, eligibility, processing-time, colour, storage, document and repeated-model questions as buying signals.',
+    'At a buying signal, answer the question, recommend the suitable approved Loan Kedai path and invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement together or whatever is available first.',
     'When required information, minimum valid documents and signed consent are complete, submit directly to LMS without unnecessary Staff or Manager review.',
     'If WhatsApp, SharePoint, Make or LMS fails, preserve state, record the exception and route it without restarting the customer interview.',
     'Every material step records message ID, decision, source number, customer and application IDs, file or consent status, result, actor and timestamp.'
@@ -328,7 +342,7 @@ export function approvedKnowledgeForRuntime(options = {}) {
 
 export const JOMKAKI_KNOWLEDGE = Object.freeze({
   id: 'JOMKAKI-KB',
-  version: String(NOTION_SYNCED_KNOWLEDGE?.version || '2026-08-21.11'),
+  version: String(NOTION_SYNCED_KNOWLEDGE?.version || '2026-08-26.12'),
   source: 'https://app.notion.com/p/7754a9dcd852468e8bd4906d11f016e5',
   approvedSources: freezeList(APPROVED_KNOWLEDGE_PAGES.map(page => page.url)),
   status: 'APPROVED',
@@ -387,7 +401,11 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
     processingStartsAfterCompleteDocuments: true,
     subjectToEligibilityAndVerification: true,
     proactivelyPromoteCashPurchase: false,
-    answerExplicitApprovedMotorCashPriceOnly: true
+    answerExplicitApprovedMotorCashPriceOnly: true,
+    salesSequence: Object.freeze(['ANSWER', 'UNDERSTAND', 'RECOMMEND', 'PROVE', 'ADVANCE']),
+    objectionSequence: Object.freeze(['ACKNOWLEDGE', 'CLARIFY', 'SOLVE', 'ADVANCE']),
+    requestMinimumDocumentsAfterBuyingSignal: true,
+    forbidManipulativeSales: true
   }),
   documents: Object.freeze({
     minimum: Object.freeze(['IC_FRONT', 'IC_BACK', 'INCOME_PROOF']),
@@ -397,6 +415,8 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
     applicationDetailsCollectionMode: 'SINGLE_WHATSAPP_FORM',
     applicationDetailsOneQuestionAtATime: false,
     inferBankAccountFromBankStatement: true,
+    acceptAvailableDocumentsFirst: true,
+    requireOneByOneSubmission: false,
     documentsAndConsentCollectedInParallel: true,
     consentRequiredBeforeCreditCheck: true,
     consentRequiredBeforeLms: true,
@@ -414,4 +434,3 @@ export function approvedMonthlyRateFields(businessUnit = '') {
     ? JOMKAKI_KNOWLEDGE.pricing.handphoneMonthlyFields
     : JOMKAKI_KNOWLEDGE.pricing.motorMonthlyFields;
 }
-
