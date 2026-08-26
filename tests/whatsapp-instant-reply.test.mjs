@@ -585,8 +585,8 @@ test('a saved KL location makes a plain address follow-up return the full branch
   assert.equal(decision.branchLocationIntent, true);
   assert.match(decision.text, /Boleh\. Ini alamat cawangan JomKaki Rider Petaling Jaya:/i);
   assert.match(decision.text, /15, Ground Floor 10th Mile/);
-  assert.match(decision.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=15%2C%20Ground%20Floor/i);
-  assert.match(decision.text, /Waze: https:\/\/waze\.com\/ul\?q=15%2C%20Ground%20Floor.*&navigate=yes/i);
+  assert.match(decision.text, /Google Maps: https:\/\/jomkaki-rider\.vercel\.app\/go\/petaling-jaya\/maps/i);
+  assert.match(decision.text, /Waze: https:\/\/jomkaki-rider\.vercel\.app\/go\/petaling-jaya\/waze/i);
   assert.doesNotMatch(decision.text, /Alamat penuh|cawangan paling dekat|kawasan Petaling Jaya|KL Petaling Jaya branch|—|direkodkan|liputan servis|pengesahan|bandar atau negeri/i);
   assert.equal((decision.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 });
@@ -601,8 +601,8 @@ test('KL branch shorthand returns the canonical Petaling Jaya address even when 
     assert.equal(decision.branchLocationIntent, true, text);
     assert.match(decision.text, /cawangan JomKaki Rider Petaling Jaya/i, text);
     assert.match(decision.text, /15, Ground Floor 10th Mile, Lebuhraya Persekutuan/i, text);
-    assert.match(decision.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\//i, text);
-    assert.match(decision.text, /Waze: https:\/\/waze\.com\/ul\?/i, text);
+    assert.match(decision.text, /Google Maps: https:\/\/jomkaki-rider\.vercel\.app\/go\/petaling-jaya\/maps/i, text);
+    assert.match(decision.text, /Waze: https:\/\/jomkaki-rider\.vercel\.app\/go\/petaling-jaya\/waze/i, text);
     assert.doesNotMatch(decision.text, /bandar atau negeri|bergantung pada kawasan|teruskan saja/i, text);
     assert.equal((decision.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0, text);
   }
@@ -622,8 +622,8 @@ test('physical branch names override internal sales-team rows for customer-facin
   });
   assert.match(satok.text, /cawangan JomKaki Rider Kuching Satok/i);
   assert.match(satok.text, /LOT 442, Ground Floor Section 11/i);
-  assert.match(satok.text, /Google Maps: https:\/\/www\.google\.com\/maps\/search\//i);
-  assert.match(satok.text, /Waze: https:\/\/waze\.com\/ul\?/i);
+  assert.match(satok.text, /Google Maps: https:\/\/jomkaki-rider\.vercel\.app\/go\/kuching-satok\/maps/i);
+  assert.match(satok.text, /Waze: https:\/\/jomkaki-rider\.vercel\.app\/go\/kuching-satok\/waze/i);
   assert.doesNotMatch(satok.text, /Loan iPhone Sarawak Team|bandar atau negeri/i);
   assert.equal((satok.text.replace(/https?:\/\/\S+/g, '').match(/\?/g) || []).length, 0);
 
