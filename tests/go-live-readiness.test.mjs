@@ -38,6 +38,9 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.match(app,/u\.passwordConfigured=true;u\.mustChangePassword=true/);
   assert.match(api,/passwordConfigured: Boolean\(clean\(row\['Password Hash'\]\)\)/);
   assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa','channels'\]/);
+  assert.match(app,/const pendingIntegrationNames=pendingIntegrations\.map/);
+  assert.ok(app.includes('remain safely gated until the required activation checks pass'));
+  assert.ok(!app.includes('Meta/LMS remain safely disabled until approved credentials exist'));
 });
 
 test('Synthetic QA records stay traceable but do not distort production metrics',()=>{
