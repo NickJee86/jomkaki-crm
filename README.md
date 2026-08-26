@@ -93,6 +93,8 @@ Current Meta staging status (11 August 2026):
 - Normal Leads remain unassigned while AI follows up and collects the required documents.
 - AI-verified complete cases become `READY_FOR_LMS` without Staff or Manager handling.
 - Incomplete document collection or failed AI follow-up becomes `AI_TO_SA_HANDOVER` and is round-robin assigned to eligible Staff.
+- CRM Administrators can configure stage-specific automatic follow-up timing for missing documents, incomplete application information, unsigned consent and CAD additional-document requests. The scheduler runs every 15 minutes, respects Malaysia business hours, resets the cadence when the customer replies, pauses on human takeover or closed cases, prevents duplicate sends and hands the case to Staff after the configured maximum of three attempts.
+- WhatsApp messages outside the 24-hour customer-service window require an approved Meta template name in **System Settings → Customer follow-up control**. The automation pauses the individual case instead of attempting a non-compliant free-form message when a template is missing.
 - Explicit customer requests for a human enter the Manager handover queue.
 - Staff can only see and work on exception cases assigned to their own SA ID.
 - Branch Supervisors can only see Leads assigned to their own branch. Vacant Supervisor positions fall back to the Regional Manager.
