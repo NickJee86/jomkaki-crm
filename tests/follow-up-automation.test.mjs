@@ -112,3 +112,30 @@ test('CRM and Vercel expose the complete follow-up control layer', () => {
   assert.deepEqual(vercel.crons, [{ path: '/api/follow-up-dispatch', schedule: '*/15 * * * *' }]);
 });
 
+test('follow-up settings show operational status, approved previews and controlled tests without a wide table', () => {
+  const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../v2.css', import.meta.url), 'utf8');
+  for (const template of [
+    'jomkaki_documents_start_v1',
+    'jomkaki_documents_partial_v1',
+    'jomkaki_consent_unsigned_v1',
+    'jomkaki_application_info_v1',
+    'jomkaki_cad_documents_v1'
+  ]) assert.match(app, new RegExp(template));
+  assert.match(app, /Waiting customers/);
+  assert.match(app, /Due now/);
+  assert.match(app, /Delivery issues/);
+  assert.match(app, /Last automated send/);
+  assert.match(app, /Customer reply → reset attempts/);
+  assert.match(app, /Controlled template test/);
+  assert.match(app, /messageType:'TEMPLATE'/);
+  assert.match(css, /\.follow-up-rule-list\{display:grid/);
+  assert.match(css, /@media\(max-width:760px\).*\.follow-up-template-row\{grid-template-columns:1fr\}/s);
+});
+
+test('follow-up settings preserve last-saved attribution for administrators', () => {
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  assert.match(api, /updatedAt: clean\(settings\.updatedAt\)/);
+  assert.match(api, /settings\.updatedBy = session\.username/);
+  assert.match(api, /followUpSettingsRows\(settings, session\.username, settings\.updatedAt\)/);
+});
