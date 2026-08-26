@@ -10,6 +10,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
+  assert.match(html,/app-v2\.js\?v=20260826-go-live-audit1/);
   [
     'Go-live readiness',
     'Branch Manager coverage',
