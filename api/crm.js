@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmentAccounts, setSession, validateSession } from './_auth.js';
 import { FUTURE_REPORTING_FIELDS, integrationReadiness, publicIntegrationRecords } from './_integrations.js';
 
+
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
 const PROJECT_NUMBER = process.env.GOOGLE_PROJECT_NUMBER;
@@ -229,6 +230,53 @@ async function ensureSheetHeaders(req, sheet, requiredHeaders) {
   });
   if (!response.ok) throw new Error(`Unable to extend ${sheet} headers (${response.status})`);
   return [...headers, ...missing];
+}
+
+async function ensureWorksheet(req, sheet, headers) {
+  const token = await getAccessToken(req);
+  const metadataResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?fields=sheets.properties(sheetId,title,gridProperties(columnCount))`, { headers: { authorization: `Bearer ${token}` } });
+  if (!metadataResponse.ok) throw new Error(`Unable to inspect ${sheet} worksheet (${metadataResponse.status})`);
+  const metadata = await metadataResponse.json();
+  const existing = (metadata.sheets || []).map(item => item.properties || {}).find(item => item.title === sheet);
+  if (!existing) {
+    const createResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}:batchUpdate`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: sheet, gridProperties: { rowCount: 200, columnCount: Math.max(26, headers.length) } } } }] })
+    });
+    if (!createResponse.ok) throw new Error(`Unable to create ${sheet} worksheet (${createResponse.status})`);
+    const headerResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A1`)}?valueInputOption=RAW`, {
+      method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [headers] })
+    });
+    if (!headerResponse.ok) throw new Error(`Unable to initialize ${sheet} worksheet (${headerResponse.status})`);
+    return headers;
+  }
+  return ensureSheetHeaders(req, sheet, headers);
+}
+
+async function replaceWorksheetRows(req, sheet, rows) {
+  const token = await getAccessToken(req);
+  const clearResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A:Z`)}:clear`, {
+    method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{}'
+  });
+  if (!clearResponse.ok) throw new Error(`Unable to clear ${sheet} settings (${clearResponse.status})`);
+  const writeResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A1`)}?valueInputOption=USER_ENTERED`, {
+    method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: rows })
+  });
+  if (!writeResponse.ok) throw new Error(`Unable to save ${sheet} settings (${writeResponse.status})`);
+}
+
+const publicFollowUpSettings = settings => settings.rules.map(rule => ({ ...rule, ...settings.global }));
+
+async function readFollowUpSettings(req) {
+  const { FOLLOW_UP_SETTINGS_HEADERS, followUpSettingsRows, normalizeFollowUpSettings } = await import('./_follow-up.js');
+  await ensureWorksheet(req, 'Follow_Up_Settings', FOLLOW_UP_SETTINGS_HEADERS);
+  const [rows] = await readRanges(req, ['Follow_Up_Settings!A1:Z100']);
+  if ((rows || []).length <= 1) {
+    const defaults = normalizeFollowUpSettings();
+    await replaceWorksheetRows(req, 'Follow_Up_Settings', followUpSettingsRows(defaults, 'SYSTEM_DEFAULT'));
+    return defaults;
+  }
+  return normalizeFollowUpSettings(rowsToObjects(rows));
 }
 
 async function getSharePointToken() {
@@ -651,6 +699,15 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
+      if (action === 'saveFollowUpSettings') {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const { FOLLOW_UP_SETTINGS_HEADERS, followUpSettingsRows, normalizeFollowUpSettings } = await import('./_follow-up.js');
+        const settings = normalizeFollowUpSettings({ global: body.global || {}, rules: body.rules || [] });
+        await ensureWorksheet(req, 'Follow_Up_Settings', FOLLOW_UP_SETTINGS_HEADERS);
+        await replaceWorksheetRows(req, 'Follow_Up_Settings', followUpSettingsRows(settings, session.username));
+        await writeActivity(req, session, { type: 'CRM_FOLLOW_UP_SETTINGS_UPDATED', description: `Automatic follow-up ${settings.global.enabled ? 'enabled' : 'paused'}; ${settings.rules.filter(rule => rule.enabled).length} stage rules active` });
+        return res.status(200).json({ live: true, global: settings.global, records: publicFollowUpSettings(settings) });
+      }
       if (action === 'changeOwnPassword') {
         const currentPassword = clean(body.currentPassword), newPassword = clean(body.newPassword);
         if (newPassword.length < 10) throw new Error('New password must contain at least 10 characters');
@@ -1374,6 +1431,32 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { leadId, applicationId, type: 'CRM_DOCUMENT_UPLOADED', description: `${documentType} uploaded for automatic AI validation` });
         return res.status(201).json({ live: true, documentId, fileName: uploaded.name });
       }
+      if (action === 'controlApplicationFollowUp') {
+        const { FOLLOW_UP_APPLICATION_HEADERS } = await import('./_follow-up.js');
+        const applicationId = clean(body.applicationId), command = clean(body.command).toUpperCase();
+        if (!['PAUSE', 'RESUME', 'SNOOZE', 'SEND_NOW', 'STOP'].includes(command)) throw new Error('A valid follow-up action is required');
+        const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:BG1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
+        const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), scope = scopeData(session, leads, applications, branches);
+        const record = applications.find(row => clean(row['Application ID']) === applicationId);
+        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (['APPROVED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(clean(record['Application Status']).toUpperCase()) && !['PAUSE', 'STOP'].includes(command)) throw new Error('Follow-up cannot resume on a closed application');
+        const timestamp = now(), hours = Math.min(720, Math.max(1, Number(body.hours) || 24));
+        const changes = command === 'PAUSE'
+          ? { 'Follow Up Status': 'PAUSED', 'Follow Up Scheduled At': '', 'Follow Up Paused At': timestamp, 'Follow Up Pause Reason': clean(body.reason) || 'Paused manually in CRM', 'Next Follow Up At': '' }
+          : command === 'STOP'
+            ? { 'Follow Up Status': 'STOPPED', 'Follow Up Scheduled At': '', 'Follow Up Paused At': timestamp, 'Follow Up Pause Reason': clean(body.reason) || 'Stopped manually in CRM', 'Next Follow Up At': '' }
+            : command === 'SNOOZE'
+              ? { 'Follow Up Status': 'SNOOZED', 'Follow Up Scheduled At': timestamp, 'Follow Up Paused At': '', 'Follow Up Pause Reason': '', 'Next Follow Up At': new Date(Date.now() + hours * 3600000).toISOString() }
+              : { 'Follow Up Status': 'ACTIVE', 'Follow Up Scheduled At': timestamp, 'Follow Up Paused At': '', 'Follow Up Pause Reason': '', 'Next Follow Up At': command === 'SEND_NOW' ? timestamp : new Date(Date.now() + 15 * 60000).toISOString() };
+        await ensureSheetHeaders(req, 'Applications', FOLLOW_UP_APPLICATION_HEADERS);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'CZ');
+        if (record['Lead ID']) {
+          await ensureSheetHeaders(req, 'Leads', FOLLOW_UP_APPLICATION_HEADERS);
+          await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'BG');
+        }
+        await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: `CRM_FOLLOW_UP_${command}`, description: command === 'SNOOZE' ? `Automatic follow-up delayed ${hours} hours` : `Automatic follow-up ${command.toLowerCase().replace('_', ' ')}` });
+        return res.status(200).json({ live: true, applicationId, command, nextFollowUp: changes['Next Follow Up At'], followUpStatus: changes['Follow Up Status'] });
+      }
       if (action === 'updateApplication') {
         const applicationId = clean(body.applicationId);
         const stages = ['APPLICATION_DETAILS_PENDING', 'DOCUMENT_COLLECTION', 'DOCUMENT_VERIFICATION', 'CREDIT_ASSESSMENT', 'BRANCH_HANDOVER', 'RECOVERY_PENDING', 'COMPLETED'];
@@ -1398,15 +1481,16 @@ export default async function handler(req, res) {
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
           if (branchId && clean(advisor['Branch ID']) !== branchId) throw new Error('The selected sales advisor does not belong to the selected branch');
         }
+        await ensureSheetHeaders(req, 'Applications', ['Follow Up Scheduled At']);
         await updateObject(req, 'Applications', 'Application ID', applicationId, {
           'Updated At': now(), 'Current Stage': stage, 'Application Status': status, 'Assigned SA ID': saId,
-          'Assigned Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Missing Documents': clean(body.missingDocuments),
+          'Assigned Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Follow Up Scheduled At': clean(body.nextFollowUp) ? now() : '', 'Missing Documents': clean(body.missingDocuments),
           'SA Review Required': session.role === 'STAFF' ? clean(record['SA Review Required']) : clean(body.reviewRequired).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE',
           'Handover Reason': session.role === 'STAFF' ? clean(record['Handover Reason']) : clean(body.handoverReason), 'Updated By': session.username
         });
         if (record['Lead ID']) {
-          await ensureSheetHeaders(req, 'Leads', leadRecordHeaders);
-          await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Updated At': now(), 'Updated By': session.username }, 'AP');
+          await ensureSheetHeaders(req, 'Leads', [...leadRecordHeaders, 'Follow Up Scheduled At']);
+          await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': branchId, 'Next Follow Up At': clean(body.nextFollowUp), 'Follow Up Scheduled At': clean(body.nextFollowUp) ? now() : '', 'Updated At': now(), 'Updated By': session.username }, 'BG');
         }
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICATION_UPDATED', description: `Application updated to ${stage} / ${status}` });
         return res.status(200).json({ live: true, applicationId });
@@ -1581,6 +1665,18 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: canonicalRole(session.role), region: session.region, businessAccess: canonicalBusinessAccess(session.businessAccess, session.role), saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
+  if (resource === 'followUpSettings') {
+    if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+    try {
+      const settings = await readFollowUpSettings(req);
+      return res.status(200).json({ live: true, global: settings.global, records: publicFollowUpSettings(settings) });
+    } catch (error) {
+      console.error('Follow-up settings fallback:', error);
+      const { normalizeFollowUpSettings } = await import('./_follow-up.js');
+      const settings = normalizeFollowUpSettings();
+      return res.status(200).json({ live: true, fallback: true, global: settings.global, records: publicFollowUpSettings(settings) });
+    }
+  }
   if (resource === 'integrations') return res.status(200).json({ live: true, records: publicIntegrationRecords(process.env), readiness: integrationReadiness(process.env), reportingFields: FUTURE_REPORTING_FIELDS });
   try {
     if (resource === 'channels') {
@@ -1627,7 +1723,7 @@ export default async function handler(req, res) {
           productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
           tenure: rowBusinessUnit(app) === 'HANDPHONE' ? app['Loan Tenure Months'] : app['Loan Tenure Years'], tenureUnit: rowBusinessUnit(app) === 'HANDPHONE' ? 'MONTHS' : 'YEARS', status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'], customerId: row['Customer ID'] || app['Customer ID'], teamId: row['Team ID'] || app['Team ID'],
           sa: row['Assigned SA ID'] || app['Assigned SA ID'] || 'Unassigned', branch: row['Selected Branch ID'] || app['Assigned Branch ID'] || '', state: row.State, city: row['City or Area'],
-          notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
+          notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], lastCustomerReplyAt: row['Last Customer Reply At'] || app['Last Customer Reply At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], followUpStatus: row['Follow Up Status'] || app['Follow Up Status'], followUpRule: row['Follow Up Rule'] || app['Follow Up Rule'], followUpAttempts: Number(row['Follow Up Attempts'] || app['Follow Up Attempts'] || 0), lastFollowUpAt: row['Last Follow Up At'] || app['Last Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
       });
       return res.status(200).json({ live: true, records });
     }
@@ -1652,7 +1748,7 @@ export default async function handler(req, res) {
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, tenureUnit: businessUnit === 'HANDPHONE' ? 'MONTHS' : 'YEARS', deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)'] || effectiveDeposit(quote)) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)'] || quote['Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '', customerId: row['Customer ID'], teamId: row['Team ID'], originChannelId: row['Origin WhatsApp Channel ID'],
-          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], documentStatus: docs.count ? docs.documentStatus : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete ? 'TRUE' : 'FALSE',
+          branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], followUpStatus: row['Follow Up Status'] || 'ACTIVE', followUpRule: row['Follow Up Rule'], followUpAttempts: Number(row['Follow Up Attempts'] || 0), lastFollowUpAt: row['Last Follow Up At'], lastCustomerReplyAt: row['Last Customer Reply At'], followUpPauseReason: row['Follow Up Pause Reason'], documentStatus: docs.count ? docs.documentStatus : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete ? 'TRUE' : 'FALSE',
           missingDocuments: docs.count ? (docs.classificationPending ? '' : docs.receivedMissing.join(', ')) : (row['Missing Documents'] || ''), verificationPendingDocuments: docs.pendingTypes.join(', '), verifiedMissingDocuments: docs.missing.join(', '), documentClassificationPending: docs.classificationPending, documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,
           icMasked: ic ? `******${ic.slice(-4)}` : '', homeAddress: row['Home Address'], email: row.Email,
           employerName: row['Employer Name'], employerAddress: row['Employer Address'], employerPhone: row['Employer Phone'],
