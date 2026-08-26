@@ -150,10 +150,25 @@ test('follow-up control centre exposes scheduler health, exceptions, history and
   assert.match(app, /Template health/);
   assert.match(app, /Policy &amp; access/);
   assert.match(app, /followUpControlCentreManager/);
-  assert.match(app, /resources=\['integrations','catalog','pricing','users','qa','channels','outbox','activity'\]/);
+  assert.match(app, /resources=\['outbox','activity','followUpSettings'\]/);
   assert.match(css, /\.follow-up-console-grid\{display:grid/);
   assert.match(css, /\.settings-policy-disclosure/);
   assert.match(css, /@media\(max-width:760px\).*\.follow-up-console-grid.*grid-template-columns:1fr/s);
+});
+
+test('follow-up operations are separated from Management and available by role scope', () => {
+  const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../v2.css', import.meta.url), 'utf8');
+  assert.match(app, /function followup\(\)/);
+  assert.match(app, /function followUpTeamWorkspace\(\)/);
+  assert.match(app, /Customer follow-up queue/);
+  assert.match(app, /Information incomplete/);
+  assert.match(app, /Consent unsigned/);
+  assert.match(app, /if\(admin&&loadedResources\.has\('followUpSettings'\)\)followUpControlCentreManager\(\);else followUpTeamWorkspace\(\)/);
+  assert.doesNotMatch(app, /function settings\(\)\{\s*settingsLegacy\(\);\s*if\(state\.user\?\.role==='ADMIN'&&loadedResources\.has\('followUpSettings'\)\)/);
+  assert.doesNotMatch(api, /resource === 'followUpSettings'[\s\S]{0,120}session\.role !== 'ADMIN'/);
+  assert.match(css, /\.follow-up-work-row\{display:grid/);
 });
 
 test('safe scheduler scan is admin-only, read-only and audit logged', () => {

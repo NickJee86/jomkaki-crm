@@ -1691,7 +1691,6 @@ export default async function handler(req, res) {
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: canonicalRole(session.role), region: session.region, businessAccess: canonicalBusinessAccess(session.businessAccess, session.role), saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
   if (resource === 'followUpSettings') {
-    if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
     try {
       const settings = await readFollowUpSettings(req);
       return res.status(200).json({ live: true, global: settings.global, records: publicFollowUpSettings(settings) });
