@@ -7,14 +7,17 @@ const html = read('../index.html');
 const app = read('../app-v2.js');
 const auth = read('../api/_auth.js');
 
-test('primary navigation is grouped into six predictable workspaces', () => {
+test('primary navigation keeps follow-up as a first-class daily workspace', () => {
   const views = [...html.matchAll(/class="nav-item(?: active)?" data-view="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(views, ['dashboard', 'customers', 'workbench', 'products', 'reports', 'management']);
+  assert.deepEqual(views, ['dashboard', 'customers', 'workbench', 'followup', 'products', 'reports', 'management']);
   assert.match(app, /function customers\(\)/);
   assert.match(app, /function products\(\)/);
   assert.match(app, /function management\(\)/);
+  assert.match(app, /function followup\(\)/);
+  assert.match(app, /Daily customer recovery, document collection and reminder delivery/);
   assert.match(app, /Customer 360/);
   assert.match(html, /Tasks & Approvals/);
+  assert.match(html, />Follow-up<\/button>/);
 });
 
 test('refresh errors preserve the authenticated workspace', () => {
@@ -30,4 +33,3 @@ test('sheet-backed sessions tolerate a temporary account directory outage', () =
   assert.match(auth, /validationDeferred:\s*true/);
   assert.match(auth, /clean\(session\.authSource\)\s*===\s*'sheet'/);
 });
-
