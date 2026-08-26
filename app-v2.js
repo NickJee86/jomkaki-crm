@@ -264,13 +264,14 @@ function settingsLegacy(){
   const managedBranches=new Set(state.data.users.filter(user=>['BRANCH_SUPERVISOR','BRANCH_MANAGER'].includes(user.role)&&user.loginEnabled).map(user=>user.branchId).filter(Boolean));
   const missingManagerBranches=branchEntries.filter(([branchId])=>!managedBranches.has(branchId));
   const pendingIntegrations=state.data.integrations.filter(integration=>!integration.automaticActionsEnabled);
+  const pendingIntegrationNames=pendingIntegrations.map(integration=>integration.name||integration.id).filter(Boolean).join(' and ');
   const readinessItems=[
     ['Branch Manager coverage',missingManagerBranches.length?missingManagerBranches.length+' branches need an owner':'Complete',missingManagerBranches.length?'Owner confirmation required':'Every active branch has a Manager login',!missingManagerBranches.length],
     ['Active catalog images',activeImageIssues.length?activeImageIssues.length+' item needs attention':'Complete',activeImageIssues.length?'Open Motor Catalog to add or approve the image':'Every active model has an approved image',!activeImageIssues.length],
     ['Approved pricing completeness',approvedPricingGaps.length?approvedPricingGaps.length+' approved row needs attention':'Complete',approvedPricingGaps.length?'Motor requires a deposit plus at least one 3–5-year monthly payment; Handphone requires at least one approved 1–5-year monthly payment':'All active approved quotes are complete',!approvedPricingGaps.length],
     ['Account password readiness',passwordSetupGaps.length?passwordSetupGaps.length+' enabled accounts need setup':'Complete',passwordSetupGaps.length?'Open Users & Access and reset each affected account password':'Every enabled account has a secure CRM-managed password',!passwordSetupGaps.length],
     ['Synthetic QA isolation',syntheticRows.length+' records isolated','Excluded from daily workspaces, dashboard and business reports; retained only as traceable Admin evidence',true],
-    ['External production connections',pendingIntegrations.length?pendingIntegrations.length+' waiting':'Complete',pendingIntegrations.length?'Meta/LMS remain safely disabled until approved credentials exist':'All approved external connections are live',!pendingIntegrations.length]
+    ['External production connections',pendingIntegrations.length?pendingIntegrations.length+' waiting':'Complete',pendingIntegrations.length?`${pendingIntegrationNames||'Pending integrations'} remain safely gated until the required activation checks pass`:'All approved external connections are live',!pendingIntegrations.length]
   ];
   const readinessCards=readinessItems.map(item=>`<article class="readiness-item ${item[3]?'complete':'attention'}"><div>${pill(item[3]?'READY':'ACTION NEEDED',item[3])}<h4>${esc(item[0])}</h4></div><strong>${esc(item[1])}</strong><p>${esc(item[2])}</p></article>`).join('');
   const missingManagerRows=missingManagerBranches.map(([id,name])=>[name,id,'Owner name and account required']);
