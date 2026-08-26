@@ -139,3 +139,38 @@ test('follow-up settings preserve last-saved attribution for administrators', ()
   assert.match(api, /settings\.updatedBy = session\.username/);
   assert.match(api, /followUpSettingsRows\(settings, session\.username, settings\.updatedAt\)/);
 });
+
+test('follow-up control centre exposes scheduler health, exceptions, history and safe actions', () => {
+  const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
+  const css = fs.readFileSync(new URL('../v2.css', import.meta.url), 'utf8');
+  assert.match(app, /Scheduler health/);
+  assert.match(app, /Run safe scan/);
+  assert.match(app, /Exception queue/);
+  assert.match(app, /Follow-up history/);
+  assert.match(app, /Template health/);
+  assert.match(app, /Policy &amp; access/);
+  assert.match(app, /followUpControlCentreManager/);
+  assert.match(app, /resources=\['integrations','catalog','pricing','users','qa','channels','outbox','activity'\]/);
+  assert.match(css, /\.follow-up-console-grid\{display:grid/);
+  assert.match(css, /\.settings-policy-disclosure/);
+  assert.match(css, /@media\(max-width:760px\).*\.follow-up-console-grid.*grid-template-columns:1fr/s);
+});
+
+test('safe scheduler scan is admin-only, read-only and audit logged', () => {
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  assert.match(api, /action === 'previewFollowUpRun'/);
+  assert.match(api, /runFollowUpDispatch\(req, \{ dryRun: true \}\)/);
+  assert.match(api, /CRM_FOLLOW_UP_SAFE_SCAN/);
+  assert.match(api, /Administrator access is required/);
+});
+
+test('scheduler heartbeat and automatic-message fields support live health and history', () => {
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  const dispatcher = fs.readFileSync(new URL('../api/follow-up-dispatch.js', import.meta.url), 'utf8');
+  assert.match(dispatcher, /FOLLOW_UP_RUN_COMPLETED/);
+  assert.match(dispatcher, /completedAt: now\.toISOString\(\)/);
+  assert.match(api, /automationKey: row\['Automation Key'\]/);
+  assert.match(api, /followUpRule: row\['Follow Up Rule'\]/);
+  assert.match(api, /row\['Actor Username'\]/);
+  assert.match(api, /row\['Occurred At'\]/);
+});

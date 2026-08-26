@@ -10,7 +10,8 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
-  assert.match(html,/app-v2\.js\?v=20260826-go-live-audit1/);
+  assert.match(html,/app-v2\.js\?v=20260826-follow-up-ops2/);
+  assert.match(html,/v2\.css\?v=20260826-follow-up-ops2/);
   [
     'Go-live readiness',
     'Branch Manager coverage',
@@ -38,7 +39,7 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.match(app,/Password setup required/);
   assert.match(app,/u\.passwordConfigured=true;u\.mustChangePassword=true/);
   assert.match(api,/passwordConfigured: Boolean\(clean\(row\['Password Hash'\]\)\)/);
-  assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa','channels'\]/);
+  assert.match(app,/const resources=\['integrations','catalog','pricing','users','qa','channels','outbox','activity'\]/);
   assert.match(app,/const pendingIntegrationNames=pendingIntegrations\.map/);
   assert.ok(app.includes('remain safely gated until the required activation checks pass'));
   assert.ok(!app.includes('Meta/LMS remain safely disabled until approved credentials exist'));
