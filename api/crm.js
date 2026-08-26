@@ -265,7 +265,12 @@ async function replaceWorksheetRows(req, sheet, rows) {
   if (!writeResponse.ok) throw new Error(`Unable to save ${sheet} settings (${writeResponse.status})`);
 }
 
-const publicFollowUpSettings = settings => settings.rules.map(rule => ({ ...rule, ...settings.global }));
+const publicFollowUpSettings = settings => settings.rules.map(rule => ({
+  ...rule,
+  ...settings.global,
+  updatedAt: clean(settings.updatedAt),
+  updatedBy: clean(settings.updatedBy)
+}));
 
 async function readFollowUpSettings(req) {
   const { FOLLOW_UP_SETTINGS_HEADERS, followUpSettingsRows, normalizeFollowUpSettings } = await import('./_follow-up.js');
@@ -276,7 +281,11 @@ async function readFollowUpSettings(req) {
     await replaceWorksheetRows(req, 'Follow_Up_Settings', followUpSettingsRows(defaults, 'SYSTEM_DEFAULT'));
     return defaults;
   }
-  return normalizeFollowUpSettings(rowsToObjects(rows));
+  const sourceRows = rowsToObjects(rows);
+  const settings = normalizeFollowUpSettings(sourceRows);
+  settings.updatedAt = clean(sourceRows[0]?.['Updated At']);
+  settings.updatedBy = clean(sourceRows[0]?.['Updated By']);
+  return settings;
 }
 
 async function getSharePointToken() {
@@ -703,8 +712,10 @@ export default async function handler(req, res) {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         const { FOLLOW_UP_SETTINGS_HEADERS, followUpSettingsRows, normalizeFollowUpSettings } = await import('./_follow-up.js');
         const settings = normalizeFollowUpSettings({ global: body.global || {}, rules: body.rules || [] });
+        settings.updatedAt = now();
+        settings.updatedBy = session.username;
         await ensureWorksheet(req, 'Follow_Up_Settings', FOLLOW_UP_SETTINGS_HEADERS);
-        await replaceWorksheetRows(req, 'Follow_Up_Settings', followUpSettingsRows(settings, session.username));
+        await replaceWorksheetRows(req, 'Follow_Up_Settings', followUpSettingsRows(settings, session.username, settings.updatedAt));
         await writeActivity(req, session, { type: 'CRM_FOLLOW_UP_SETTINGS_UPDATED', description: `Automatic follow-up ${settings.global.enabled ? 'enabled' : 'paused'}; ${settings.rules.filter(rule => rule.enabled).length} stage rules active` });
         return res.status(200).json({ live: true, global: settings.global, records: publicFollowUpSettings(settings) });
       }
@@ -1878,4 +1889,3 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
-
