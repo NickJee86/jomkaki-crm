@@ -201,7 +201,15 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
     await recordActivity(application, handedOver ? 'FOLLOW_UP_HANDED_TO_STAFF' : 'FOLLOW_UP_SENT', `${evaluation.ruleId} attempt ${evaluation.nextAttempt} ${cloudMode ? 'sent through WhatsApp Cloud API' : 'queued for manual WhatsApp delivery'}`);
     results.push({ applicationId: id, outboxId, attempt: evaluation.nextAttempt, ruleId: evaluation.ruleId, status: sendStatus, sent: cloudMode, queued: !cloudMode, handedOver, nextFollowUpAt: nextAt });
   }
-  return { checked: applications.length, results };
+  const summary = {
+    due: results.length,
+    sent: results.filter(result => result.sent).length,
+    queued: results.filter(result => result.queued).length,
+    blocked: results.filter(result => result.blocked || result.failed).length,
+    handedOver: results.filter(result => result.handedOver).length
+  };
+  if (!dryRun) await recordActivity({}, 'FOLLOW_UP_RUN_COMPLETED', `Checked ${applications.length} applications; ${summary.due} due, ${summary.sent} sent, ${summary.queued} queued, ${summary.blocked} blocked and ${summary.handedOver} handed over`);
+  return { checked: applications.length, completedAt: now.toISOString(), summary, results };
 }
 
 export default async function handler(req, res) {
@@ -218,4 +226,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: clean(error?.message) || 'Unable to run follow-up dispatcher' });
   }
 }
-

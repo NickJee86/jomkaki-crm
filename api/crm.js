@@ -708,6 +708,20 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
+      if (action === 'previewFollowUpRun') {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        const { runFollowUpDispatch } = await import('./follow-up-dispatch.js');
+        const preview = await runFollowUpDispatch(req, { dryRun: true });
+        const results = (preview.results || []).slice(0, 100);
+        const summary = {
+          due: results.length,
+          blocked: results.filter(result => result.blocked || result.failed).length,
+          ready: results.filter(result => !result.blocked && !result.failed).length,
+          templatesRequired: results.filter(result => result.templateRequired).length
+        };
+        await writeActivity(req, session, { type: 'CRM_FOLLOW_UP_SAFE_SCAN', description: `Read-only follow-up scan checked ${preview.checked || 0} applications; ${summary.due} due and ${summary.blocked} blocked` });
+        return res.status(200).json({ live: true, checked: preview.checked || 0, summary, results });
+      }
       if (action === 'saveFollowUpSettings') {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         const { FOLLOW_UP_SETTINGS_HEADERS, followUpSettingsRows, normalizeFollowUpSettings } = await import('./_follow-up.js');
@@ -1863,9 +1877,10 @@ export default async function handler(req, res) {
       }) : resource === 'outbox' ? ({
         id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'],
         status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'], channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], wabaId: row['WABA ID'], replyToMessageId: row['Reply To Message ID'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'], displayNumber: channelForMessage(row, channels)?.['Display Number'] || '',
+        messageType: row['Message Type'], templateName: row['Template Name'], language: row.Language, automationKey: row['Automation Key'], followUpRule: row['Follow Up Rule'], followUpAttempt: Number(row['Follow Up Attempt'] || 0),
         attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
         manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING'
-      }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] }));
+      }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || row['Actor Username'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] || row['Occurred At'] }));
       return res.status(200).json({ live: true, records });
     }
 
