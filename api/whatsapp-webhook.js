@@ -2049,15 +2049,30 @@ const promotionOptionText = ({ row = {}, product = {} } = {}) => {
 
 const branchAddress = row => clean(row?.['Branch Address'] || row?.Address || row?.['Full Address'] || row?.Location);
 const branchMapUrl = row => clean(row?.['Google Maps URL'] || row?.['Map URL'] || row?.['Google Map URL']);
+const branchNavigationSlug = row => ({
+  'BR-SWK-STK': 'kuching-satok',
+  'BR-SWK-KSM': 'kota-samarahan',
+  'BR-SWK-BKW': 'kuching-batu-kawa',
+  'BR-SWK-BTU': 'bintulu',
+  'BR-WM-PJ': 'petaling-jaya'
+})[clean(row?.['Branch ID'])] || '';
+const branchShortNavigationUrl = (row, provider) => {
+  const slug = branchNavigationSlug(row);
+  if (!slug) return '';
+  const publicUrl = clean(process.env.JOMKAKI_CRM_PUBLIC_URL || 'https://jomkaki-rider.vercel.app').replace(/\/+$/, '');
+  return `${publicUrl}/go/${slug}/${provider}`;
+};
 const branchGoogleMapsUrl = row => {
+  const shortUrl = branchShortNavigationUrl(row, 'maps');
   const configuredUrl = branchMapUrl(row);
   const address = branchAddress(row);
-  return configuredUrl || (address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '');
+  return shortUrl || configuredUrl || (address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}` : '');
 };
 const branchWazeUrl = row => {
+  const shortUrl = branchShortNavigationUrl(row, 'waze');
   const configuredUrl = clean(row?.['Waze URL'] || row?.['Waze Link']);
   const address = branchAddress(row);
-  return configuredUrl || (address ? `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes` : '');
+  return shortUrl || configuredUrl || (address ? `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes` : '');
 };
 const branchLabel = row => {
   const name = clean(row?.['Branch Name']);

@@ -3,6 +3,12 @@
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/go/:branch/:provider",
+      "destination": "/api/branch-navigation?branch=:branch&provider=:provider"
+    }
+  ],
   "headers": [
     {
       "source": "/",
