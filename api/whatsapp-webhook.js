@@ -847,15 +847,15 @@ const instantCopy = (language, key, values = {}) => {
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Sorry, my earlier reply did not answer your question. For a shop-loan application, the minimum documents are the front and back of your MyKad plus your latest payslip or EPF statement. You may send all files together; there is no need to send them one by one.',
       PAYSLIP_PERIOD: 'The latest three months of payslips are preferred. If you only have one or two months, you may still send them and the application will continue to be checked; it will not be rejected automatically for that reason.',
       BUDGET: 'No problem. I can check another model with a lower monthly instalment. What monthly budget would be comfortable for you?',
-      APPLY: 'To start the shop-loan check, please send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send all the files together or in several uploads.',
-      SHOP_LOAN: 'Yes, we offer shop-loan applications. Processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. If you are ready, I can help start the check now.',
+      APPLY: 'To start the shop-loan check, send the front and back of your MyKad plus your latest payslip or EPF statement here. You may send everything together or whatever you have first.',
+      SHOP_LOAN: 'Yes, we offer shop loans with monthly plans based on the approved model and tenure. Processing normally takes 1–3 working days after complete documents are received. To start, send your MyKad front and back plus your latest payslip or EPF statement; everything together or whatever you have first is fine.',
       SHOP_LOAN_MODEL: 'Which motorcycle model would you like to check?',
       THANKS: 'You are welcome. If you need another model or monthly-instalment check, just message me here.',
       HELP: 'Sure. Tell me what you would like to know and I will check it for you.',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
-      TENURE_QUOTE: `For ${brand} ${model}, the ${localizedTenure.replace(/\s+(year|month)s?$/i, '-$1')} instalment is RM${amount} per month, subject to branch confirmation.`,
+      TENURE_QUOTE: `For ${brand} ${model}, the ${localizedTenure.replace(/\s+(year|month)s?$/i, '-$1')} instalment is RM${amount} per month, subject to branch confirmation. If it suits your budget, send your MyKad front/back and latest payslip or EPF statement to start the shop-loan check.`,
       TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
-      DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation.`,
+      DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation. To start the shop-loan check, send your MyKad front/back and latest payslip or EPF statement here.`,
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} still needs branch confirmation, and I can arrange that check for you.`,
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
       CASH_PRICE_UNAVAILABLE: `The cash price for ${brand} ${model} requires branch confirmation. Meanwhile, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?`,
@@ -865,15 +865,15 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
       BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
-      LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after the complete documents are received, subject to eligibility checks and verification. Would you like me to help start the check now?',
+      LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after complete documents are received, subject to eligibility checks and verification. To start, send your MyKad front and back plus your latest payslip or EPF statement; everything together or whatever you have first is fine.',
       HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
       PROMOTION_LOCATION: 'Current motorcycle promotions differ by area, so I will check the approved offers for your location first.',
       PROMOTION_LIST: `Current approved motorcycle promotions for your area include ${options}.`,
       PROMOTION_NONE: 'I cannot confirm an active approved motorcycle promotion for your area yet.',
       PROMOTION_MODEL: 'Which model would you like me to check in detail?',
       HANDPHONE_DEPOSIT_POLICY: `For phones, I can only share the approved monthly instalment. The deposit and selling price are not quoted to customers.`,
-      INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using the Hire Purchase method. The actual monthly instalment depends on the approved model, deposit and tenure.',
-      DRIVING_LICENCE_ELIGIBILITY: 'Yes, you may start the application even if you do not have a driving licence yet. Final eligibility is still subject to checking. If you are ready, I can help start the application check.',
+      INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using Hire Purchase. The actual monthly instalment depends on the approved model, deposit and tenure. To start the check, send your MyKad front/back and latest payslip or EPF statement here.',
+      DRIVING_LICENCE_ELIGIBILITY: 'Yes, you may start even if you do not have a driving licence; final eligibility remains subject to checking. Send your MyKad front/back and latest payslip or EPF statement here to begin. You may send everything together or whatever you have first.',
       COLOUR_OPTIONS: `For ${brand} ${model}, the approved catalogue colours are ${colours}.`,
       STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}.`,
       STORAGE_AVAILABLE: `Yes, ${brand} ${model} is available in ${requestedStorage}. The approved storage options are ${storage}.`,
@@ -884,7 +884,7 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE_ONLY: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation.`,
       NAME_AFTER_ANSWER: 'May I know your name?',
       LOCATION_AFTER_ANSWER: 'Which city or state are you currently staying in?',
-      QUOTE: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. If this suits your budget, I can help you continue with the loan check.`
+      QUOTE: `For ${brand} ${model}, ${deposit ? `the approved deposit is RM${deposit} and ` : ''}the ${tenure} instalment is RM${amount} per month, subject to branch confirmation. If this suits your budget, send your MyKad front/back and latest payslip or EPF statement here to start the shop-loan check.`
     },
     MS: {
       NAME: 'Hai, terima kasih kerana menghubungi JomKaki Rider. Saya boleh bantu semak motor, telefon dan pelan ansuran bulanan. Boleh saya tahu nama anda?',
@@ -912,15 +912,15 @@ const instantCopy = (language, key, values = {}) => {
       DOCUMENT_REQUIREMENTS_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Untuk loan kedai, dokumen minimum ialah IC depan dan belakang serta slip gaji terkini atau penyata EPF. Boleh hantar semua fail sekali gus; tak perlu hantar satu per satu.',
       PAYSLIP_PERIOD: 'Slip gaji 3 bulan terkini lebih digalakkan. Kalau anda hanya ada 1 atau 2 bulan, masih boleh hantar dan semakan akan diteruskan; permohonan tidak ditolak secara automatik hanya sebab itu.',
       BUDGET: 'Boleh. Saya boleh semak model lain dengan ansuran bulanan yang lebih rendah. Bajet bulanan yang selesa untuk anda berapa?',
-      APPLY: 'Untuk mula semakan loan kedai, boleh hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau dalam beberapa fail.',
-      SHOP_LOAN: 'Boleh, kami ada menyediakan loan kedai. Biasanya proses mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Kalau anda mahu, saya boleh bantu mulakan semakan sekarang.',
+      APPLY: 'Untuk mula semakan Loan Kedai, hantar IC depan dan belakang serta slip gaji terkini atau penyata EPF di sini. Boleh hantar semua sekali atau yang ada dahulu.',
+      SHOP_LOAN: 'Boleh, kami ada Loan Kedai dengan pelan bulanan ikut model dan tempoh yang diluluskan. Proses biasa 1–3 hari bekerja selepas dokumen lengkap diterima. Untuk mula, hantar IC depan, IC belakang dan slip gaji terkini atau penyata EPF; semua sekali atau yang ada dahulu pun boleh.',
       SHOP_LOAN_MODEL: 'Model motor yang mana anda mahu semak?',
       THANKS: 'Sama-sama. Kalau mahu semak model lain atau ansuran bulanan, terus mesej saya di sini.',
       HELP: 'Boleh. Beritahu saja apa yang anda mahu tahu, saya semak untuk anda.',
       DOCUMENT: 'Dokumen anda sudah diterima. Saya sedang semak semua fail untuk permohonan ini. Tak perlu hantar semula sekarang; dokumen yang masih kurang boleh dihantar kemudian.',
-      TENURE_QUOTE: `Untuk ${brand} ${model}, ansuran ${localizedTenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
+      TENURE_QUOTE: `Untuk ${brand} ${model}, ansuran ${localizedTenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Kalau sesuai dengan bajet, hantar IC depan/belakang serta slip gaji terkini atau penyata EPF untuk mula semakan Loan Kedai.`,
       TENURE_UNAVAILABLE: `Ansuran ${localizedTenure} untuk ${brand} ${model} belum ada dalam kadar yang diluluskan. Mahu saya semak tempoh yang tersedia?`,
-      DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan.`,
+      DEPOSIT_QUOTE: `Untuk ${brand} ${model}, deposit yang diluluskan ialah RM${deposit}, tertakluk kepada pengesahan cawangan. Untuk mula semakan Loan Kedai, hantar IC depan/belakang serta slip gaji terkini atau penyata EPF di sini.`,
       DEPOSIT_UNAVAILABLE: `Deposit yang diluluskan untuk ${brand} ${model} masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       CASH_PRICE_QUOTE: `Untuk ${brand} ${model}, harga tunai yang diluluskan ialah RM${cashPrice}, tertakluk kepada pengesahan cawangan.`,
       CASH_PRICE_UNAVAILABLE: `Harga tunai untuk ${brand} ${model} memerlukan pengesahan cawangan. Sementara itu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?`,
@@ -930,15 +930,15 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
       BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
-      LOAN_PROCESSING_TIME: 'Biasanya proses loan kedai mengambil masa 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Mahu saya bantu mulakan semakan sekarang?',
+      LOAN_PROCESSING_TIME: 'Proses Loan Kedai biasanya 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Untuk mula, hantar IC depan, IC belakang dan slip gaji terkini atau penyata EPF; semua sekali atau yang ada dahulu pun boleh.',
       HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
       PROMOTION_LOCATION: 'Promosi motor semasa berbeza mengikut kawasan, jadi saya akan semak tawaran yang diluluskan untuk lokasi anda dahulu.',
       PROMOTION_LIST: `Antara promosi motor yang sedang aktif untuk kawasan anda ialah ${options}.`,
       PROMOTION_NONE: 'Buat masa ini, saya belum dapat sahkan promosi motor aktif yang diluluskan untuk kawasan anda.',
       PROMOTION_MODEL: 'Model mana satu anda mahu saya semak dengan lebih lanjut?',
       HANDPHONE_DEPOSIT_POLICY: `Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Deposit dan harga jualan tidak diberikan kepada pelanggan.`,
-      INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran bulanan sebenar ikut model, deposit dan tempoh yang diluluskan.',
-      DRIVING_LICENCE_ELIGIBILITY: 'Boleh mula memohon walaupun belum ada lesen memandu. Kelayakan akhir masih tertakluk pada semakan. Kalau anda mahu, saya boleh bantu mulakan semakan permohonan.',
+      INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran sebenar ikut model, deposit dan tempoh yang diluluskan. Untuk mula semakan, hantar IC depan/belakang serta slip gaji terkini atau penyata EPF di sini.',
+      DRIVING_LICENCE_ELIGIBILITY: 'Boleh mula memohon walaupun belum ada lesen memandu; kelayakan akhir masih tertakluk pada semakan. Hantar IC depan/belakang serta slip gaji terkini atau penyata EPF untuk mula. Semua sekali atau yang ada dahulu pun boleh.',
       COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang direkodkan dalam katalog diluluskan ialah ${colours}.`,
       STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}.`,
       STORAGE_AVAILABLE: `Ada. ${brand} ${model} tersedia dalam ${requestedStorage}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
@@ -949,7 +949,7 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE_ONLY: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan.`,
       NAME_AFTER_ANSWER: 'Boleh saya tahu nama anda?',
       LOCATION_AFTER_ANSWER: 'Anda tinggal di bandar atau negeri mana?',
-      QUOTE: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Kalau sesuai dengan bajet anda, saya boleh bantu teruskan semakan loan.`
+      QUOTE: `Untuk ${brand} ${model}, ${deposit ? `deposit yang diluluskan ialah RM${deposit} dan ` : ''}ansuran ${tenure} ialah RM${amount} sebulan, tertakluk kepada pengesahan cawangan. Kalau sesuai dengan bajet, hantar IC depan/belakang serta slip gaji terkini atau penyata EPF untuk mula semakan Loan Kedai.`
     },
     ZH: {
       NAME: '您好，感谢您联系 JomKaki Rider。我可以协助您查询合适的摩托车或手机型号及月供。请问该怎么称呼您？',
@@ -973,8 +973,8 @@ const instantCopy = (language, key, values = {}) => {
       DOCUMENT_REQUIREMENTS_RECOVERY: '不好意思，刚才没有正确回答你的问题。店内贷款所需的基本文件是身份证正反面，以及最新薪水单或 EPF 报表。可以一次发送所有文件，不需要逐份发送。',
       PAYSLIP_PERIOD: '建议提供最近 3 个月的薪水单。如果目前只有 1 或 2 个月，也可以先提交并继续审核，不会仅因为月份不足而自动拒绝申请。',
       BUDGET: '可以，我能帮你查询月供较低的其他型号。你觉得每月多少预算比较合适？',
-      APPLY: '要开始店内贷款审核，请在这里发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以逐份发送。',
-      SHOP_LOAN: '可以，我们有提供店内贷款申请。资格需要根据申请人的资料和证明文件审核，我可以逐步协助你完成检查。',
+      APPLY: '要开始店内贷款审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录。可以一次发送全部，或先发送目前有的文件。',
+      SHOP_LOAN: '可以，我们有提供店内贷款月供方案。完整文件收到后，正常审核时间为 1–3 个工作日。要开始审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录；可以一次发送全部，或先发送目前有的文件。',
       SHOP_LOAN_MODEL: '你想查询哪一款摩托？',
       THANKS: '不客气。如果你要查询其他型号或月供，随时在这里留言。',
       HELP: '可以。请直接告诉我你想了解什么，我帮你查询。',
@@ -984,8 +984,8 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_ADDRESS: `可以，这是${branch}的地址：\n${address}${googleMapsUrl ? `\nGoogle Maps：${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze：${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
       BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
-      INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供仍以获批的型号、首付及年期为准。',
-      DRIVING_LICENCE_ELIGIBILITY: '还没有驾照也可以先申请，最终资格仍需审核。如果你准备好了，我可以帮你开始申请审核。',
+      INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供以获批型号、首付及年期为准。要开始审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录。',
+      DRIVING_LICENCE_ELIGIBILITY: '还没有驾照也可以先申请，最终资格仍需审核。要开始审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录；可以一次发送全部，或先发送目前有的文件。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
       STORAGE_OPTIONS: `${brand} ${model} 已获批的容量选择有：${storage}。`,
       STORAGE_AVAILABLE: `有，${brand} ${model} 提供 ${requestedStorage}。已获批容量有：${storage}。`,
@@ -996,7 +996,7 @@ const instantCopy = (language, key, values = {}) => {
       QUOTE_ONLY: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。`,
       NAME_AFTER_ANSWER: '请问该怎么称呼您？',
       LOCATION_AFTER_ANSWER: '请问您目前住在哪个城市或州属？',
-      QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。申请店内贷款需要 MyKad 正反面，以及最新薪水单或 EPF 记录。如果这个方案适合你，可以在这里逐份发送文件。`
+      QUOTE: `${brand} ${model} 的 ${tenure} 月供是每月 RM${amount}，最终以分行确认为准。如果这个方案适合你，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录开始审核；可以一次发送全部，或先发送目前有的文件。`
     }
   };
   return copies[language]?.[key] || copies.EN[key] || '';
@@ -1180,6 +1180,9 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, appli
     'Be warm, concise and human. Use no emoji. Ask at most one question. Keep the reply under 420 characters.',
     'Never answer like a menu and never reuse the last assistant reply. Treat a correction, typo, shorthand or follow-up as a continuation of the same conversation instead of restarting product, name or location collection.',
     'Answer only what the customer asked, then give one useful next action. Do not dump every model, tenure, document or policy unless the customer explicitly asks for a list.',
+    'Use the consultative sales sequence Answer → Understand → Recommend → Prove → Advance. Solve the immediate question first, connect the customer need to an approved Loan Kedai option, explain the relevant value and move to one easy next step.',
+    'Recognize a quotation, deposit, eligibility, processing-time, colour, storage, document or repeated-model question as a buying signal. After answering, confidently invite the customer to start the Loan Kedai check by sending MyKad front, MyKad back and latest payslip or EPF statement. Say the files may be sent together or whatever is available first.',
+    'Handle objections with Acknowledge → Clarify → Solve → Advance. Never use fake urgency, fake scarcity, fear, guilt, hidden conditions, pressure or guaranteed approval.',
     'Never state, estimate or guess a cash price, selling price or deposit. Never invent a monthly instalment. If no approved monthly amount is supplied, say you can check it and ask only the one detail needed.',
     'A product, model or category missing from the approved catalogue is not a rejection. Say it can still be checked with the branch, do not claim it is unavailable, and ask at most one useful clue such as the full model, a photo or monthly budget.',
     'Never promise loan approval, document completeness, credit-check completion or application status unless that fact appears in the context. An Active catalogue row with Approval Status APPROVED is available stock and must be described as available without asking the branch to reconfirm it.',
@@ -1342,12 +1345,17 @@ export function buildConversationTurnContext({ text = '', state = {}, lead = {},
     DOCUMENT_STATUS: documentStatusSnapshot(documents),
     BUSINESS_RULES: {
       primarySalesPath: 'LOAN_KEDAI',
+      salesSequence: 'ANSWER_UNDERSTAND_RECOMMEND_PROVE_ADVANCE',
+      objectionSequence: 'ACKNOWLEDGE_CLARIFY_SOLVE_ADVANCE',
+      requestMinimumDocumentsAfterBuyingSignal: true,
+      manipulativeSalesForbidden: true,
       defaultLanguage: 'MS',
       answerAllLatestQuestionsFirst: true,
       maximumMainQuestions: 1,
       neverRepeatKnownQuestion: true,
       loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
       minimumDocuments: 'MyKad front and back plus latest payslip or EPF statement',
+      documentSubmission: 'Send everything together or whatever is available first; never require one-by-one submission',
       consentRequiredBeforeCreditCheckAndLms: true,
       unlistedProductIsNotRejection: true,
       handphoneCashPriceMustNotBeDisclosed: true
@@ -1428,7 +1436,12 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     approvedOperationalFacts: {
       primarySalesPath: 'LOAN_KEDAI',
       loanKedaiProcessing: '1-3 working days after complete documents are received, subject to eligibility checks and verification',
-      cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.'
+      cashPurchasePolicy: 'Do not proactively promote cash purchase. Answer an explicit motor cash-price question only from an approved value, then guide toward Loan Kedai.',
+      salesSequence: 'Answer → Understand → Recommend → Prove → Advance',
+      objectionSequence: 'Acknowledge → Clarify → Solve → Advance',
+      buyingSignals: 'quotation, deposit, eligibility, processing time, colour, storage, documents, repeated interest in one model',
+      documentConversion: 'After answering a buying signal, invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement; accept everything together or whatever is available first.',
+      ethicalBoundary: 'Never use fake urgency, fake scarcity, fear, guilt, hidden conditions, pressure or guaranteed approval.'
     },
     approvedNotionKnowledge: approvedKnowledgeForRuntime({ text, businessUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit), includeTesting: false }),
     catalogChoices,
@@ -1450,6 +1463,9 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
     'BRANCH_LOCATION means the customer asks where a branch, shop, showroom or nearest service point is. It must never be classified as PROVIDE_LOCATION or MODEL_SELECTION, even when a product was discussed in the previous turn.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
+    'For sales guidance, use Answer → Understand → Recommend → Prove → Advance. A quotation, deposit, eligibility, processing-time, colour, storage, document or repeated-model question is a buying signal. After answering, move the customer toward the suitable approved Loan Kedai plan and the document-start step.',
+    'When a buying signal is present and a model or Loan Kedai interest is clear, suggestedReply should confidently invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement. Explain that the documents start eligibility verification and may be sent together or whatever is available first.',
+    'Handle objections with Acknowledge → Clarify → Solve → Advance. Never use fake urgency, fake scarcity, fear, guilt, hidden conditions, pressure or guaranteed approval.',
     'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
     'Understand product types and likely spelling variants such as scooter, skuter, scuter, kapcai, cub, moped, sport, naked, adventure, cruiser, touring and electric. A category question must be answered as a category enquiry, not with the generic help menu.',
     'Default to MS unless the customer clearly prefers English or Chinese. Profanity or obvious anger is FRUSTRATED, not a model name.',
@@ -2731,6 +2747,11 @@ const declarativeReplyPart = value => {
   return sentences.filter(sentence => !/[?？]\s*$/.test(sentence)).join(' ').replace(/\s{2,}/g, ' ').trim();
 };
 
+const withoutDocumentSalesAdvance = value => {
+  const sentences = clean(value).match(/[^.!?？]+[.!?？]?/g) || [];
+  return sentences.filter(sentence => !/(?:MyKad|IC depan|IC belakang|payslip|slip gaji|EPF statement|penyata EPF)/i.test(sentence)).join(' ').replace(/\s{2,}/g, ' ').trim();
+};
+
 export function buildMultiQuestionSalesDecision(args = {}) {
   const detected = approvedQuestionIntents(args.aiIntent?.questionIntents, args.text).filter(intent => MULTI_QUESTION_INTENTS.has(intent));
   const baseDecision = args.baseDecision || buildInstantSalesDecision(args);
@@ -2740,10 +2761,15 @@ export function buildMultiQuestionSalesDecision(args = {}) {
     text: intentProbeText({ intent, originalText: args.text, state: args.state, aiIntent: args.aiIntent }),
     aiIntent: { ...(args.aiIntent || {}), intent, questionIntents: [intent] }
   })).filter(decision => decision?.handled && clean(decision.text));
-  const answerParts = boundedUnique(decisions.map(decision => declarativeReplyPart(decision.text)).filter(Boolean), 8);
-  if (answerParts.length < 2) return { ...baseDecision, answeredQuestionKeys: detected };
+  const buyingSignalIntents = new Set(['MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'INTEREST_RATE', 'PRODUCT_COLOUR', 'PRODUCT_STORAGE', 'DRIVING_LICENCE_ELIGIBILITY', 'DOCUMENT_REQUIREMENTS', 'SHOP_LOAN', 'PROCESSING_TIME']);
+  const shouldAdvanceToDocuments = detected.some(intent => buyingSignalIntents.has(intent)) && !detected.includes('DOCUMENT_STATUS');
+  const answerParts = boundedUnique(decisions.map(decision => declarativeReplyPart(
+    shouldAdvanceToDocuments ? withoutDocumentSalesAdvance(decision.text) : decision.text
+  )).filter(Boolean), 8);
+  if (answerParts.length < 2 && !shouldAdvanceToDocuments) return { ...baseDecision, answeredQuestionKeys: detected };
   const language = instantLanguage(args.text, args.state || {});
-  const combinedAnswer = answerParts.join(' ').slice(0, 760).trim();
+  const documentAdvance = shouldAdvanceToDocuments ? instantCopy(language, 'APPLY') : '';
+  const combinedAnswer = [...answerParts, documentAdvance].filter(Boolean).join(' ').slice(0, 760).trim();
   const continuation = profileContinuation({
     language,
     state: args.state || {},
@@ -3469,4 +3495,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-
