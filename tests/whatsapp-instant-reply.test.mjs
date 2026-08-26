@@ -79,6 +79,10 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.deepEqual(JOMKAKI_KNOWLEDGE.loanKedai.normalProcessingWorkingDays, [1, 3]);
   assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.primarySalesPath, true);
   assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.proactivelyPromoteCashPurchase, false);
+  assert.deepEqual(JOMKAKI_KNOWLEDGE.loanKedai.salesSequence, ['ANSWER', 'UNDERSTAND', 'RECOMMEND', 'PROVE', 'ADVANCE']);
+  assert.deepEqual(JOMKAKI_KNOWLEDGE.loanKedai.objectionSequence, ['ACKNOWLEDGE', 'CLARIFY', 'SOLVE', 'ADVANCE']);
+  assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.requestMinimumDocumentsAfterBuyingSignal, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.loanKedai.forbidManipulativeSales, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentRequiredBeforeLms, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentDispatchOnFirstApplicationDocument, true);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.consentCanProceedWithMissingDocuments, true);
@@ -86,6 +90,8 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsCollectionMode, 'SINGLE_WHATSAPP_FORM');
   assert.equal(JOMKAKI_KNOWLEDGE.documents.applicationDetailsOneQuestionAtATime, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.inferBankAccountFromBankStatement, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.acceptAvailableDocumentsFirst, true);
+  assert.equal(JOMKAKI_KNOWLEDGE.documents.requireOneByOneSubmission, false);
   assert.equal(JOMKAKI_KNOWLEDGE.documents.documentsAndConsentCollectedInParallel, true);
   assert.deepEqual(approvedMonthlyRateFields('HANDPHONE').map(([, field]) => field), [
     'Monthly 60 Months (RM)', 'Monthly 48 Months (RM)', 'Monthly 36 Months (RM)', 'Monthly 24 Months (RM)', 'Monthly 12 Months (RM)'
@@ -104,6 +110,10 @@ test('approved Notion knowledge snapshot governs language, pricing and consent r
   const applicationKnowledge = approvedKnowledgeForRuntime({ text: 'sudah sign consent, borang mana', businessUnit: 'MOTOR' });
   assert.match(applicationKnowledge, /one complete WhatsApp application form/i);
   assert.match(applicationKnowledge, /one or two outstanding items do not block consent/i);
+  const salesKnowledge = approvedKnowledgeForRuntime({ text: 'berapa ansuran dan macam mana nak apply', businessUnit: 'MOTOR' });
+  assert.match(salesKnowledge, /Answer → Understand → Recommend → Prove → Advance/);
+  assert.match(salesKnowledge, /MyKad front, MyKad back and latest payslip or EPF statement/i);
+  assert.match(salesKnowledge, /fake urgency/i);
   const roleKnowledge = approvedKnowledgeForRuntime({ text: 'regional manager approve catalog', businessUnit: 'MOTOR' });
   assert.match(roleKnowledge, /\[roleSop\]/);
   assert.match(roleKnowledge, /pending until Administrator approval/i);
@@ -1037,8 +1047,8 @@ test('instant motor reply sends approved deposit, image and only one monthly ins
   assert.match(decision.text, /RM273/);
   assert.match(decision.text, /deposit.*RM1000/i);
   assert.doesNotMatch(decision.text, /394|318|12000|selling price/i);
-  assert.match(decision.text, /continue with the loan check/i);
-  assert.doesNotMatch(decision.text, /MyKad|payslip|EPF/i);
+  assert.match(decision.text, /start the shop-loan check/i);
+  assert.match(decision.text, /MyKad.*payslip|MyKad.*EPF/i);
   assert.doesNotMatch(decision.text, /satu per satu|one by one/i);
 });
 
@@ -1285,7 +1295,8 @@ test('a tenure follow-up answers only the requested monthly rate without resendi
   assert.equal(decision.imageUrl, undefined);
   assert.match(decision.text, /3 tahun/);
   assert.match(decision.text, /RM310/);
-  assert.doesNotMatch(decision.text, /RM225|IC depan|slip gaji/i);
+  assert.match(decision.text, /IC depan.*slip gaji|IC depan.*EPF/i);
+  assert.doesNotMatch(decision.text, /RM225/i);
 });
 
 test('phone shorthand groups colour rows and identifies the requested model family', () => {
@@ -1521,6 +1532,10 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
   assert.match(request.input, /Approved Notion knowledge snapshot/);
   assert.match(request.input, /\[conversation\]/);
   assert.match(request.input, /\[memory\]/);
+  assert.match(request.instructions, /Answer → Understand → Recommend → Prove → Advance/);
+  assert.match(request.instructions, /buying signal/i);
+  assert.match(request.instructions, /whatever is available first/i);
+  assert.match(request.instructions, /fake urgency/i);
   assert.equal(request.metadata.knowledge_pages, '19');
 
   const fetchImpl = async (_url, options) => {
@@ -1561,6 +1576,10 @@ test('AI intent understanding uses a strict grounded schema and never receives t
   assert.equal(request.input.includes('60123456789'), false);
   assert.match(request.input, /MTR-YAM-NMAX/);
   assert.match(JSON.stringify(request), /BRANCH_LOCATION/);
+  assert.match(request.instructions, /Answer → Understand → Recommend → Prove → Advance/);
+  assert.match(request.input, /documentConversion/);
+  assert.match(request.input, /whatever is available first/i);
+  assert.match(request.input, /fake urgency/i);
 
   const interpreted = await requestAiIntent({
     text: 'nma berapa sebulan bah',
@@ -1639,7 +1658,7 @@ test('Loan Kedai processing time is answered from approved knowledge and never b
     assert.match(decision.text, /1[–-]3 hari bekerja/i);
     assert.match(decision.text, /loan kedai/i);
     assert.doesNotMatch(decision.text, /harga disahkan|maklum balas cawangan|harga tunai/i);
-    assert.equal((decision.text.match(/\?/g) || []).length, 1);
+    assert.equal((decision.text.match(/\?/g) || []).length, 0);
   }
 });
 
@@ -2142,4 +2161,3 @@ test('licence eligibility is grounded in the approved Notion runtime snapshot', 
   assert.match(knowledge, /never guarantee approval/i);
   assert.match(JOMKAKI_KNOWLEDGE.version, /^(?:notion-\d{4}-\d{2}-\d{2}-[a-f0-9]+|2026-08-21\.11)$/);
 });
-
