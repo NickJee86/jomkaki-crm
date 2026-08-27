@@ -204,3 +204,10 @@ test('scheduler heartbeat remains visible regardless of activity-log length', ()
   assert.match(api, /Activity_Log!A:Z/);
   assert.match(dispatcher, /Activity_Log!A1:Z1/);
 });
+
+test('Administrator can see approved system-level follow-up audit events', () => {
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  assert.match(api, /globalActivityTypes = new Set\(\['FOLLOW_UP_RUN_COMPLETED', 'CRM_FOLLOW_UP_SAFE_SCAN', 'CRM_FOLLOW_UP_SETTINGS_UPDATED'\]\)/);
+  assert.match(api, /resource === 'activity' && session\.role === 'ADMIN'/);
+  assert.match(api, /globalActivityTypes\.has\(clean\(row\['Activity Type'\]\)\.toUpperCase\(\)\)/);
+});
