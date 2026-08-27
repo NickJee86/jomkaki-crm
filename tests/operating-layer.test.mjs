@@ -35,7 +35,9 @@ test('notifications combine customer, document, follow-up and delivery work', ()
   assert.match(app, /Customer replies/);
   assert.match(app, /Delivery issues/);
   assert.match(app, /function customerMessagePreview\(/);
+  assert.match(app, /function customerMessageTypeLabel\(/);
   assert.match(app, /WhatsApp attachment or action received/);
+  assert.match(app, /type==='UNSUPPORTED'\)return''/);
   assert.match(app, /urgent===1\?'needs':'need'/);
 });
 
@@ -50,7 +52,7 @@ test('reports are grouped into clear operating categories', () => {
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260827-message-preview1/);
+  assert.match(html, /app-v2\.js\?v=20260827-message-preview2/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
