@@ -55,7 +55,10 @@ function initializeTableScrollAccess(){
   scheduleTableScrollDock();
 }
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
-const pretty=v=>String(v||'—').replaceAll('_',' ').toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+const pretty=value=>{
+  const labels={AI:'AI',API:'API',CAD:'CAD',CCRIS:'CCRIS',CRM:'CRM',CSV:'CSV',CTOS:'CTOS',EPF:'EPF',GB:'GB',IC:'IC',ID:'ID',LMS:'LMS',PDF:'PDF',SA:'SA',SKU:'SKU',WHATSAPP:'WhatsApp'};
+  return String(value||'—').replaceAll('_',' ').toLowerCase().replace(/\b\w/g,character=>character.toUpperCase()).replace(/\b(Ai|Api|Cad|Ccris|Crm|Csv|Ctos|Epf|Gb|Ic|Id|Lms|Pdf|Sa|Sku|Whatsapp)\b/g,word=>labels[word.toUpperCase()]||word);
+};
 const when=v=>{if(!v)return'—';const d=new Date(v);return Number.isNaN(d.valueOf())?String(v):new Intl.DateTimeFormat('en-MY',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Kuala_Lumpur'}).format(d)};
 const money=v=>v?`RM ${esc(v)}`:'—';
 const pill=(v,good=false)=>`<span class="pill ${good?'green':''}">${pretty(v)}</span>`;
