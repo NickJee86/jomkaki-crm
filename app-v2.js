@@ -1096,7 +1096,7 @@ function resolveCustomer360(identity={}){
   return {lead,application,applications,leadIds,applicationIds,phone,matches};
 }
 function customer360Conversation(context){
-  const incoming=state.data.inbox.filter(context.matches).map(item=>({id:item.id,direction:'incoming',actor:'Customer',message:customerMessagePreview(item,'Message content not recorded'),time:item.time,status:item.status,meta:[whatsappChannelLabel(item),customerMessageTypeLabel(item)].filter(Boolean).join(' | '),humanRequired:item.humanRequired}));
+  const incoming=state.data.inbox.filter(context.matches).map(item=>({id:item.id,direction:'incoming',actor:'Customer',message:customerMessagePreview(item,'Message content not recorded'),time:item.time||item.received||item.created||context.lead?.lastInboundAt||context.lead?.lastCustomerReplyAt||context.lead?.time||context.lead?.created,status:item.status,meta:[whatsappChannelLabel(item),customerMessageTypeLabel(item)].filter(Boolean).join(' | '),humanRequired:item.humanRequired}));
   const outgoing=state.data.outbox.filter(context.matches).map(item=>{const route=String(item.routingStatus||'').toUpperCase(),manual=item.manual||/(MANUAL|STAFF|HUMAN|MANAGER)/.test(route);return{id:item.id,direction:'outgoing',actor:manual?'Staff / Manager':'AI / CRM',message:item.message,time:item.time,status:item.status,meta:[whatsappChannelLabel(item),item.deliveredAt?'Delivered':'',item.readAt?'Read':''].filter(Boolean).join(' | ')}});
   return [...incoming,...outgoing].sort((a,b)=>customer360TimeValue(a.time)-customer360TimeValue(b.time));
 }

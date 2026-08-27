@@ -32,6 +32,7 @@ test('Customer 360 joins every operational record without changing the Sheet mod
   assert.doesNotMatch(app,/meta:\[whatsappChannelLabel\(item\),item\.routingStatus/);
   assert.match(app,/WHATSAPP:'WhatsApp'/);
   assert.match(app,/\(Ai\|Api\|Cad\|Ccris\|Crm\|Csv\|Ctos\|Epf\|Gb\|Ic\|Id\|Lms\|Pdf\|Sa\|Sku\|Whatsapp\)/);
+  assert.match(app,/item\.time\|\|item\.received\|\|item\.created\|\|context\.lead\?\.lastInboundAt\|\|context\.lead\?\.lastCustomerReplyAt/);
 });
 
 test('API returns the full permitted history and the UI protects sensitive data',()=>{
@@ -57,7 +58,7 @@ test('Customer 360 cannot remain on an endless loading screen',()=>{
   assert.match(app,/data-360-retry/);
   assert.match(app,/The customer record could not be loaded/);
   assert.match(css,/\.customer-360-load-warning/);
-  assert.match(html,/app-v2\.js\?v=20260827-customer360-readable2/);
+  assert.match(html,/app-v2\.js\?v=20260827-customer360-readable3/);
   assert.match(app,/function customer360DocumentRequirement/);
   assert.match(app,/IDENTITY_DOCUMENT/);
   assert.match(app,/Received · Pending AI/);
