@@ -198,9 +198,9 @@ test('go-live readiness treats the follow-up scheduler as a production dependenc
   assert.match(app, /No successful scheduler run was observed in the last 45 minutes/);
 });
 
-test('scheduler heartbeat remains visible after the activity log grows', () => {
+test('scheduler heartbeat remains visible regardless of activity-log length', () => {
   const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
   const dispatcher = fs.readFileSync(new URL('../api/follow-up-dispatch.js', import.meta.url), 'utf8');
-  assert.match(api, /Activity_Log!A1:Z5000/);
-  assert.match(dispatcher, /Activity_Log!A1:Z5000/);
+  assert.match(api, /Activity_Log!A:Z/);
+  assert.match(dispatcher, /Activity_Log!A1:Z1/);
 });
