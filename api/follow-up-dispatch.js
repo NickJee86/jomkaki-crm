@@ -115,7 +115,7 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
   const [applicationRows, leadRows, documentRows, outboxRows, channelRows, settingsRows, activityRows] = await Promise.all([
     readSheet(token, 'Applications!A1:CZ2000'), readSheet(token, 'Leads!A1:BG2000'), readSheet(token, 'Document_Log!A1:AD2000'),
     readSheet(token, 'Message_Outbox!A1:BG2000'), readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'), readSheet(token, 'Follow_Up_Settings!A1:Z100', true),
-    readSheet(token, 'Activity_Log!A1:Z5000')
+    readSheet(token, 'Activity_Log!A1:Z1')
   ]);
   const applications = objects(applicationRows), leads = objects(leadRows), documents = objects(documentRows), outbox = objects(outboxRows), channels = objects(channelRows);
   const settings = normalizeFollowUpSettings(objects(settingsRows));
