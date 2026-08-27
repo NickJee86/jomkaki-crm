@@ -1859,7 +1859,7 @@ export default async function handler(req, res) {
     }
 
     if (['inbox', 'outbox', 'activity'].includes(resource)) {
-      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:AC1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:AC1200', 'Outbox ID'] : ['Activity_Log!A1:Z1200', 'Activity ID'];
+      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:AC1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:AC1200', 'Outbox ID'] : ['Activity_Log!A1:Z5000', 'Activity ID'];
       const [rows, channelRows] = await readRanges(req, [cfg[0], channelRange]);
       const channels = rowsToObjects(channelRows);
       const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID'])).reverse();
