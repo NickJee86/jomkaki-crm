@@ -18,7 +18,7 @@ test('wide CRM tables receive a viewport-level horizontal scroll control',()=>{
 test('the scroll control follows dynamic page and table updates',()=>{
   assert.match(appSource,/new MutationObserver\(scheduleTableScrollDock\)\.observe\(app,\{childList:true,subtree:true\}\)/);
   assert.match(appSource,/bind\(\);applyDemoFeatureBanner\(\);scheduleTableScrollDock\(\);/);
-  assert.match(html,/app-v2\.js\?v=20260827-message-preview2/);
+  assert.match(html,/app-v2\.js\?v=20260827-customer360-readable1/);
   assert.match(html,/design-refresh\.css\?v=20260821-table-scroll1/);
 });
 
