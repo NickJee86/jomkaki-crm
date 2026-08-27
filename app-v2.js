@@ -118,6 +118,12 @@ function customerMessagePreview(item={},fallback='Open the conversation'){
   const labels={IMAGE:'Photo received',DOCUMENT:'Document received',AUDIO:'Voice note received',VOICE:'Voice note received',VIDEO:'Video received',STICKER:'Sticker received',LOCATION:'Location received',CONTACT:'Contact received',CONTACTS:'Contact received',REACTION:'WhatsApp reaction received'};
   return labels[type]||((placeholder||type==='UNSUPPORTED')?'WhatsApp attachment or action received':fallback);
 }
+function customerMessageTypeLabel(item={}){
+  const type=operationalValue(item.attachmentType||item.messageType);
+  const labels={TEXT:'Text',IMAGE:'Photo',DOCUMENT:'Document',AUDIO:'Voice note',VOICE:'Voice note',VIDEO:'Video',STICKER:'Sticker',LOCATION:'Location',CONTACT:'Contact',CONTACTS:'Contact',REACTION:'Reaction'};
+  if(!type||type==='UNSUPPORTED')return'';
+  return labels[type]||pretty(type);
+}
 function crmNotifications(){
   const items=[],seen=new Set(),push=item=>{const key=item.key||`${item.type}-${item.applicationId||item.leadId||item.id}`;if(!seen.has(key)){seen.add(key);items.push({...item,key})}};
   state.data.inbox.filter(item=>!isDemoRecord(item)&&(item.humanRequired||['UNREAD','NEW','RECEIVED','HUMAN_HANDOVER_REQUIRED'].includes(operationalValue(item.status)))).forEach(item=>push({key:item.applicationId?`customer-${item.applicationId}`:`message-${item.id}`,type:'message',group:'Customer replies',customer:item.customer||item.phone||'Customer',context:'Unread WhatsApp reply',title:item.humanRequired?'Human reply requested':'Reply customer now',detail:customerMessagePreview(item,'Open the conversation and answer the customer'),tone:item.humanRequired?'urgent':'normal',priority:item.humanRequired?100:80,leadId:item.leadId,applicationId:item.applicationId,phone:item.phone,view:'inbox',id:item.id}));
@@ -1083,7 +1089,7 @@ function resolveCustomer360(identity={}){
   return {lead,application,applications,leadIds,applicationIds,phone,matches};
 }
 function customer360Conversation(context){
-  const incoming=state.data.inbox.filter(context.matches).map(item=>({id:item.id,direction:'incoming',actor:'Customer',message:customerMessagePreview(item,'Message content not recorded'),time:item.time,status:item.status,meta:[whatsappChannelLabel(item),item.messageType,item.attachmentType].filter(Boolean).join(' | '),humanRequired:item.humanRequired}));
+  const incoming=state.data.inbox.filter(context.matches).map(item=>({id:item.id,direction:'incoming',actor:'Customer',message:customerMessagePreview(item,'Message content not recorded'),time:item.time,status:item.status,meta:[whatsappChannelLabel(item),customerMessageTypeLabel(item)].filter(Boolean).join(' | '),humanRequired:item.humanRequired}));
   const outgoing=state.data.outbox.filter(context.matches).map(item=>{const route=String(item.routingStatus||'').toUpperCase(),manual=item.manual||/(MANUAL|STAFF|HUMAN|MANAGER)/.test(route);return{id:item.id,direction:'outgoing',actor:manual?'Staff / Manager':'AI / CRM',message:item.message,time:item.time,status:item.status,meta:[whatsappChannelLabel(item),item.routingStatus,item.deliveredAt?'Delivered':'',item.readAt?'Read':''].filter(Boolean).join(' | ')}});
   return [...incoming,...outgoing].sort((a,b)=>customer360TimeValue(a.time)-customer360TimeValue(b.time));
 }
