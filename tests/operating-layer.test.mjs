@@ -52,7 +52,7 @@ test('reports are grouped into clear operating categories', () => {
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260827-customer360-readable1/);
+  assert.match(html, /app-v2\.js\?v=20260827-customer360-readable2/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
