@@ -189,3 +189,11 @@ test('scheduler heartbeat and automatic-message fields support live health and h
   assert.match(api, /row\['Actor Username'\]/);
   assert.match(api, /row\['Occurred At'\]/);
 });
+
+test('go-live readiness treats the follow-up scheduler as a production dependency', () => {
+  const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
+  assert.match(app, /\['Follow-up scheduler'/);
+  assert.match(app, /followUpOperations\.schedulerHealthy/);
+  assert.match(app, /'activity','followUpSettings'/);
+  assert.match(app, /No successful scheduler run was observed in the last 45 minutes/);
+});
