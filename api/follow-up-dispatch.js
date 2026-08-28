@@ -119,13 +119,14 @@ async function approvedTemplateNames(route) {
   const wabaId = clean(route['WABA ID']), accessToken = channelCredential(route);
   if (!wabaId || !accessToken) return new Set();
   const key = `${wabaId}:${accessToken.slice(-8)}`;
-  if (approvedTemplateCache.has(key)) return approvedTemplateCache.get(key);
+  const cached = approvedTemplateCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.names;
   const version = clean(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0');
   const response = await fetch(`https://graph.facebook.com/${version}/${wabaId}/message_templates?fields=name,status&limit=250`, { headers: { authorization: `Bearer ${accessToken}` } });
   if (!response.ok) throw new Error(`Unable to verify approved Meta templates (${response.status})`);
   const result = await response.json().catch(() => ({}));
   const names = new Set((result.data || []).filter(template => upper(template.status) === 'APPROVED').map(template => clean(template.name)));
-  approvedTemplateCache.set(key, names);
+  approvedTemplateCache.set(key, { names, expiresAt: Date.now() + 5 * 60000 });
   return names;
 }
 
