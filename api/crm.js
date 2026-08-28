@@ -1522,29 +1522,36 @@ export default async function handler(req, res) {
       }
       if (action === 'controlApplicationFollowUp') {
         const { FOLLOW_UP_APPLICATION_HEADERS } = await import('./_follow-up.js');
-        const applicationId = clean(body.applicationId), command = clean(body.command).toUpperCase();
-        if (!['PAUSE', 'RESUME', 'SNOOZE', 'SEND_NOW', 'STOP'].includes(command)) throw new Error('A valid follow-up action is required');
+        const requestedId = clean(body.applicationId || body.leadId || body.recordId), command = clean(body.command).toUpperCase();
+        if (!['PAUSE', 'RESUME', 'SNOOZE', 'SCHEDULE', 'SEND_NOW', 'STOP'].includes(command)) throw new Error('A valid follow-up action is required');
         const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:BG1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), scope = scopeData(session, leads, applications, branches);
-        const record = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
-        if (['APPROVED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(clean(record['Application Status']).toUpperCase()) && !['PAUSE', 'STOP'].includes(command)) throw new Error('Follow-up cannot resume on a closed application');
-        const timestamp = now(), hours = Math.min(720, Math.max(1, Number(body.hours) || 24));
+        const applicationRecord = applications.find(row => clean(row['Application ID']) === requestedId), leadRecord = leads.find(row => clean(row['Lead ID']) === requestedId) || leads.find(row => clean(row['Lead ID']) === clean(applicationRecord?.['Lead ID']));
+        const applicationId = clean(applicationRecord?.['Application ID']), leadId = clean(leadRecord?.['Lead ID']), record = applicationRecord || leadRecord, recordType = applicationRecord ? 'APPLICATION' : 'LEAD';
+        if (!record || (applicationRecord ? !scope.applicationIds.has(applicationId) : !scope.leadIds.has(leadId))) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
+        const closedStatus = clean(applicationRecord?.['Application Status'] || leadRecord?.['Lead Status']).toUpperCase();
+        if (['COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED', 'DO_NOT_CONTACT'].includes(closedStatus) && !['PAUSE', 'STOP'].includes(command)) throw new Error('Follow-up cannot resume on a closed customer record');
+        const timestamp = now(), hours = Math.min(720, Math.max(1, Number(body.hours) || 24)), requestedNext = clean(body.nextAt), parsedNext = Date.parse(requestedNext);
+        if (command === 'SCHEDULE' && (!requestedNext || !Number.isFinite(parsedNext) || parsedNext <= Date.now())) throw new Error('Choose a future follow-up date and time');
         const changes = command === 'PAUSE'
           ? { 'Follow Up Status': 'PAUSED', 'Follow Up Scheduled At': '', 'Follow Up Paused At': timestamp, 'Follow Up Pause Reason': clean(body.reason) || 'Paused manually in CRM', 'Next Follow Up At': '' }
           : command === 'STOP'
             ? { 'Follow Up Status': 'STOPPED', 'Follow Up Scheduled At': '', 'Follow Up Paused At': timestamp, 'Follow Up Pause Reason': clean(body.reason) || 'Stopped manually in CRM', 'Next Follow Up At': '' }
             : command === 'SNOOZE'
               ? { 'Follow Up Status': 'SNOOZED', 'Follow Up Scheduled At': timestamp, 'Follow Up Paused At': '', 'Follow Up Pause Reason': '', 'Next Follow Up At': new Date(Date.now() + hours * 3600000).toISOString() }
+              : command === 'SCHEDULE'
+                ? { 'Follow Up Status': 'SCHEDULED', 'Follow Up Scheduled At': timestamp, 'Follow Up Paused At': '', 'Follow Up Pause Reason': clean(body.reason), 'Next Follow Up At': new Date(parsedNext).toISOString() }
               : { 'Follow Up Status': 'ACTIVE', 'Follow Up Scheduled At': timestamp, 'Follow Up Paused At': '', 'Follow Up Pause Reason': '', 'Next Follow Up At': command === 'SEND_NOW' ? timestamp : new Date(Date.now() + 15 * 60000).toISOString() };
-        await ensureSheetHeaders(req, 'Applications', FOLLOW_UP_APPLICATION_HEADERS);
-        await updateObject(req, 'Applications', 'Application ID', applicationId, { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'CZ');
-        if (record['Lead ID']) {
-          await ensureSheetHeaders(req, 'Leads', FOLLOW_UP_APPLICATION_HEADERS);
-          await updateObject(req, 'Leads', 'Lead ID', record['Lead ID'], { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'BG');
+        if (applicationRecord) {
+          await ensureSheetHeaders(req, 'Applications', FOLLOW_UP_APPLICATION_HEADERS);
+          await updateObject(req, 'Applications', 'Application ID', applicationId, { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'CZ');
         }
-        await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: `CRM_FOLLOW_UP_${command}`, description: command === 'SNOOZE' ? `Automatic follow-up delayed ${hours} hours` : `Automatic follow-up ${command.toLowerCase().replace('_', ' ')}` });
-        return res.status(200).json({ live: true, applicationId, command, nextFollowUp: changes['Next Follow Up At'], followUpStatus: changes['Follow Up Status'] });
+        if (leadId) {
+          await ensureSheetHeaders(req, 'Leads', FOLLOW_UP_APPLICATION_HEADERS);
+          await updateObject(req, 'Leads', 'Lead ID', leadId, { ...changes, 'Updated At': timestamp, 'Updated By': session.username }, 'BG');
+        }
+        await writeActivity(req, session, { leadId, applicationId, type: `CRM_FOLLOW_UP_${command}`, description: command === 'SNOOZE' ? `Automatic follow-up delayed ${hours} hours` : command === 'SCHEDULE' ? `Follow-up scheduled for ${changes['Next Follow Up At']}${clean(body.reason) ? `: ${clean(body.reason)}` : ''}` : `Automatic follow-up ${command.toLowerCase().replace('_', ' ')}` });
+        return res.status(200).json({ live: true, recordId: requestedId, recordType, leadId, applicationId, command, nextFollowUp: changes['Next Follow Up At'], followUpStatus: changes['Follow Up Status'] });
       }
       if (action === 'updateApplication') {
         const applicationId = clean(body.applicationId);
@@ -1884,7 +1891,7 @@ export default async function handler(req, res) {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
       return res.status(200).json({ live: true, records: (await accountRows(req)).filter(row => row.Username).map(publicAccount) });
     }
-    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
+    const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:BG1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
     const allLeads = rowsToObjects(leadRows), allApplications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
@@ -1903,15 +1910,17 @@ export default async function handler(req, res) {
 
     if (resource === 'leads') {
       const latest = latestApplicationByLead(businessApplications);
+      const [conversationRows] = await readRanges(req, ['Conversation_State!A1:AP2000']);
+      const latestConversation = new Map(); rowsToObjects(conversationRows).forEach(row => { if (row['Lead ID']) latestConversation.set(row['Lead ID'], row); });
       const records = [...businessLeads].reverse().map(row => {
-        const app = latest.get(row['Lead ID']) || {};
+        const app = latest.get(row['Lead ID']) || {}, conversation = latestConversation.get(row['Lead ID']) || {}, selectedProduct = [conversation['Selected Product Brand'], conversation['Selected Product Model'], conversation['Selected Product Variant']].filter(Boolean).join(' ');
         return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region, businessUnit: rowBusinessUnit(Object.keys(app).length ? app : row), motorType: app['Motor Type'] || app['Product Condition'] || row['Motor Type'] || row['Product Condition'], inventoryId: app['Second Hand Inventory ID'] || app['Inventory ID'] || row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
           source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
-          model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || row['Enquiry Type'] || `${rowBusinessUnit(row) === 'HANDPHONE' ? 'Handphone' : 'Motor'} enquiry`,
-          productBrand: app['Product Brand'], productModel: app['Product Model'], productVariant: app['Product Variant'] || app.Variant,
+          model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || selectedProduct || row['Enquiry Type'] || `${rowBusinessUnit(row) === 'HANDPHONE' ? 'Handphone' : 'Motor'} enquiry`,
+          productBrand: app['Product Brand'] || conversation['Selected Product Brand'], productModel: app['Product Model'] || conversation['Selected Product Model'], productVariant: app['Product Variant'] || app.Variant || conversation['Selected Product Variant'],
           tenure: rowBusinessUnit(app) === 'HANDPHONE' ? app['Loan Tenure Months'] : app['Loan Tenure Years'], tenureUnit: rowBusinessUnit(app) === 'HANDPHONE' ? 'MONTHS' : 'YEARS', status: row['Lead Status'], applicationStatus: app['Application Status'], applicationId: app['Application ID'], customerId: row['Customer ID'] || app['Customer ID'], teamId: row['Team ID'] || app['Team ID'],
           sa: row['Assigned SA ID'] || app['Assigned SA ID'] || 'Unassigned', branch: row['Selected Branch ID'] || app['Assigned Branch ID'] || '', state: row.State, city: row['City or Area'],
-          notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], lastCustomerReplyAt: row['Last Customer Reply At'] || app['Last Customer Reply At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], followUpStatus: row['Follow Up Status'] || app['Follow Up Status'], followUpRule: row['Follow Up Rule'] || app['Follow Up Rule'], followUpAttempts: Number(row['Follow Up Attempts'] || app['Follow Up Attempts'] || 0), lastFollowUpAt: row['Last Follow Up At'] || app['Last Follow Up At'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
+          notes: row.Notes, channelId: row['Last Inbound WhatsApp Channel ID'] || row['Primary WhatsApp Channel ID'], primaryChannelId: row['Primary WhatsApp Channel ID'], lastInboundNumberId: row['Last Inbound WhatsApp Number ID'], lastInboundAt: row['Last Inbound At'], lastCustomerReplyAt: row['Last Customer Reply At'] || app['Last Customer Reply At'], nextFollowUp: row['Next Follow Up At'] || app['Next Follow Up At'], followUpStatus: row['Follow Up Status'] || app['Follow Up Status'], followUpRule: row['Follow Up Rule'] || app['Follow Up Rule'], followUpAttempts: Number(row['Follow Up Attempts'] || app['Follow Up Attempts'] || 0), lastFollowUpAt: row['Last Follow Up At'] || app['Last Follow Up At'], followUpPauseReason: row['Follow Up Pause Reason'] || app['Follow Up Pause Reason'], created: row['Created At'], time: row['Updated At'] || row['Created At'] };
       });
       return res.status(200).json({ live: true, records });
     }
@@ -2069,3 +2078,4 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
+
