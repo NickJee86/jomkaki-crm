@@ -10,7 +10,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
-  assert.match(html,/app-v2\.js\?v=20260828-customer-workspace1/);
+  assert.match(html,/app-v2\.js\?v=20260828-operational-workbench1/);
   assert.match(html,/v2\.css\?v=20260827-operating-layer1/);
   [
     'Go-live readiness',

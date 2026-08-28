@@ -68,6 +68,10 @@ test('product hub totals match the records employees can open', () => {
 test('tasks and approvals use one clear name throughout the workspace', () => {
   assert.match(app, /head\('Tasks & Approvals'/);
   assert.match(app, /Cases requiring action/);
+  assert.match(app, /function workbench\(\)\{\s*const ranked=operationalApplications\(\)/);
+  assert.match(app, /!isDemoRecord\(item\)&&item\.humanRequired/);
+  assert.match(app, /ranked\.filter\(\(\{action\}\)=>action\.priority>=55\)/);
+  assert.doesNotMatch(app, /const needsDocs=state\.data\.applications/);
   assert.doesNotMatch(app, /My Workbench/);
   assert.doesNotMatch(app, /Assigned exception cases/);
 });
@@ -101,7 +105,7 @@ test('effective customer workspaces keep operational filters and production-only
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260828-customer-workspace1/);
+  assert.match(html, /app-v2\.js\?v=20260828-operational-workbench1/);
   assert.match(html, /business-architecture\.js\?v=20260828-operational-records1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
