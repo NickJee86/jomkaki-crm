@@ -14,6 +14,9 @@ test('primary navigation keeps follow-up as a first-class daily workspace', () =
   assert.match(app, /function products\(\)/);
   assert.match(app, /function management\(\)/);
   assert.match(app, /function followup\(\)/);
+  assert.match(app, /function bindPrimaryNavigation\(\)/);
+  assert.match(app, /dataset\.navigationBound==='true'/);
+  assert.match(app, /openMessageQueue'\)\.addEventListener\('click'/);
   assert.match(app, /Daily customer recovery, document collection and reminder delivery/);
   assert.match(app, /Customer 360/);
   assert.match(html, /Tasks & Approvals/);
@@ -33,3 +36,4 @@ test('sheet-backed sessions tolerate a temporary account directory outage', () =
   assert.match(auth, /validationDeferred:\s*true/);
   assert.match(auth, /clean\(session\.authSource\)\s*===\s*'sheet'/);
 });
+
