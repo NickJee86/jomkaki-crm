@@ -6,6 +6,8 @@ const numberBetween = (value, fallback, minimum, maximum) => {
 };
 
 export const FOLLOW_UP_RULE_IDS = [
+  'SALES_ENQUIRY_IDLE',
+  'QUOTE_NO_RESPONSE',
   'DOCUMENTS_NOT_STARTED',
   'DOCUMENTS_PARTIAL',
   'CONSENT_UNSIGNED',
@@ -28,6 +30,8 @@ export const DEFAULT_FOLLOW_UP_SETTINGS = Object.freeze({
     pauseOnHumanTakeover: true
   }),
   rules: Object.freeze([
+    Object.freeze({ id: 'SALES_ENQUIRY_IDLE', label: 'Sales enquiry went quiet', enabled: true, delays: Object.freeze([2, 24, 72]), maxAttempts: 3, templateName: 'jomkaki_sales_enquiry_v1', language: 'ms' }),
+    Object.freeze({ id: 'QUOTE_NO_RESPONSE', label: 'Quote sent but no response', enabled: true, delays: Object.freeze([4, 24, 72]), maxAttempts: 3, templateName: 'jomkaki_quote_followup_v1', language: 'ms' }),
     Object.freeze({ id: 'DOCUMENTS_NOT_STARTED', label: 'Documents not started', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_documents_start_v1', language: 'ms' }),
     Object.freeze({ id: 'DOCUMENTS_PARTIAL', label: 'Documents partially received', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_documents_partial_v1', language: 'ms' }),
     Object.freeze({ id: 'CONSENT_UNSIGNED', label: 'Consent sent but unsigned', enabled: true, delays: Object.freeze([6, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_consent_unsigned_v1', language: 'ms' }),
@@ -111,7 +115,23 @@ const splitList = value => clean(value).split(/[,;|]/).map(item => item.trim()).
 const closedApplication = application => ['COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(upper(application['Application Status'] ?? application.status));
 const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'TEMPLATE_REQUIRED', 'BLOCKED_CHANNEL'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
 
+export function isFollowUpOptOut(text = '') {
+  const value = clean(text).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!value) return false;
+  return /(?:^|\s)(?:stop|unsubscribe|cancel follow ?up|do not contact|dont contact|jangan hubungi|jangan contact|tak mahu mesej|taknak mesej|tak mau mesej|berhenti mesej|jangan follow ?up)(?:\s|$)/i.test(value)
+    || /(?:不要再联系|不要联系|别再联系|停止联系|不要再发|别再发信息)/.test(value);
+}
+
+export function classifyLeadFollowUpStage(lead = {}) {
+  const status = upper(lead['Lead Status'] ?? lead.status);
+  if (['CONVERTED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED', 'DO_NOT_CONTACT'].includes(status)) return { eligible: false, reason: 'LEAD_CLOSED' };
+  if (humanControlled(lead)) return { eligible: false, reason: 'MANUAL_OR_PAUSED' };
+  const product = clean(lead['Selected Product'] ?? lead.selectedProduct ?? lead.product ?? [lead['Product Brand'], lead['Product Model'], lead['Product Variant']].filter(Boolean).join(' '));
+  return { eligible: true, ruleId: product ? 'QUOTE_NO_RESPONSE' : 'SALES_ENQUIRY_IDLE', selectedProduct: product };
+}
+
 export function classifyFollowUpStage(application = {}, documents = []) {
+  if (upper(application._recordType ?? application.recordType) === 'LEAD') return classifyLeadFollowUpStage(application);
   if (closedApplication(application)) return { eligible: false, reason: 'APPLICATION_CLOSED' };
   if (humanControlled(application)) return { eligible: false, reason: 'MANUAL_OR_PAUSED' };
   const cad = upper(application['CAD Status'] ?? application.cadStatus);
@@ -201,11 +221,13 @@ export function followUpNeedsMetaTemplate(lastReplyAt, sendAt = new Date()) {
 }
 
 const customerName = application => {
-  const name = clean(application['Applicant Name'] ?? application.customer);
+  const name = clean(application['Applicant Name'] ?? application['Customer Name'] ?? application.customer ?? application.name);
   return name && !/^WhatsApp Customer\b/i.test(name) ? name.split(/\s+/)[0] : '';
 };
 const productName = application => clean(application.product || [application['Product Brand'], application['Product Model']].filter(Boolean).join(' '));
 const missingDocumentLabels = value => splitList(value).map(item => ({ IC_FRONT: 'MyKad bahagian depan', IC_BACK: 'MyKad bahagian belakang', INCOME_PROOF: 'slip gaji terkini atau penyata EPF', BANK_STATEMENT: 'bank statement', CTOS_CCRIS_CONSENT: 'borang consent yang sudah ditandatangani' }[upper(item)] || item.replaceAll('_', ' ').toLowerCase()));
+const CONSENT_FORM_URL = 'https://jomkaki-rider.vercel.app/assets/ctos-ccris-consent-bph-v4.pdf';
+const APPLICATION_INFORMATION_FORM = `\n\n*TOLONG ISI MAKLUMAT DI BAWAH:*\nNama pemohon:\nIC pemohon:\nAlamat rumah:\nNombor telefon:\nNama & alamat tempat kerja:\nNombor telefon tempat kerja:\nTempoh berkhidmat:\nJawatan:\nEmail:\nRujukan 1 — Nama / HP / Hubungan:\nRujukan 2 — Nama / HP / Hubungan:\nMotosikal — Jenama / Model / Tempoh loan:`;
 
 export function buildFollowUpMessage({ application = {}, ruleId = '', attempt = 1 } = {}) {
   const name = customerName(application), greeting = name ? `Hi ${name},` : 'Hi,';
@@ -213,9 +235,11 @@ export function buildFollowUpMessage({ application = {}, ruleId = '', attempt = 
   const missingDocuments = missingDocumentLabels(application['Missing Documents'] ?? application.missingDocuments);
   const missingFields = splitList(application['Missing Application Fields'] ?? application.missingApplicationFields).map(item => item.replaceAll('_', ' ').toLowerCase());
   const suffix = attempt >= 3 ? ' Kalau ada apa-apa yang menghalang, beritahu saya—saya boleh bantu semak satu-satu.' : '';
+  if (ruleId === 'SALES_ENQUIRY_IDLE') return `${greeting} saya masih boleh bantu cari motor atau telefon yang sesuai dengan bajet anda. Tak perlu terus buat keputusan—beritahu sahaja bajet bulanan atau jenis model yang anda suka, saya akan pilihkan beberapa pilihan Loan Kedai yang mudah dibandingkan.${suffix}`;
+  if (ruleId === 'QUOTE_NO_RESPONSE') return `${greeting} berkenaan ${product || 'model yang anda tanya tadi'}, saya boleh terus bantu semak ansuran, warna, spesifikasi dan dokumen Loan Kedai tanpa anda perlu mula semula. Kalau bajet tadi belum sesuai, beritahu bajet bulanan anda dan saya carikan pilihan lain.${suffix}`;
   if (ruleId === 'CAD_ADDITIONAL_DOCUMENTS') return `${greeting} pihak semakan perlukan dokumen tambahan untuk teruskan permohonan${productText}. Boleh hantar dokumen yang diminta di sini; saya akan semak sebaik diterima.${suffix}`;
-  if (ruleId === 'CONSENT_UNSIGNED') return `${greeting} borang consent${productText} masih belum lengkap. Boleh tandatangan dan hantar semula PDF atau gambar yang jelas di sini. Tak perlu tunggu dokumen lain lengkap.${suffix}`;
-  if (ruleId === 'INFORMATION_INCOMPLETE') return `${greeting} maklumat permohonan${productText} masih belum lengkap${missingFields.length ? ` (${missingFields.slice(0, 4).join(', ')})` : ''}. Boleh lengkapkan borang yang saya hantar tadi dalam satu mesej supaya saya teruskan semakan.${suffix}`;
+  if (ruleId === 'CONSENT_UNSIGNED') return `${greeting} borang consent${productText} masih belum lengkap. Boleh buka borang ini, tandatangan dan hantar semula PDF atau gambar yang jelas di sini. Tak perlu tunggu dokumen lain lengkap.\n\nBorang consent: ${CONSENT_FORM_URL}${suffix}`;
+  if (ruleId === 'INFORMATION_INCOMPLETE') return `${greeting} maklumat permohonan${productText} masih belum lengkap${missingFields.length ? ` (${missingFields.slice(0, 4).join(', ')})` : ''}. Isi semua yang anda tahu dalam satu mesej—bahagian yang belum pasti boleh tinggalkan dahulu.${APPLICATION_INFORMATION_FORM}${suffix}`;
   if (ruleId === 'DOCUMENTS_PARTIAL') return `${greeting} saya sudah terima sebahagian dokumen${productText}. Yang masih diperlukan ialah ${missingDocuments.length ? missingDocuments.join(', ') : 'dokumen permohonan yang belum lengkap'}. Hantar yang ada dulu pun boleh; saya semak sekali terus.${suffix}`;
   if (ruleId === 'DIRECT_DEBIT_INCOMPLETE') return `${greeting} permohonan${productText} sudah sampai ke langkah Direct Debit. Boleh lengkapkan arahan Direct Debit yang dihantar supaya proses seterusnya boleh diteruskan. Kalau ada bahagian yang tak jelas, balas di sini dan saya bantu.${suffix}`;
   if (ruleId === 'AGREEMENT_UNSIGNED') return `${greeting} perjanjian untuk permohonan${productText} masih belum ditandatangani. Sila semak dan tandatangan perjanjian yang dihantar, kemudian balas di sini selepas selesai. Kalau perlukan bantuan, beritahu saya.${suffix}`;
@@ -228,4 +252,5 @@ export function nextFollowUpAfterSend({ sentAt = new Date(), rule = {}, attempts
   const delay = numberBetween(delays[Math.min(attempts, delays.length - 1)], 24, 0.25, 720);
   return moveToFollowUpBusinessWindow(new Date(new Date(sentAt).valueOf() + delay * 3600000), global).toISOString();
 }
+
 
