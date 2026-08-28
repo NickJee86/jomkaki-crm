@@ -14,6 +14,12 @@
 .whatsapp-channel-panel .data-table td:nth-child(6){white-space:nowrap}
 .channel-binding-notice{display:flex;align-items:center;gap:12px;padding:14px 16px;border:1px solid #bde4dc;border-radius:14px;background:#effbf7;color:#123b39}
 .channel-binding-notice strong{color:#f15f22}
+.template-message-preview{display:grid;gap:7px;padding:14px 16px;border:1px solid #cfe4e1;border-radius:14px;background:#f7fbfa}
+.template-message-preview[hidden]{display:none}
+.template-message-preview>span{font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#60777d}
+.template-message-preview>strong{font-size:12px;color:#123b4a}
+.template-message-preview>p{margin:0;padding:12px;border-radius:10px;background:#fff;border:1px solid #e2eceb;white-space:pre-wrap;font-size:11px;line-height:1.55;color:#203c48}
+.template-message-preview>small{color:#60777d}
 .channel-check{display:flex!important;align-items:center;gap:10px;min-height:46px;padding:10px 12px;border:1px solid #dce6eb;border-radius:12px;background:#f8fbfc;font-weight:700}
 .channel-check input{width:18px!important;height:18px!important;margin:0}
 .whatsapp-number-report{border-top:4px solid #f66318}
