@@ -17,9 +17,11 @@ test('follow-up defaults cover every required incomplete-customer stage', () => 
   assert.equal(settings.global.enabled, true);
   assert.deepEqual(settings.global.activeDays, [1, 2, 3, 4, 5, 6]);
   assert.deepEqual(settings.rules.map(rule => rule.id), [
-    'DOCUMENTS_NOT_STARTED', 'DOCUMENTS_PARTIAL', 'CONSENT_UNSIGNED', 'INFORMATION_INCOMPLETE', 'CAD_ADDITIONAL_DOCUMENTS'
+    'DOCUMENTS_NOT_STARTED', 'DOCUMENTS_PARTIAL', 'CONSENT_UNSIGNED', 'INFORMATION_INCOMPLETE', 'CAD_ADDITIONAL_DOCUMENTS',
+    'DIRECT_DEBIT_INCOMPLETE', 'AGREEMENT_UNSIGNED'
   ]);
   assert.ok(settings.rules.every(rule => rule.maxAttempts === 3));
+  assert.ok(settings.rules.every(rule => rule.templateName.startsWith('jomkaki_')));
 });
 
 test('CRM values safely normalize timing and serialize into the settings worksheet', () => {
@@ -41,6 +43,13 @@ test('follow-up stage prioritizes CAD, consent, incomplete information and docum
   assert.equal(classifyFollowUpStage({ 'Application Status': 'IN_PROGRESS', 'Missing Application Fields': 'Email,Employer Name' }).ruleId, 'INFORMATION_INCOMPLETE');
   assert.equal(classifyFollowUpStage({ 'Application Status': 'IN_PROGRESS', 'Missing Documents': 'IC_BACK', documentsReceived: 2 }).ruleId, 'DOCUMENTS_PARTIAL');
   assert.equal(classifyFollowUpStage({ 'Application Status': 'IN_PROGRESS', 'Missing Documents': 'IC_FRONT,IC_BACK' }).ruleId, 'DOCUMENTS_NOT_STARTED');
+});
+
+test('approved cases continue through Direct Debit and agreement instead of disappearing', () => {
+  const base = { 'Application Status': 'APPROVED', 'Minimum Documents Complete': 'TRUE', 'Credit Consent Status': 'VERIFIED' };
+  assert.equal(classifyFollowUpStage({ ...base, 'Direct Debit Status': 'PENDING', 'Agreement Status': 'PENDING' }).ruleId, 'DIRECT_DEBIT_INCOMPLETE');
+  assert.equal(classifyFollowUpStage({ ...base, 'Direct Debit Status': 'COMPLETED', 'Agreement Status': 'PENDING_SIGNATURE' }).ruleId, 'AGREEMENT_UNSIGNED');
+  assert.equal(classifyFollowUpStage({ ...base, 'Direct Debit Status': 'COMPLETED', 'Agreement Status': 'SIGNED' }).eligible, false);
 });
 
 test('closed, completed, paused and handed-over cases never receive automatic follow-up', () => {
@@ -92,6 +101,8 @@ test('messages explain exactly what remains without asking for completed items a
   assert.match(message, /MyKad bahagian belakang/);
   assert.match(message, /slip gaji terkini atau penyata EPF/);
   assert.doesNotMatch(message, /MyKad bahagian depan/);
+  assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'DIRECT_DEBIT_INCOMPLETE' }), /Direct Debit/);
+  assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'AGREEMENT_UNSIGNED' }), /perjanjian/);
 });
 
 test('Meta template is required after the 24-hour customer service window', () => {
@@ -123,7 +134,13 @@ test('follow-up settings show operational status, approved previews and controll
     'jomkaki_documents_partial_v1',
     'jomkaki_consent_unsigned_v1',
     'jomkaki_application_info_v1',
-    'jomkaki_cad_documents_v1'
+    'jomkaki_cad_documents_v1',
+    'jomkaki_direct_debit_v1',
+    'jomkaki_agreement_unsigned_v1',
+    'jomkaki_document_send_v1',
+    'jomkaki_image_send_v1',
+    'jomkaki_continue_enquiry_v1',
+    'jomkaki_product_image_v1'
   ]) assert.match(app, new RegExp(template));
   assert.match(app, /Waiting customers/);
   assert.match(app, /Due now/);
@@ -168,6 +185,7 @@ test('follow-up operations are separated from Management and available by role s
   assert.match(app, /Customer follow-up queue/);
   assert.match(app, /Information incomplete/);
   assert.match(app, /Consent unsigned/);
+  assert.match(app, /Completion steps/);
   assert.match(app, /if\(admin&&loadedResources\.has\('followUpSettings'\)\)followUpControlCentreManager\(\);else followUpTeamWorkspace\(\)/);
   assert.doesNotMatch(app, /function settings\(\)\{\s*settingsLegacy\(\);\s*if\(state\.user\?\.role==='ADMIN'&&loadedResources\.has\('followUpSettings'\)\)/);
   assert.doesNotMatch(api, /resource === 'followUpSettings'[\s\S]{0,120}session\.role !== 'ADMIN'/);

@@ -17,9 +17,14 @@ test('manual WhatsApp reply exposes safe image and PDF attachments with an hones
   assert.match(app, /form\.attachment\.disabled=!canAttach/);
   assert.match(app, /getWhatsAppTemplates/);
   assert.match(app, /approved Image-header or Document-header template/);
+  assert.match(app, /Exact approved WhatsApp message/);
+  assert.match(app, /CRM will select the matching approved media template automatically/);
+  assert.match(app, /data-body=/);
   assert.match(api, /uploadWhatsAppMedia/);
   assert.match(api, /approvedWhatsAppTemplates/);
   assert.match(api, /message_templates\?fields=/);
+  assert.match(api, /selectedApprovedTemplate\.body/);
+  assert.match(api, /requires a matching attachment/);
   assert.match(api, /WhatsApp 24-hour service window is closed/);
 });
 
