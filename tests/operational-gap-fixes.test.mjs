@@ -8,11 +8,14 @@ const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
 const dispatcher = fs.readFileSync(new URL('../api/whatsapp-outbox-send.js', import.meta.url), 'utf8');
 const vercel = JSON.parse(fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
 
-test('manual WhatsApp reply supports safe image and PDF attachments with approved templates', () => {
+test('manual WhatsApp reply exposes safe image and PDF attachments with an honest Meta-window state', () => {
   assert.match(app, /Attach image or PDF/);
   assert.match(app, /application\/pdf,image\/jpeg,image\/png,image\/webp/);
   assert.match(app, /FOLLOW_UP_TEMPLATE_REGISTRY/);
   assert.match(app, /24-hour reply window is open/);
+  assert.match(app, /attachmentField\.hidden=false/);
+  assert.match(app, /form\.attachment\.disabled=!canAttach/);
+  assert.match(app, /Attachment locked by Meta: send an approved template first/);
   assert.match(api, /uploadWhatsAppMedia/);
   assert.match(api, /WhatsApp 24-hour service window is closed/);
 });
