@@ -23,6 +23,14 @@ test('One SA login can submit Motor, Handphone or Both',()=>{
   assert.match(ui,/name="businessUnit" value="HANDPHONE"/);
   assert.match(api,/Your account cannot submit/);
   assert.match(ui,/if\(architectureAllows\(state\.user\?\.businessAccess,'MOTOR'\)\)await ensureCatalogForForms\(\)/);
+  assert.match(ui,/architectureBusinessAccessLabel/);
+  assert.doesNotMatch(ui,/architectureBusinessPill\(architectureAccess\(user\.businessAccess\)===\x27BOTH\x27\?\x27MOTOR\x27/);
+});
+
+test('Staff application entry only offers physical branches',()=>{
+  assert.match(ui,/architecturePhysicalBranch/);
+  assert.match(ui,/\.filter\(\(\[id,name\]\)=>architecturePhysicalBranch\(id,name\)\)/);
+  assert.match(html,/business-architecture\.js\?v=20260828-staff-entry1/);
 });
 
 test('Motor and Handphone application data remain separately reportable',()=>{
