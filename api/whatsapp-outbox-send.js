@@ -21,10 +21,21 @@ export function buildMetaPayload(row = {}) {
   const to = digits(row['Phone Number']);
   const messageType = clean(row['Message Type'] || 'TEXT').toUpperCase();
   if (!to) throw new Error('Outbox phone number is missing');
-  if (messageType === 'TEMPLATE') {
+  if (messageType === 'TEMPLATE' || messageType.startsWith('TEMPLATE_')) {
     const name = clean(row['Template Name']);
     if (!name) throw new Error('Approved Meta template name is missing');
-    return { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: clean(row.Language || 'en_US') } } };
+    const template = { name, language: { code: clean(row.Language || 'en_US') } };
+    const mediaId = clean(row['Media ID']);
+    const headerFormat = messageType.replace(/^TEMPLATE_?/, '');
+    if (headerFormat === 'IMAGE') {
+      if (!mediaId) throw new Error('Approved image template needs a Meta media ID');
+      template.components = [{ type: 'header', parameters: [{ type: 'image', image: { id: mediaId } }] }];
+    }
+    if (headerFormat === 'DOCUMENT') {
+      if (!mediaId) throw new Error('Approved document template needs a Meta media ID');
+      template.components = [{ type: 'header', parameters: [{ type: 'document', document: { id: mediaId, filename: clean(row['Media File Name']) || 'document.pdf' } }] }];
+    }
+    return { messaging_product: 'whatsapp', to, type: 'template', template };
   }
   const body = clean(row['Message Text']);
   const mediaId = clean(row['Media ID']);

@@ -15,8 +15,11 @@ test('manual WhatsApp reply exposes safe image and PDF attachments with an hones
   assert.match(app, /24-hour reply window is open/);
   assert.match(app, /attachmentField\.hidden=false/);
   assert.match(app, /form\.attachment\.disabled=!canAttach/);
-  assert.match(app, /Attachment locked by Meta: send an approved template first/);
+  assert.match(app, /getWhatsAppTemplates/);
+  assert.match(app, /approved Image-header or Document-header template/);
   assert.match(api, /uploadWhatsAppMedia/);
+  assert.match(api, /approvedWhatsAppTemplates/);
+  assert.match(api, /message_templates\?fields=/);
   assert.match(api, /WhatsApp 24-hour service window is closed/);
 });
 
@@ -41,6 +44,16 @@ test('outbox dispatcher supports uploaded document and image media IDs', () => {
   });
   const image = buildMetaPayload({ 'Phone Number': '60123456789', 'Message Type': 'IMAGE', 'Media ID': 'media-456', 'Message Text': 'Gambar' });
   assert.equal(image.image.id, 'media-456');
+  assert.deepEqual(buildMetaPayload({
+    'Phone Number': '60123456789', 'Message Type': 'TEMPLATE_DOCUMENT', 'Template Name': 'jomkaki_document_send_v1',
+    Language: 'ms', 'Media ID': 'media-789', 'Media File Name': 'consent.pdf'
+  }), {
+    messaging_product: 'whatsapp', to: '60123456789', type: 'template',
+    template: {
+      name: 'jomkaki_document_send_v1', language: { code: 'ms' },
+      components: [{ type: 'header', parameters: [{ type: 'document', document: { id: 'media-789', filename: 'consent.pdf' } }] }]
+    }
+  });
 });
 
 test('pending WhatsApp messages have an automatic five-minute dispatcher', () => {
