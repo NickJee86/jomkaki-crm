@@ -36,6 +36,11 @@ test('Messages new-message composer keeps files staged while customer templates 
   assert.match(app, /if\(!matchTemplateToAttachment\(\)&&form\.attachment\.files\?\.\[0\]\)/);
   assert.match(app, /File ready\. CRM will send it using the matching approved media template/);
   assert.match(app, /messageQueue\.onclick=\(\)=>navigateToView\('outbox'\)/);
+  assert.match(app, /Live Meta check is temporarily unavailable/);
+  assert.match(app, /Showing \$\{fallback\.length\} CRM-approved templates/);
+  assert.match(app, /jomkaki_document_send_v1:\{status:'Active',headerFormat:'DOCUMENT'/);
+  assert.match(app, /jomkaki_image_send_v1:\{status:'Active',headerFormat:'IMAGE'/);
+  assert.match(app, /Sending is still revalidated by Meta/);
 });
 
 test('outbound messages are recorded and locked before Meta delivery', () => {
