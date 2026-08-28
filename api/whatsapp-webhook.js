@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getAccessToken } from './_auth.js';
 import { approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
+import { FOLLOW_UP_APPLICATION_HEADERS, isFollowUpOptOut } from './_follow-up.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -17,6 +18,9 @@ const CONSENT_DISPATCH_RESERVATION_TTL_MS = 5 * 60 * 1000;
 const consentDispatchReservations = globalThis.__JOMKAKI_CONSENT_DISPATCH_RESERVATIONS__ ||= new Map();
 export const CREDIT_CONSENT_TEMPLATE_URL = 'https://jomkaki-rider.vercel.app/assets/ctos-ccris-consent-bph-v4.pdf';
 export const CREDIT_CONSENT_TEMPLATE_VERSION = 'BPH_V4.0_01112020';
+const followUpOptOutReply = text => /[\u4e00-\u9fff]/.test(clean(text))
+  ? '好的，我已经停止自动跟进信息。以后如果还需要查询摩托、手机或 Loan Kedai，直接发信息给我们就可以。'
+  : 'Baik, saya sudah hentikan mesej follow-up automatik. Kalau anda perlukan bantuan motor, telefon atau Loan Kedai semula nanti, mesej kami sahaja.';
 const INBOUND_RESERVATION_TTL_MS = 5 * 60 * 1000;
 const inboundMessageReservations = globalThis.__JOMKAKI_INBOUND_RESERVATIONS__ ||= new Map();
 const sheetReadCache = globalThis.__JOMKAKI_SHEET_READ_CACHE__ ||= new Map();
@@ -3082,7 +3086,7 @@ export default async function handler(req, res) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
         if (message.__skipDuplicate || (message.id && existingMessageIds.has(clean(message.id)))) continue;
-        const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`;
+        const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`, optOutRequested = isFollowUpOptOut(text);
         const contact = (value.contacts || []).find(item => digits(item.wa_id) === phone) || (value.contacts || [])[0] || {};
         const profileName = extractCustomerName(contact.profile?.name);
         const route = routes.find(row => clean(row['Phone Number ID']) === clean(numberId)) || {};
@@ -3227,6 +3231,7 @@ export default async function handler(req, res) {
             instantDecision = { ...instantDecision, text: generatedText, aiGenerated: true, humanFollowUpRequired: undefined };
           }
         }
+        if (optOutRequested) instantDecision = { handled: true, followUpOptOut: true, nextStep: clean(conversationState?.['Current Step']) || 'STEP_01_DISCOVERY', productUnit: routeBusinessUnit, text: followUpOptOutReply(text) };
         let willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
         let instantResult = { sent: false };
@@ -3270,6 +3275,26 @@ export default async function handler(req, res) {
             await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
             await updateObject(token, 'Applications', 'Application ID', application['Application ID'], applicationTurnChanges, 'CZ');
             Object.assign(application, applicationTurnChanges);
+          }
+        }
+        if (optOutRequested) {
+          const stoppedAt = new Date().toISOString(), stopChanges = {
+            'Follow Up Status': 'STOPPED',
+            'Follow Up Scheduled At': '',
+            'Next Follow Up At': '',
+            'Follow Up Paused At': stoppedAt,
+            'Follow Up Pause Reason': 'Customer requested no further follow-up',
+            'Last Customer Reply At': receivedAt,
+            'Updated At': stoppedAt,
+            'Updated By': 'META_WEBHOOK_OPT_OUT'
+          };
+          await ensureHeaders(token, 'Leads', FOLLOW_UP_APPLICATION_HEADERS);
+          await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], stopChanges, 'BG');
+          Object.assign(lead, stopChanges);
+          if (clean(application['Application ID'])) {
+            await ensureHeaders(token, 'Applications', FOLLOW_UP_APPLICATION_HEADERS);
+            await updateObject(token, 'Applications', 'Application ID', application['Application ID'], stopChanges, 'CZ');
+            Object.assign(application, stopChanges);
           }
         }
         if (clean(application['Application ID']) && inferredInboundDocumentType === 'CTOS_CCRIS_CONSENT_SIGNED' && !['VERIFIED', 'DECLINED', 'WITHDRAWN'].includes(clean(application['Credit Consent Status']).toUpperCase())) {
@@ -3495,3 +3520,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
+
