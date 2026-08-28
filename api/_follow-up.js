@@ -10,7 +10,9 @@ export const FOLLOW_UP_RULE_IDS = [
   'DOCUMENTS_PARTIAL',
   'CONSENT_UNSIGNED',
   'INFORMATION_INCOMPLETE',
-  'CAD_ADDITIONAL_DOCUMENTS'
+  'CAD_ADDITIONAL_DOCUMENTS',
+  'DIRECT_DEBIT_INCOMPLETE',
+  'AGREEMENT_UNSIGNED'
 ];
 
 export const DEFAULT_FOLLOW_UP_SETTINGS = Object.freeze({
@@ -26,11 +28,13 @@ export const DEFAULT_FOLLOW_UP_SETTINGS = Object.freeze({
     pauseOnHumanTakeover: true
   }),
   rules: Object.freeze([
-    Object.freeze({ id: 'DOCUMENTS_NOT_STARTED', label: 'Documents not started', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: '', language: 'ms' }),
-    Object.freeze({ id: 'DOCUMENTS_PARTIAL', label: 'Documents partially received', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: '', language: 'ms' }),
-    Object.freeze({ id: 'CONSENT_UNSIGNED', label: 'Consent sent but unsigned', enabled: true, delays: Object.freeze([6, 24, 48]), maxAttempts: 3, templateName: '', language: 'ms' }),
-    Object.freeze({ id: 'INFORMATION_INCOMPLETE', label: 'Application information incomplete', enabled: true, delays: Object.freeze([4, 24, 48]), maxAttempts: 3, templateName: '', language: 'ms' }),
-    Object.freeze({ id: 'CAD_ADDITIONAL_DOCUMENTS', label: 'CAD additional documents required', enabled: true, delays: Object.freeze([2, 24, 48]), maxAttempts: 3, templateName: '', language: 'ms' })
+    Object.freeze({ id: 'DOCUMENTS_NOT_STARTED', label: 'Documents not started', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_documents_start_v1', language: 'ms' }),
+    Object.freeze({ id: 'DOCUMENTS_PARTIAL', label: 'Documents partially received', enabled: true, delays: Object.freeze([3, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_documents_partial_v1', language: 'ms' }),
+    Object.freeze({ id: 'CONSENT_UNSIGNED', label: 'Consent sent but unsigned', enabled: true, delays: Object.freeze([6, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_consent_unsigned_v1', language: 'ms' }),
+    Object.freeze({ id: 'INFORMATION_INCOMPLETE', label: 'Application information incomplete', enabled: true, delays: Object.freeze([4, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_application_info_v1', language: 'ms' }),
+    Object.freeze({ id: 'CAD_ADDITIONAL_DOCUMENTS', label: 'CAD additional documents required', enabled: true, delays: Object.freeze([2, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_cad_documents_v1', language: 'ms' }),
+    Object.freeze({ id: 'DIRECT_DEBIT_INCOMPLETE', label: 'Direct Debit incomplete after approval', enabled: true, delays: Object.freeze([6, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_direct_debit_v1', language: 'ms' }),
+    Object.freeze({ id: 'AGREEMENT_UNSIGNED', label: 'Agreement sent but unsigned', enabled: true, delays: Object.freeze([6, 24, 48]), maxAttempts: 3, templateName: 'jomkaki_agreement_unsigned_v1', language: 'ms' })
   ])
 });
 
@@ -80,7 +84,7 @@ export function normalizeFollowUpSettings(input = {}) {
         numberBetween(row.delays?.[2] ?? row['Third Delay Hours'], defaultRule.delays[2], 0.25, 720)
       ],
       maxAttempts: numberBetween(row.maxAttempts ?? row['Max Attempts'], defaultRule.maxAttempts, 1, 3),
-      templateName: clean(row.templateName ?? row['Meta Template Name']),
+      templateName: clean(row.templateName ?? row['Meta Template Name']) || defaultRule.templateName,
       language: clean(row.language ?? row['Template Language']) || defaultRule.language
     };
   });
@@ -104,7 +108,7 @@ const timestamp = value => {
 };
 const upper = value => clean(value).toUpperCase();
 const splitList = value => clean(value).split(/[,;|]/).map(item => item.trim()).filter(Boolean);
-const closedApplication = application => ['APPROVED', 'COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(upper(application['Application Status'] ?? application.status));
+const closedApplication = application => ['COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(upper(application['Application Status'] ?? application.status));
 const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'TEMPLATE_REQUIRED', 'BLOCKED_CHANNEL'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
 
 export function classifyFollowUpStage(application = {}, documents = []) {
@@ -119,8 +123,17 @@ export function classifyFollowUpStage(application = {}, documents = []) {
   const missingDocuments = splitList(application['Missing Documents'] ?? application.missingDocuments);
   const received = Number(application.documentsReceived ?? 0) || documents.filter(document => clean(document['Application ID'] ?? document.applicationId) === clean(application['Application ID'] ?? application.id)).length;
   const documentsComplete = upper(application['Minimum Documents Complete'] ?? application.minimumDocumentsComplete) === 'TRUE' || upper(application.aiDocumentsComplete) === 'TRUE';
-  if (documentsComplete && !missingDocuments.length) return { eligible: false, reason: 'REQUIREMENTS_COMPLETE' };
-  return { eligible: true, ruleId: received > 0 ? 'DOCUMENTS_PARTIAL' : 'DOCUMENTS_NOT_STARTED', missingDocuments };
+  if (!documentsComplete || missingDocuments.length) return { eligible: true, ruleId: received > 0 ? 'DOCUMENTS_PARTIAL' : 'DOCUMENTS_NOT_STARTED', missingDocuments };
+  const applicationStatus = upper(application['Application Status'] ?? application.status);
+  const lmsStatus = upper(application['LMS Submission Status'] ?? application.lmsSubmissionStatus);
+  const approvedJourney = applicationStatus === 'APPROVED' || /(APPROVED|ACCEPTED|SUCCESS)/.test(cad) || ['APPROVED', 'ACCEPTED', 'SUCCESS', 'COMPLETED'].includes(lmsStatus);
+  if (approvedJourney) {
+    const directDebit = upper(application['Direct Debit Status'] ?? application.directDebitStatus);
+    if (!['COMPLETED', 'ACTIVE'].includes(directDebit)) return { eligible: true, ruleId: 'DIRECT_DEBIT_INCOMPLETE' };
+    const agreement = upper(application['Agreement Status'] ?? application.agreementStatus);
+    if (!['SIGNED', 'COMPLETED', 'APPROVED'].includes(agreement)) return { eligible: true, ruleId: 'AGREEMENT_UNSIGNED' };
+  }
+  return { eligible: false, reason: 'REQUIREMENTS_COMPLETE' };
 }
 
 const localClock = (date, offsetMinutes) => new Date(date.valueOf() + offsetMinutes * 60000);
@@ -204,6 +217,8 @@ export function buildFollowUpMessage({ application = {}, ruleId = '', attempt = 
   if (ruleId === 'CONSENT_UNSIGNED') return `${greeting} borang consent${productText} masih belum lengkap. Boleh tandatangan dan hantar semula PDF atau gambar yang jelas di sini. Tak perlu tunggu dokumen lain lengkap.${suffix}`;
   if (ruleId === 'INFORMATION_INCOMPLETE') return `${greeting} maklumat permohonan${productText} masih belum lengkap${missingFields.length ? ` (${missingFields.slice(0, 4).join(', ')})` : ''}. Boleh lengkapkan borang yang saya hantar tadi dalam satu mesej supaya saya teruskan semakan.${suffix}`;
   if (ruleId === 'DOCUMENTS_PARTIAL') return `${greeting} saya sudah terima sebahagian dokumen${productText}. Yang masih diperlukan ialah ${missingDocuments.length ? missingDocuments.join(', ') : 'dokumen permohonan yang belum lengkap'}. Hantar yang ada dulu pun boleh; saya semak sekali terus.${suffix}`;
+  if (ruleId === 'DIRECT_DEBIT_INCOMPLETE') return `${greeting} permohonan${productText} sudah sampai ke langkah Direct Debit. Boleh lengkapkan arahan Direct Debit yang dihantar supaya proses seterusnya boleh diteruskan. Kalau ada bahagian yang tak jelas, balas di sini dan saya bantu.${suffix}`;
+  if (ruleId === 'AGREEMENT_UNSIGNED') return `${greeting} perjanjian untuk permohonan${productText} masih belum ditandatangani. Sila semak dan tandatangan perjanjian yang dihantar, kemudian balas di sini selepas selesai. Kalau perlukan bantuan, beritahu saya.${suffix}`;
   return `${greeting} saya boleh teruskan semakan Loan Kedai${productText}. Untuk mula, boleh hantar MyKad depan dan belakang bersama slip gaji terkini atau penyata EPF. Kalau belum ada semua, hantar yang ada dulu—saya semak sekali terus.${suffix}`;
 }
 

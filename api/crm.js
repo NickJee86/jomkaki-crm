@@ -567,8 +567,11 @@ async function approvedWhatsAppTemplates(channel) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(clean(result.error?.message) || `Meta template lookup failed (${response.status})`);
   return (Array.isArray(result.data) ? result.data : []).filter(template => clean(template.status).toUpperCase() === 'APPROVED').map(template => {
-    const header = (Array.isArray(template.components) ? template.components : []).find(component => clean(component.type).toUpperCase() === 'HEADER');
-    return { name: clean(template.name), status: 'APPROVED', language: clean(template.language) || 'ms', category: clean(template.category), headerFormat: clean(header?.format).toUpperCase() };
+    const components = Array.isArray(template.components) ? template.components : [];
+    const header = components.find(component => clean(component.type).toUpperCase() === 'HEADER');
+    const body = components.find(component => clean(component.type).toUpperCase() === 'BODY');
+    const footer = components.find(component => clean(component.type).toUpperCase() === 'FOOTER');
+    return { name: clean(template.name), status: 'APPROVED', language: clean(template.language) || 'ms', category: clean(template.category), headerFormat: clean(header?.format).toUpperCase(), body: clean(body?.text), footer: clean(footer?.text) };
   }).filter(template => template.name);
 }
 
@@ -1703,7 +1706,8 @@ export default async function handler(req, res) {
           if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
           const unassignedHandover = inboxRecords.some(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()) && clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF' && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId)));
           if (session.role === 'STAFF' && unassignedHandover) return res.status(403).json({ live: false, error: 'This human handover is controlled by a Manager and has not been assigned to Staff.' });
-          const phone = whatsappPhone(body.phone), message = clean(body.message), attachment = body.attachment?.data ? body.attachment : null;
+          const phone = whatsappPhone(body.phone), attachment = body.attachment?.data ? body.attachment : null;
+          let message = clean(body.message);
           if (!phone || (!message && !attachment && clean(body.messageType).toUpperCase() !== 'TEMPLATE') || message.length > 4000) throw new Error('A valid phone number and message or attachment are required');
           let messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT';
           const templateName = clean(body.templateName), language = clean(body.language) || 'ms';
@@ -1723,6 +1727,14 @@ export default async function handler(req, res) {
           const serviceWindowOpen = Boolean(latestInbound && Date.now() - rowTime(latestInbound) <= 24 * 60 * 60 * 1000);
           if (cloudMode && !serviceWindowOpen && messageType !== 'TEMPLATE') throw new Error('The WhatsApp 24-hour service window is closed. Choose an approved Meta template.');
           if (!cloudMode && attachment) throw new Error('CRM file sending requires WhatsApp Cloud mode. Manual WhatsApp cannot attach a local file safely.');
+          let selectedApprovedTemplate = null;
+          if (cloudMode && messageType === 'TEMPLATE') {
+            const templates = await approvedWhatsAppTemplates(route);
+            selectedApprovedTemplate = templates.find(template => template.name === templateName && template.language === language) || templates.find(template => template.name === templateName);
+            if (!selectedApprovedTemplate) throw new Error('The selected template is not approved for this official WhatsApp account');
+            if (['IMAGE', 'DOCUMENT'].includes(selectedApprovedTemplate.headerFormat) && !attachment) throw new Error(`The approved ${selectedApprovedTemplate.headerFormat.toLowerCase()} template requires a matching attachment`);
+            message = selectedApprovedTemplate.body || message || templateName;
+          }
           let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '', media = null;
           if (cloudMode) {
             const { accessToken, phoneNumberId, version } = channelCredentials(route);
@@ -1731,10 +1743,7 @@ export default async function handler(req, res) {
               if (messageType === 'TEMPLATE') {
                 const validated = validateUploadFile(attachment, { label: 'WhatsApp attachment' });
                 const requiredHeader = validated.mimeType.startsWith('image/') ? 'IMAGE' : 'DOCUMENT';
-                const templates = await approvedWhatsAppTemplates(route);
-                const approvedTemplate = templates.find(template => template.name === templateName && template.language === language) || templates.find(template => template.name === templateName);
-                if (!approvedTemplate) throw new Error('The selected template is not approved for this official WhatsApp account');
-                if (approvedTemplate.headerFormat !== requiredHeader) throw new Error(`Choose an approved ${requiredHeader.toLowerCase()}-header template for this attachment`);
+                if (selectedApprovedTemplate?.headerFormat !== requiredHeader) throw new Error(`Choose an approved ${requiredHeader.toLowerCase()}-header template for this attachment`);
               }
               media = await uploadWhatsAppMedia(attachment, { accessToken, phoneNumberId, version });
               const mediaType = media.mimeType.startsWith('image/') ? 'IMAGE' : 'DOCUMENT';
