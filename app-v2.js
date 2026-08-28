@@ -464,6 +464,13 @@ function reportRegionKey(value){
   if(normalized.includes('EAST')||normalized.includes('SARAWAK')||normalized.includes('SABAH'))return'EAST_MALAYSIA';
   return normalized||'UNASSIGNED';
 }
+function reportPhysicalBranch(id,name=''){
+  const branchId=String(id||'').trim().toUpperCase(),label=String(name||'').trim().toUpperCase();
+  return /^BR-/.test(branchId)&&!/(TEAM|VIRTUAL|IPHONE|HANDPHONE)/.test(`${branchId} ${label}`);
+}
+function reportOperationalChannel(channel={}){
+  return Boolean(channel.id&&channel.active&&!/(RETIRED|LEGACY)/.test(`${channel.id} ${channel.name||''}`.toUpperCase()));
+}
 
 function reportPercent(value,total){
   return total?Math.round(value/total*100)+'%':'0%';
@@ -854,7 +861,7 @@ function reportsLegacy(){
   const team=reportTeam.filter(member=>branchAllowed(member.branchId)&&staffAllowed(member.id));
   const branchNames=Object.fromEntries(state.data.team.map(member=>[member.branchId,member.branch||member.branchId]));
   const branchRegions=Object.fromEntries(state.data.team.map(member=>[member.branchId,reportRegionKey(member.region)]));
-  const branchIds=[...new Set([...leads.map(lead=>lead.branch),...applications.map(application=>application.branch),...team.map(member=>member.branchId)].filter(Boolean))];
+  const branchIds=[...new Set([...leads.map(lead=>lead.branch),...applications.map(application=>application.branch),...team.map(member=>member.branchId)].filter(branchId=>reportPhysicalBranch(branchId,branchNames[branchId])))];
   const branchRows=branchIds.map(branchId=>{
     const branchLeads=leads.filter(lead=>lead.branch===branchId);
     const branchApplications=applications.filter(application=>application.branch===branchId);
@@ -960,7 +967,7 @@ function reportsLegacy(){
   ]:[];
   const report={period,productView,region,branch,staff,stage,secondHandStatus,secondHandQuery,summary,trendRows,agingRows,documentGapRows,sourceRows,loanStatusRows,rejectionRows,regionRows,branchRows,staffRows,integrationStatusRows,metaReportingRows,lmsReportingRows,secondHandRows,handphoneApprovalRows};
   const accountRoleRows=Object.entries(adminGroup(state.data.users,user=>user.role)).map(entry=>[entry[0],entry[1]]);
-  const branchOptions=[...new Map([...reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId]),...secondHandBase.filter(motor=>motor.branchId).map(motor=>[motor.branchId,motor.branch||motor.branchId])]).entries()].sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
+  const branchOptions=[...new Map([...reportTeam.filter(member=>member.branchId).map(member=>[member.branchId,member.branch||member.branchId]),...secondHandBase.filter(motor=>motor.branchId).map(motor=>[motor.branchId,motor.branch||motor.branchId])]).entries()].filter(option=>reportPhysicalBranch(option[0],option[1])).sort((a,b)=>String(a[1]).localeCompare(String(b[1])));
   const staffOptions=reportTeam.filter(member=>branch==='ALL'||member.branchId===branch).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
   const stageOptions=[...new Set(state.data.applications.filter(application=>!isSyntheticApplication(application)&&regionAllowed(application.region||allLeadRegions[application.leadId])&&branchAllowed(application.branch)&&staffAllowed(application.sa)).map(application=>application.stage).filter(Boolean))].sort();
   const auditRows=activity.slice(0,15).map(event=>[when(event.time),pretty(event.type),event.applicationId||event.leadId||'—',event.description||'—',event.actor||'System']);
@@ -1483,7 +1490,8 @@ function channelReportSource(){
 function appendWhatsAppChannelReport(source){
   if(state.user?.role!=='ADMIN'||!loadedResources.has('channels'))return;
   const region=state.reportRegion||'ALL',selected=state.reportChannel||'ALL';
-  const channels=(state.data.channels||[]).filter(channel=>(region==='ALL'||channel.region===region)&&(selected==='ALL'||channel.id===selected));
+  const availableChannels=(state.data.channels||[]).filter(reportOperationalChannel);
+  const channels=availableChannels.filter(channel=>(region==='ALL'||channel.region===region)&&(selected==='ALL'||channel.id===selected));
   const leadChannel=lead=>lead.primaryChannelId||lead.channelId;
   const rows=channels.map(channel=>{
     const leads=source.leads.filter(lead=>leadChannel(lead)===channel.id),leadIds=new Set(leads.map(lead=>lead.id)),applications=source.applications.filter(item=>leadIds.has(item.leadId));
@@ -1492,7 +1500,7 @@ function appendWhatsAppChannelReport(source){
   });
   const toolbar=app.querySelector('.report-toolbar'),spacer=toolbar?.querySelector('.toolbar-spacer');
   if(spacer&&!document.getElementById('reportChannel')){
-    const options=(state.data.channels||[]).filter(channel=>region==='ALL'||channel.region===region).map(channel=>reportOption(channel.id,`${channel.name||channel.id}${channel.displayNumber?' · '+channel.displayNumber:''}`,selected)).join('');
+    const options=availableChannels.filter(channel=>region==='ALL'||channel.region===region).map(channel=>reportOption(channel.id,`${channel.name||channel.id}${channel.displayNumber?' · '+channel.displayNumber:''}`,selected)).join('');
     spacer.insertAdjacentHTML('beforebegin',`<label>WhatsApp number<select id="reportChannel">${reportOption('ALL','All official numbers',selected)}${options}</select></label>`);
     document.getElementById('reportChannel').onchange=event=>{state.reportChannel=event.target.value;reports()};
     const regionSelect=document.getElementById('reportRegion'),original=regionSelect?.onchange;if(regionSelect&&original)regionSelect.onchange=event=>{const next=event.target.value,current=(state.data.channels||[]).find(channel=>channel.id===state.reportChannel);if(current&&next!=='ALL'&&current.region!==next)state.reportChannel='ALL';original(event)};
@@ -1523,7 +1531,8 @@ function organizeReports(){
 }
 
 function reports(){
-  const source=channelReportSource(),selected=state.reportChannel||'ALL';
+  const source=channelReportSource(),requestedChannel=state.reportChannel||'ALL',selected=requestedChannel==='ALL'||(state.data.channels||[]).some(channel=>channel.id===requestedChannel&&reportOperationalChannel(channel))?requestedChannel:'ALL';
+  if(selected!==requestedChannel)state.reportChannel='ALL';
   const backup={leads:state.data.leads,applications:state.data.applications,documents:state.data.documents,inbox:state.data.inbox,outbox:state.data.outbox,activity:state.data.activity};
   Object.assign(state.data,source);
   if(state.user?.role==='ADMIN'&&selected!=='ALL'&&loadedResources.has('channels')){
