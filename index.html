@@ -43,8 +43,8 @@
       <nav class="nav" aria-label="Primary navigation">
         <p class="nav-label">Workspace</p>
         <button class="nav-item active" data-view="dashboard"><span>HM</span>Home</button>
-        <button class="nav-item" data-view="customers"><span>CU</span>Customers <b id="leadBadge">0</b></button>
-        <button class="nav-item" data-view="workbench"><span>TK</span>Tasks & Approvals <i id="workBadge">0</i></button>
+        <button class="nav-item" data-view="customers"><span>CU</span>Customers <b id="leadBadge" hidden>0</b></button>
+        <button class="nav-item" data-view="workbench"><span>TK</span>Tasks & Approvals <i id="workBadge" hidden>0</i></button>
         <button class="nav-item" data-view="followup"><span>FU</span>Follow-up</button>
         <button class="nav-item" data-view="products"><span>PR</span>Products & Pricing</button>
         <button class="nav-item" data-view="reports"><span>RP</span>Reports</button>
@@ -69,13 +69,13 @@
       <header class="topbar">
         <button class="menu-button" id="menuButton" aria-label="Open menu">MENU</button>
         <div class="search"><span>FIND</span><input id="globalSearch" placeholder="Search lead, phone or application ID..." /><kbd>Ctrl K</kbd></div>
-        <div class="top-actions"><button class="icon-button" aria-label="Notifications">N<em>3</em></button><button class="primary" id="newLeadButton">Refresh data</button></div>
+        <div class="top-actions"><button class="icon-button" aria-label="Notifications">N<em hidden>0</em></button><button class="primary" id="newLeadButton">Refresh data</button></div>
       </header>
       <section id="appView" class="view" aria-live="polite"></section>
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="./app-v2.js?v=20260828-task-labels1"></script>
+  <script src="./app-v2.js?v=20260828-badge-slots1"></script>
   <script src="./business-architecture.js?v=20260828-business-access-labels1"></script>
   <script src="./product-business.js?v=20260817-catalog-workflow2"></script>
   <script src="./handphone-tenure-v2.js?v=20260814-audit-fix1"></script>

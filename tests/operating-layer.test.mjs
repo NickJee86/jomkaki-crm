@@ -71,10 +71,18 @@ test('tasks and approvals use one clear name throughout the workspace', () => {
   assert.doesNotMatch(app, /Assigned exception cases/);
 });
 
+test('zero workload badges stay quiet and WhatsApp capacity is unambiguous', () => {
+  assert.match(app, /function setNavBadge\(id,value\)/);
+  assert.match(html, /id="workBadge" hidden>0/);
+  assert.match(html, /aria-label="Notifications">N<em hidden>0<\/em>/);
+  assert.match(app, /\$\{connected\.length\} LIVE · \$\{channels\.length\} SLOTS/);
+  assert.doesNotMatch(app, /LIVE \/ 10 RESERVED/);
+});
+
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260828-task-labels1/);
+  assert.match(html, /app-v2\.js\?v=20260828-badge-slots1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
