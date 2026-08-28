@@ -7,6 +7,10 @@
     {
       "path": "/api/follow-up-dispatch",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/whatsapp-outbox-send",
+      "schedule": "*/5 * * * *"
     }
   ],
   "rewrites": [
@@ -41,4 +45,3 @@
     }
   ]
 }
-

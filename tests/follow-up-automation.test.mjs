@@ -109,7 +109,10 @@ test('CRM and Vercel expose the complete follow-up control layer', () => {
   assert.match(api, /saveFollowUpSettings/);
   assert.match(api, /Follow_Up_Settings/);
   assert.match(dispatcher, /FOLLOW_UP_AUTOMATION/);
-  assert.deepEqual(vercel.crons, [{ path: '/api/follow-up-dispatch', schedule: '*/15 * * * *' }]);
+  assert.deepEqual(vercel.crons, [
+    { path: '/api/follow-up-dispatch', schedule: '*/15 * * * *' },
+    { path: '/api/whatsapp-outbox-send', schedule: '*/5 * * * *' }
+  ]);
 });
 
 test('follow-up settings show operational status, approved previews and controlled tests without a wide table', () => {

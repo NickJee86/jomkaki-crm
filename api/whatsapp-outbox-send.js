@@ -27,6 +27,7 @@ export function buildMetaPayload(row = {}) {
     return { messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: clean(row.Language || 'en_US') } } };
   }
   const body = clean(row['Message Text']);
+  const mediaId = clean(row['Media ID']);
   if (clean(row['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') {
     const documentUrl = clean(row['Document URL']) || clean(body.match(/https:\/\/\S+?\.pdf(?:\?\S*)?/i)?.[0]);
     if (!/^https:\/\//i.test(documentUrl)) throw new Error('Consent document URL must use HTTPS');
@@ -38,11 +39,18 @@ export function buildMetaPayload(row = {}) {
   const imageUrl = clean(row['Image URL']);
   const imageMessage = Boolean(imageUrl) || ['IMAGE', 'MOTOR_IMAGE', 'HANDPHONE_IMAGE', 'PRODUCT_IMAGE', 'SESSION_IMAGE'].includes(messageType);
   if (imageMessage) {
-    if (!/^https:\/\//i.test(imageUrl)) throw new Error('Outbox image URL must use HTTPS');
+    if (!mediaId && !/^https:\/\//i.test(imageUrl)) throw new Error('Outbox image needs a Meta media ID or HTTPS URL');
     const caption = clean(row['Image Caption'] || row['Image Caption (MS)'] || row['Message Text']).slice(0, 1024);
     return {
       messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'image',
-      image: { link: imageUrl, ...(caption ? { caption } : {}) }
+      image: { ...(mediaId ? { id: mediaId } : { link: imageUrl }), ...(caption ? { caption } : {}) }
+    };
+  }
+  if (messageType === 'DOCUMENT') {
+    if (!mediaId) throw new Error('Outbox document needs a Meta media ID');
+    return {
+      messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'document',
+      document: { id: mediaId, filename: clean(row['Media File Name']) || 'document.pdf', ...(body ? { caption: body.slice(0, 1024) } : {}) }
     };
   }
   if (!body) throw new Error('Outbox message text is missing');
@@ -73,7 +81,7 @@ const objects = rows => {
 };
 
 async function updateOutbox(token, rowNumber, changes) {
-  const [headers = []] = await readSheet(token, 'Message_Outbox!A1:Z1');
+  const [headers = []] = await readSheet(token, 'Message_Outbox!A1:AJ1');
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(headers.indexOf(header))}${rowNumber}`, values: [[value ?? '']] }));
   if (!data.length) return;
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
@@ -97,42 +105,50 @@ function readSecret(req) {
   return bearer || clean(req.headers['x-jomkaki-dispatch-secret']);
 }
 
+async function dispatchRecord(token, outbox, channels) {
+  const outboxId = clean(outbox['Outbox ID']), existingProviderId = clean(outbox['Provider Message ID']), existingStatus = clean(outbox['Send Status']).toUpperCase();
+  if (existingProviderId || ['SENT', 'DELIVERED', 'READ'].includes(existingStatus)) return { ok: true, idempotent: true, outboxId, status: existingStatus, providerMessageId: existingProviderId };
+  if (existingStatus === 'SENDING') return { ok: false, outboxId, locked: true, error: 'Message is already being sent. Do not resend it.' };
+  let attemptCount = Number(outbox['Attempt Count'] || 0) + 1, channelId = clean(outbox['Internal Channel ID']);
+  try {
+    const route = channels.find(row => clean(row['Internal Channel ID']) === channelId) || {};
+    const binding = validateRoute(outbox, route);channelId = binding.channelId;
+    const accessToken = clean(process.env[`${binding.credentialKey}_ACCESS_TOKEN`]);
+    if (!accessToken) throw new Error(`BLOCKED: Protected credential ${binding.credentialKey}_ACCESS_TOKEN is not configured`);
+    const version = clean(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0');
+    await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENDING', 'Attempt Count': String(attemptCount), 'Error Message': '', 'Send Routing Status': `VERCEL_CHANNEL_SENDING:${binding.channelId}` });
+    const response = await fetch(`https://graph.facebook.com/${version}/${binding.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(buildMetaPayload(outbox)) });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(clean(result.error?.message) || `Meta API error ${response.status}`);
+    const providerMessageId = clean(result.messages?.[0]?.id), timestamp = new Date().toISOString();
+    await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Attempt Count': String(attemptCount), 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'WhatsApp Number ID': binding.phoneNumberId, 'Send Routing Status': `VERCEL_CHANNEL_DISPATCH:${binding.channelId}` });
+    if (clean(outbox['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
+    return { ok: true, outboxId, channelId: binding.channelId, status: 'SENT', providerMessageId };
+  } catch (error) {
+    const message = clean(error?.message) || 'Unable to dispatch WhatsApp message';
+    await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'FAILED', 'Attempt Count': String(attemptCount), 'Error Message': message, 'Send Routing Status': `BLOCKED_OR_FAILED:${channelId || 'UNASSIGNED'}` }).catch(() => {});
+    return { ok: false, outboxId, channelId, error: message };
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Method not allowed' });
-  const expectedSecret = clean(process.env.WHATSAPP_DISPATCH_SECRET);
-  if (!expectedSecret || !safeEqual(readSecret(req), expectedSecret)) return res.status(401).json({ ok: false, error: 'Unauthorized dispatcher' });
+  if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ ok: false, error: 'Method not allowed' });
+  const supplied = readSecret(req), dispatchSecret = clean(process.env.WHATSAPP_DISPATCH_SECRET), cronSecret = clean(process.env.CRON_SECRET);
+  const authorized = (dispatchSecret && safeEqual(supplied, dispatchSecret)) || (cronSecret && safeEqual(supplied, cronSecret));
+  if (!authorized) return res.status(401).json({ ok: false, error: 'Unauthorized dispatcher' });
   try {
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
-    const outboxId = clean(req.body?.outboxId || req.body?.['Outbox ID']);
-    if (!outboxId) return res.status(400).json({ ok: false, error: 'Outbox ID is required' });
-    const outbox = objects(await readSheet(token, 'Message_Outbox!A1:Z1500')).find(row => clean(row['Outbox ID']) === outboxId);
-    if (!outbox) return res.status(404).json({ ok: false, error: 'Outbox message was not found' });
-    const existingProviderId = clean(outbox['Provider Message ID']);
-    const existingStatus = clean(outbox['Send Status']).toUpperCase();
-    if (existingProviderId || ['SENT', 'DELIVERED', 'READ'].includes(existingStatus)) return res.status(200).json({ ok: true, idempotent: true, outboxId, status: existingStatus, providerMessageId: existingProviderId });
+    const outboxId = clean(req.body?.outboxId || req.body?.['Outbox ID'] || req.query?.outboxId);
+    const rows = objects(await readSheet(token, 'Message_Outbox!A1:AJ1500'));
+    const targets = outboxId ? rows.filter(row => clean(row['Outbox ID']) === outboxId) : rows.filter(row => clean(row['Send Status']).toUpperCase() === 'PENDING').slice(0, 20);
+    if (outboxId && !targets.length) return res.status(404).json({ ok: false, error: 'Outbox message was not found' });
     const channels = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));
-    const route = channels.find(row => clean(row['Internal Channel ID']) === clean(outbox['Internal Channel ID'])) || {};
-    const binding = validateRoute(outbox, route);
-    const accessToken = clean(process.env[`${binding.credentialKey}_ACCESS_TOKEN`]);
-    if (!accessToken) throw new Error(`BLOCKED: Protected credential ${binding.credentialKey}_ACCESS_TOKEN is not configured`);
-    const attemptCount = Number(outbox['Attempt Count'] || 0) + 1;
-    const version = clean(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0');
-    const response = await fetch(`https://graph.facebook.com/${version}/${binding.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(buildMetaPayload(outbox)) });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message = clean(result.error?.message) || `Meta API error ${response.status}`;
-      await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'FAILED', 'Attempt Count': String(attemptCount), 'Error Message': message, 'Send Routing Status': `BLOCKED_OR_FAILED:${binding.channelId}` });
-      return res.status(502).json({ ok: false, outboxId, channelId: binding.channelId, error: message });
-    }
-    const providerMessageId = clean(result.messages?.[0]?.id);
-    const timestamp = new Date().toISOString();
-    await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Attempt Count': String(attemptCount), 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'WhatsApp Number ID': binding.phoneNumberId, 'Send Routing Status': `VERCEL_CHANNEL_DISPATCH:${binding.channelId}` });
-    if (clean(outbox['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') {
-      await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
-    }
-    return res.status(200).json({ ok: true, outboxId, channelId: binding.channelId, status: 'SENT', providerMessageId });
+    const results = [];
+    for (const target of targets) results.push(await dispatchRecord(token, target, channels));
+    const failed = results.filter(result => !result.ok);
+    return res.status(failed.length ? 207 : 200).json({ ok: failed.length === 0, scanned: targets.length, sent: results.filter(result => result.ok && !result.idempotent).length, failed: failed.length, results });
   } catch (error) {
     const message = clean(error?.message) || 'Unable to dispatch WhatsApp message';
     console.error('WhatsApp dispatcher error:', message);

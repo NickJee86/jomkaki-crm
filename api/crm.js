@@ -475,6 +475,7 @@ const CREDIT_CONSENT_DOCUMENT_TYPE = 'CTOS_CCRIS_CONSENT';
 const CREDIT_CONSENT_TEMPLATE_VERSION = 'BPH_V4.0_01112020';
 const CREDIT_CONSENT_TEMPLATE_PATH = '/assets/ctos-ccris-consent-bph-v4.pdf';
 const creditConsentHeaders = ['Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Consent Signed At', 'Credit Consent Verified At', 'Credit Consent Verified By', 'Credit Consent Document ID', 'Credit Check Status', 'Credit Check Requested At', 'Credit Check Requested By'];
+const outboundMediaHeaders = ['Media ID', 'Media MIME Type', 'Media File Name', 'Image Caption', 'Document URL', 'Image URL'];
 const leadRecordHeaders = ['Lead Source', 'Created By', 'Updated By'];
 const applicationRecordHeaders = ['Product Variant', 'Motor Type', 'Second Hand Inventory ID', 'Created By', 'Updated By'];
 const documentReviewHeaders = ['Uploaded By', 'Reviewed By', 'Reviewed At'];
@@ -555,6 +556,36 @@ function channelCredentials(channel, env = process.env) {
     phoneNumberId: clean(channel?.['Phone Number ID'] || env[`${prefix}_PHONE_NUMBER_ID`] || env.WHATSAPP_PHONE_NUMBER_ID),
     version: clean(env.WHATSAPP_GRAPH_VERSION) || 'v25.0'
   };
+}
+
+async function uploadWhatsAppMedia(file, credentials) {
+  const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'WhatsApp attachment' });
+  if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new Error('WhatsApp replies support PDF, JPG, PNG or WebP files');
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('type', mimeType);
+  form.append('file', new Blob([bytes], { type: mimeType }), safeName);
+  const response = await fetch(`https://graph.facebook.com/${credentials.version}/${credentials.phoneNumberId}/media`, { method: 'POST', headers: { authorization: `Bearer ${credentials.accessToken}` }, body: form });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !clean(result.id)) throw new Error(clean(result.error?.message) || `Meta media upload failed (${response.status})`);
+  return { mediaId: clean(result.id), mimeType, fileName: safeName };
+}
+
+function whatsappOutboxPayload(row = {}) {
+  const to = whatsappPhone(row['Phone Number']), type = clean(row['Message Type'] || 'TEXT').toUpperCase(), body = clean(row['Message Text']);
+  if (!to) throw new Error('Outbox phone number is missing');
+  if (type === 'TEMPLATE') return { messaging_product: 'whatsapp', to, type: 'template', template: { name: clean(row['Template Name']), language: { code: clean(row.Language) || 'ms' } } };
+  const mediaId = clean(row['Media ID']);
+  if (type === 'IMAGE') return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'image', image: { id: mediaId, ...(body ? { caption: body.slice(0, 1024) } : {}) } };
+  if (type === 'DOCUMENT') return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'document', document: { id: mediaId, filename: clean(row['Media File Name']) || 'document.pdf', ...(body ? { caption: body.slice(0, 1024) } : {}) } };
+  if (!body) throw new Error('Outbox message text is missing');
+  return { messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'text', text: { preview_url: false, body } };
+}
+
+async function resolveRepliedInbox(req, replyToMessageId) {
+  const messageId = clean(replyToMessageId);
+  if (!messageId) return;
+  await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': 'RESOLVED', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'AC');
 }
 
 function publicAccount(row) {
@@ -1265,7 +1296,7 @@ export default async function handler(req, res) {
         if (session.role !== 'ADMIN' && session.region !== 'ALL' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
         if (motorType === 'SECOND_HAND' && !secondHandInventoryId) throw new Error('Select an approved and available 2nd-hand motor');
         if (motorType !== 'SECOND_HAND' && !catalogId) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
-        const [catalogRows, existingLeadRows, secondHandRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AP1000', secondHandRange]);
+        const [catalogRows, existingLeadRows, existingApplicationRows, secondHandRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AP1000', 'Applications!A1:CZ1000', secondHandRange]);
         const catalogRecord = motorType === 'SECOND_HAND' ? null : rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
         const secondHandRecord = motorType === 'SECOND_HAND' ? rowsToObjects(secondHandRows).find(row => clean(row['Inventory ID']) === secondHandInventoryId) : null;
         if (motorType !== 'SECOND_HAND' && !catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
@@ -1279,6 +1310,8 @@ export default async function handler(req, res) {
         const requestedHandphoneTenure = businessUnit === 'HANDPHONE' ? clean(body.tenureMonths || body.tenure) : '';
         if (requestedHandphoneTenure && !['12', '24', '36', '48', '60'].includes(requestedHandphoneTenure)) throw new Error('Handphone loan tenure must be between 1 and 5 years');
         const normalizedPhone = whatsappPhone(phone), existingCustomer = rowsToObjects(existingLeadRows).find(row => whatsappPhone(row['Phone Number']) === normalizedPhone);
+        const duplicate = rowsToObjects(existingApplicationRows).find(row => whatsappPhone(row['Phone Number']) === normalizedPhone && rowBusinessUnit(row) === businessUnit && clean(row['Product Brand']).toLowerCase() === brand.toLowerCase() && clean(row['Product Model']).toLowerCase() === model.toLowerCase() && !['REJECTED', 'COMPLETED', 'CANCELLED', 'CLOSED'].includes(clean(row['Application Status']).toUpperCase()));
+        if (duplicate) return res.status(409).json({ live: false, error: `An open application already exists for this customer and model (${duplicate['Application ID']}). Open the existing case instead of creating a duplicate.`, existingApplicationId: duplicate['Application ID'] });
         const customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
         const leadId = makeId('LEAD'), applicationId = makeId('APP'), timestamp = now();
         const assignedSaId = session.role === 'STAFF' ? session.saId : clean(body.saId);
@@ -1327,7 +1360,7 @@ export default async function handler(req, res) {
       }
       if (action === 'sendCreditConsent') {
         const applicationId = clean(body.applicationId);
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', channelRange]);
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AJ1500', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches), application = applications.find(row => clean(row['Application ID']) === applicationId);
         if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
@@ -1496,6 +1529,18 @@ export default async function handler(req, res) {
         const saId = session.role === 'STAFF' ? session.saId : clean(body.saId);
         const branchId = session.role === 'STAFF' ? session.branchId : clean(body.branchId);
         if (!stages.includes(stage) || !statuses.includes(status)) throw new Error('A valid stage and status are required');
+        if (['APPROVED', 'COMPLETED'].includes(status) || stage === 'COMPLETED') {
+          const blockers = [];
+          if (clean(record['Credit Consent Status']).toUpperCase() !== 'VERIFIED') blockers.push('verified CTOS/CCRIS consent');
+          if (clean(record['Minimum Documents Complete']).toUpperCase() !== 'TRUE') blockers.push('verified minimum documents');
+          if (clean(record['Missing Application Fields'])) blockers.push('complete application information');
+          if (clean(record['Verification Pending Documents'])) blockers.push('document verification');
+          if (!['SUBMITTED', 'APPROVED', 'COMPLETED', 'SUCCESS'].includes(clean(record['LMS Submission Status']).toUpperCase())) blockers.push('successful LMS submission');
+          if (status === 'COMPLETED' || stage === 'COMPLETED') {
+            if (!['APPROVED', 'COMPLETED', 'SUCCESS'].includes(clean(record['CAD Status']).toUpperCase())) blockers.push('approved CAD decision');
+          }
+          if (blockers.length) throw new Error(`This application cannot be marked ${status || stage}: complete ${blockers.join(', ')} first.`);
+        }
         const branchRegion = Object.fromEntries(branches.map(row => [clean(row['Branch ID']), canonicalRegion(row.Region)]));
         if (branchId && (!branchRegion[branchId] || (session.role !== 'ADMIN' && branchRegion[branchId] !== session.region))) throw new Error('The selected branch is outside your access');
         if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && branchId !== clean(session.branchId)) throw new Error('Branch Supervisor may assign cases inside their own branch only');
@@ -1545,6 +1590,30 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_AI_DOCUMENT_EXCEPTION_RESOLVED', description: `${document['Document Type'] || 'Document'} exception marked ${verification}` });
         return res.status(200).json({ live: true, documentId });
       }
+      if (action === 'getDocumentAccess') {
+        const documentId = clean(body.documentId);
+        if (!documentId) throw new Error('Document ID is required');
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
+        const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
+        const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
+        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        const url = clean(document['File URL']);
+        if (!/^https:\/\//i.test(url)) throw new Error('This document has no secure preview link. Re-upload it or ask Admin to repair the file record.');
+        await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_SECURE_DOCUMENT_OPENED', description: `${session.username} opened ${document['Document Type'] || 'a customer document'} for review` });
+        return res.status(200).json({ live: true, documentId, fileName: document['File Name'], mimeType: document['Mime Type'], url });
+      }
+      if (action === 'retryDocumentValidation') {
+        if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to retry document validation.' });
+        const documentId = clean(body.documentId);
+        const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
+        const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
+        const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
+        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        if (clean(document['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE) throw new Error('Signed consent requires Manager verification, not AI validation');
+        await updateObject(req, 'Document_Log', 'Document ID', documentId, { 'Updated At': now(), 'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Manual Review Required': 'FALSE', Remarks: clean(body.remarks) || 'AI validation retried from CRM' }, 'AD');
+        await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_DOCUMENT_AI_RETRY_QUEUED', description: `${document['Document Type'] || 'Document'} was requeued for automatic validation` });
+        return res.status(200).json({ live: true, documentId, status: 'AI_QUEUED' });
+      }
       if (action === 'updateApplicantProfile') {
         const applicationId = clean(body.applicationId), catalogId = clean(body.catalogId);
         const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
@@ -1587,8 +1656,8 @@ export default async function handler(req, res) {
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
-      if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent'].includes(action)) {
-        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AC1500', 'SA_Master!A1:O1000', channelRange]);
+      if (['sendCustomerMessage', 'recordManualReply', 'requestHumanHandover', 'assignHandover', 'updateHandover', 'markOutboxSent', 'retryOutboxMessage'].includes(action)) {
+        const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AJ1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
         const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
@@ -1598,9 +1667,10 @@ export default async function handler(req, res) {
           if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
           const unassignedHandover = inboxRecords.some(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()) && clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF' && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId)));
           if (session.role === 'STAFF' && unassignedHandover) return res.status(403).json({ live: false, error: 'This human handover is controlled by a Manager and has not been assigned to Staff.' });
-          const phone = whatsappPhone(body.phone), message = clean(body.message);
-          if (!phone || message.length < 1 || message.length > 4000) throw new Error('A valid phone number and message are required');
-          const messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT', templateName = clean(body.templateName), language = clean(body.language) || 'en_US';
+          const phone = whatsappPhone(body.phone), message = clean(body.message), attachment = body.attachment?.data ? body.attachment : null;
+          if (!phone || (!message && !attachment && clean(body.messageType).toUpperCase() !== 'TEMPLATE') || message.length > 4000) throw new Error('A valid phone number and message or attachment are required');
+          let messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT';
+          const templateName = clean(body.templateName), language = clean(body.language) || 'ms';
           if (messageType === 'TEMPLATE' && !templateName) throw new Error('An approved Meta template name is required');
           const outboxId = makeId('OUT'), timestamp = now();
           const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
@@ -1613,19 +1683,59 @@ export default async function handler(req, res) {
           if (cloudMode && !route) throw new Error('Customer is not bound to an official WhatsApp channel. Bind the customer channel before sending.');
           if (cloudMode && route && (!truth(route.Active) || !truth(route['Outbound Enabled']))) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} is disabled. Admin approval is required before transferring the conversation.`);
           if (cloudMode && route && !clean(route['Last Verified At'])) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} has not completed Meta phone verification.`);
-          let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '';
+          const latestInbound = inboxRecords.filter(row => (leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId) || whatsappPhone(row['Phone Number']) === phone).sort((a, b) => rowTime(b) - rowTime(a))[0];
+          const serviceWindowOpen = Boolean(latestInbound && Date.now() - rowTime(latestInbound) <= 24 * 60 * 60 * 1000);
+          if (cloudMode && !serviceWindowOpen && messageType !== 'TEMPLATE') throw new Error('The WhatsApp 24-hour service window is closed. Choose an approved Meta template.');
+          if (messageType === 'TEMPLATE' && attachment) throw new Error('This template does not support a custom attachment. Send the approved template first.');
+          if (!cloudMode && attachment) throw new Error('CRM file sending requires WhatsApp Cloud mode. Manual WhatsApp cannot attach a local file safely.');
+          let sendStatus = 'MANUAL_PENDING', providerMessageId = '', errorMessage = '', media = null;
           if (cloudMode) {
             const { accessToken, phoneNumberId, version } = channelCredentials(route);
             if (!accessToken || !phoneNumberId) throw new Error('WhatsApp Cloud credentials are not configured');
-            const cloudPayload = messageType === 'TEMPLATE' ? { messaging_product: 'whatsapp', to: phone, type: 'template', template: { name: templateName, language: { code: language } } } : { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'text', text: { preview_url: false, body: message } };
-            const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(cloudPayload) });
-            const result = await response.json().catch(() => ({}));
-            if (response.ok) { sendStatus = 'QUEUED'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
+            if (attachment) {
+              media = await uploadWhatsAppMedia(attachment, { accessToken, phoneNumberId, version });
+              messageType = media.mimeType.startsWith('image/') ? 'IMAGE' : 'DOCUMENT';
+            }
           }
-          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': cloudMode && sendStatus !== 'FAILED' ? timestamp : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}`, 'Business Unit': messageBusinessUnit, 'Customer ID': customerId, 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
+          await ensureSheetHeaders(req, 'Message_Outbox', [...outboundMediaHeaders, 'Error Message']);
+          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': cloudMode ? 'PENDING' : sendStatus, 'Attempt Count': '0', 'Sent At': '', 'Provider Message ID': '', 'Error Message': '', 'Media ID': media?.mediaId || '', 'Media MIME Type': media?.mimeType || '', 'Media File Name': media?.fileName || '', 'Image Caption': media?.mimeType?.startsWith('image/') ? message : '', 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API_PENDING' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}`, 'Business Unit': messageBusinessUnit, 'Customer ID': customerId, 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
+          if (cloudMode) {
+            const { accessToken, phoneNumberId, version } = channelCredentials(route);
+            await updateObject(req, 'Message_Outbox', 'Outbox ID', outboxId, { 'Send Status': 'SENDING', 'Attempt Count': '1', 'Send Routing Status': `CLOUD_API_SENDING:${resolved.source}` }, 'AJ');
+            const outboxRow = { 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Media ID': media?.mediaId || '', 'Media File Name': media?.fileName || '' };
+            const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(whatsappOutboxPayload(outboxRow)) });
+            const result = await response.json().catch(() => ({}));
+            if (response.ok) { sendStatus = 'SENT'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
+            await updateObject(req, 'Message_Outbox', 'Outbox ID', outboxId, { 'Send Status': sendStatus, 'Sent At': sendStatus === 'SENT' ? now() : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'Send Routing Status': `${sendStatus === 'SENT' ? 'CLOUD_API_SENT' : 'CLOUD_API_FAILED'}:${resolved.source}` }, 'AJ');
+            if (sendStatus === 'SENT') await resolveRepliedInbox(req, body.replyToMessageId);
+          }
           if (route?.['Internal Channel ID']) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', route['Internal Channel ID'], { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'AC');
           await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply through ${route?.['Channel Name'] || 'the legacy default WhatsApp channel'}` });
-          return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, channelId: route?.['Internal Channel ID'] || '', channelName: route?.['Channel Name'] || '', displayNumber: route?.['Display Number'] || '', routingSource: resolved.source, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
+          return res.status(sendStatus === 'FAILED' ? 502 : 201).json({ live: sendStatus !== 'FAILED', outboxId, mode: cloudMode ? 'CLOUD' : 'MANUAL', status: sendStatus, serviceWindowOpen, channelId: route?.['Internal Channel ID'] || '', channelName: route?.['Channel Name'] || '', displayNumber: route?.['Display Number'] || '', routingSource: resolved.source, whatsappUrl: cloudMode ? '' : `https://wa.me/${phone}?text=${encodeURIComponent(message)}`, error: errorMessage || undefined });
+        }
+
+        if (action === 'retryOutboxMessage') {
+          const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
+          if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
+          if (clean(record['Send Status']).toUpperCase() !== 'FAILED') throw new Error('Only failed messages can be retried');
+          const route = channels.find(row => clean(row['Internal Channel ID']) === clean(record['Internal Channel ID']));
+          if (!route || !truth(route.Active) || !truth(route['Outbound Enabled'])) throw new Error('The original WhatsApp channel is not available for retry');
+          const credentials = channelCredentials(route);
+          if (!credentials.accessToken || !credentials.phoneNumberId) throw new Error('WhatsApp Cloud credentials are not configured');
+          const attemptCount = Number(record['Attempt Count'] || 0) + 1;
+          await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'SENDING', 'Attempt Count': String(attemptCount), 'Error Message': '', 'Send Routing Status': `CLOUD_API_RETRYING:${route['Internal Channel ID']}` }, 'AJ');
+          const response = await fetch(`https://graph.facebook.com/${credentials.version}/${credentials.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${credentials.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(whatsappOutboxPayload(record)) });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            const retryError = clean(result.error?.message) || `Meta API error ${response.status}`;
+            await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'FAILED', 'Error Message': retryError, 'Send Routing Status': `CLOUD_API_FAILED:${route['Internal Channel ID']}` }, 'AJ');
+            return res.status(502).json({ live: false, error: retryError });
+          }
+          const timestamp = now(), providerMessageId = clean(result.messages?.[0]?.id);
+          await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'SENT', 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'Send Routing Status': `CLOUD_API_RETRY_SENT:${route['Internal Channel ID']}` }, 'AJ');
+          await resolveRepliedInbox(req, record['Reply To Message ID']);
+          await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: 'CRM_WHATSAPP_RETRY_SENT', description: `${session.username} retried a failed WhatsApp message successfully` });
+          return res.status(200).json({ live: true, outboxId: record['Outbox ID'], status: 'SENT', providerMessageId });
         }
 
         if (action === 'recordManualReply' || action === 'requestHumanHandover') {
@@ -1646,6 +1756,7 @@ export default async function handler(req, res) {
           const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
           if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
           await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'MANUAL_SENT', 'Sent At': now(), 'Attempt Count': String(Number(record['Attempt Count'] || 0) + 1), 'Send Routing Status': 'WHATSAPP_BUSINESS_MANUAL' }, 'Z');
+          await resolveRepliedInbox(req, record['Reply To Message ID']);
           await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: 'CRM_MANUAL_WHATSAPP_SENT', description: `${session.username} confirmed manual WhatsApp delivery` });
           return res.status(200).json({ live: true, outboxId: record['Outbox ID'] });
         }
@@ -1859,7 +1970,7 @@ export default async function handler(req, res) {
     }
 
     if (['inbox', 'outbox', 'activity'].includes(resource)) {
-      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:AC1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:AC1200', 'Outbox ID'] : ['Activity_Log!A:Z', 'Activity ID'];
+      const cfg = resource === 'inbox' ? ['Customer_Inbox!A1:AC1000', 'Message ID'] : resource === 'outbox' ? ['Message_Outbox!A1:AJ1200', 'Outbox ID'] : ['Activity_Log!A:Z', 'Activity ID'];
       const [rows, channelRows] = await readRanges(req, [cfg[0], channelRange]);
       const channels = rowsToObjects(channelRows);
       const globalActivityTypes = new Set(['FOLLOW_UP_RUN_COMPLETED', 'CRM_FOLLOW_UP_SAFE_SCAN', 'CRM_FOLLOW_UP_SETTINGS_UPDATED']);
@@ -1878,13 +1989,13 @@ export default async function handler(req, res) {
         id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'],
         status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'], channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], wabaId: row['WABA ID'], replyToMessageId: row['Reply To Message ID'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'], displayNumber: channelForMessage(row, channels)?.['Display Number'] || '',
         messageType: row['Message Type'], templateName: row['Template Name'], language: row.Language, automationKey: row['Automation Key'], followUpRule: row['Follow Up Rule'], followUpAttempt: Number(row['Follow Up Attempt'] || 0),
-        attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
+        attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], attachmentName: row['Media File Name'], attachmentMime: row['Media MIME Type'], mediaId: row['Media ID'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
         manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING'
       }) : ({ id: row['Activity ID'], leadId: row['Lead ID'], applicationId: row['Application ID'], type: row['Activity Type'], description: row.Description, actor: row['Actor ID'] || row['Actor Username'] || 'System', status: row['Activity Status'] || 'COMPLETED', time: row['Activity At'] || row['Occurred At'] }));
       return res.status(200).json({ live: true, records });
     }
 
-    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AC1200', 'Document_Log!A1:AD1500']);
+    const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AJ1200', 'Document_Log!A1:AD1500']);
     const inbox = rowsToObjects(inboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const outbox = rowsToObjects(outboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
     const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID']));
@@ -1898,7 +2009,8 @@ export default async function handler(req, res) {
     const lmsReady = businessApplications.filter(row => ['READY_FOR_LMS', 'READY', 'QUEUED'].includes(clean(row['LMS Submission Status']).toUpperCase()) || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' || documentSummary(documentsByApplication.get(row['Application ID']) || []).aiComplete).length;
     const humanHandovers = inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())).length;
     const needsAttention = aiExceptions + count(businessApplications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
-    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), summary: { leads: businessLeads.length, applications: businessApplications.length, conversion: businessLeads.length ? businessApplications.length / businessLeads.length : 0, syntheticRecords: scope.leads.length - businessLeads.length + scope.applications.length - businessApplications.length, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
+    const { JOMKAKI_KNOWLEDGE } = await import('./_jomkaki-knowledge.js');
+    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), knowledge: { id: JOMKAKI_KNOWLEDGE.id, version: JOMKAKI_KNOWLEDGE.version, status: JOMKAKI_KNOWLEDGE.status, sourceType: JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, approvedPageCount: JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, compiledAt: JOMKAKI_KNOWLEDGE.runtimeSnapshot.compiledAt, warnings: JOMKAKI_KNOWLEDGE.runtimeSnapshot.syncWarnings }, summary: { leads: businessLeads.length, applications: businessApplications.length, conversion: businessLeads.length ? businessApplications.length / businessLeads.length : 0, syntheticRecords: scope.leads.length - businessLeads.length + scope.applications.length - businessApplications.length, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
   } catch (error) {
     console.error(error);
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
