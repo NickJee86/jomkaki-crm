@@ -4,10 +4,12 @@ import fs from 'node:fs';
 import {
   DEFAULT_FOLLOW_UP_SETTINGS,
   buildFollowUpMessage,
+  classifyLeadFollowUpStage,
   classifyFollowUpStage,
   evaluateFollowUp,
   followUpNeedsMetaTemplate,
   followUpSettingsRows,
+  isFollowUpOptOut,
   moveToFollowUpBusinessWindow,
   normalizeFollowUpSettings
 } from '../api/_follow-up.js';
@@ -17,11 +19,25 @@ test('follow-up defaults cover every required incomplete-customer stage', () => 
   assert.equal(settings.global.enabled, true);
   assert.deepEqual(settings.global.activeDays, [1, 2, 3, 4, 5, 6]);
   assert.deepEqual(settings.rules.map(rule => rule.id), [
+    'SALES_ENQUIRY_IDLE', 'QUOTE_NO_RESPONSE',
     'DOCUMENTS_NOT_STARTED', 'DOCUMENTS_PARTIAL', 'CONSENT_UNSIGNED', 'INFORMATION_INCOMPLETE', 'CAD_ADDITIONAL_DOCUMENTS',
     'DIRECT_DEBIT_INCOMPLETE', 'AGREEMENT_UNSIGNED'
   ]);
   assert.ok(settings.rules.every(rule => rule.maxAttempts === 3));
   assert.ok(settings.rules.every(rule => rule.templateName.startsWith('jomkaki_')));
+});
+
+test('quiet sales enquiries and unanswered quotations are followed before an application exists', () => {
+  assert.equal(classifyLeadFollowUpStage({ _recordType: 'LEAD', 'Lead Status': 'NEW' }).ruleId, 'SALES_ENQUIRY_IDLE');
+  assert.equal(classifyLeadFollowUpStage({ _recordType: 'LEAD', 'Lead Status': 'NEW', 'Selected Product': 'Yamaha Y16ZR' }).ruleId, 'QUOTE_NO_RESPONSE');
+  assert.equal(classifyLeadFollowUpStage({ _recordType: 'LEAD', 'Lead Status': 'DO_NOT_CONTACT' }).eligible, false);
+});
+
+test('customer stop requests are detected in Malay, English and Chinese', () => {
+  assert.equal(isFollowUpOptOut('stop'), true);
+  assert.equal(isFollowUpOptOut('jangan hubungi saya lagi'), true);
+  assert.equal(isFollowUpOptOut('不要再联系我'), true);
+  assert.equal(isFollowUpOptOut('boleh follow up esok'), false);
 });
 
 test('CRM values safely normalize timing and serialize into the settings worksheet', () => {
@@ -103,6 +119,9 @@ test('messages explain exactly what remains without asking for completed items a
   assert.doesNotMatch(message, /MyKad bahagian depan/);
   assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'DIRECT_DEBIT_INCOMPLETE' }), /Direct Debit/);
   assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'AGREEMENT_UNSIGNED' }), /perjanjian/);
+  assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'CONSENT_UNSIGNED' }), /ctos-ccris-consent-bph-v4\.pdf/);
+  assert.match(buildFollowUpMessage({ application: { 'Product Model': 'Y16ZR' }, ruleId: 'INFORMATION_INCOMPLETE' }), /TOLONG ISI MAKLUMAT DI BAWAH/);
+  assert.match(buildFollowUpMessage({ application: { 'Customer Name': 'Ali', product: 'Yamaha Y16ZR' }, ruleId: 'QUOTE_NO_RESPONSE' }), /Hi Ali/);
 });
 
 test('Meta template is required after the 24-hour customer service window', () => {
@@ -131,6 +150,8 @@ test('follow-up settings show operational status, approved previews and controll
   const css = fs.readFileSync(new URL('../v2.css', import.meta.url), 'utf8');
   for (const template of [
     'jomkaki_documents_start_v1',
+    'jomkaki_sales_enquiry_v1',
+    'jomkaki_quote_followup_v1',
     'jomkaki_documents_partial_v1',
     'jomkaki_consent_unsigned_v1',
     'jomkaki_application_info_v1',
@@ -151,6 +172,30 @@ test('follow-up settings show operational status, approved previews and controll
   assert.match(app, /messageType:'TEMPLATE'/);
   assert.match(css, /\.follow-up-rule-list\{display:grid/);
   assert.match(css, /@media\(max-width:760px\).*\.follow-up-template-row\{grid-template-columns:1fr\}/s);
+});
+
+test('follow-up dispatcher covers lead recovery, live Meta approval and real SA assignment', () => {
+  const dispatcher = fs.readFileSync(new URL('../api/follow-up-dispatch.js', import.meta.url), 'utf8');
+  assert.match(dispatcher, /Conversation_State!A1:AP2000/);
+  assert.match(dispatcher, /SA_Master!A1:O1000/);
+  assert.match(dispatcher, /leadSubjects/);
+  assert.match(dispatcher, /approvedTemplateNames/);
+  assert.match(dispatcher, /chooseFollowUpAdvisor/);
+  assert.match(dispatcher, /Last Assigned At/);
+});
+
+test('CRM queue supports unconverted leads, opt-out and flexible scheduling', () => {
+  const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
+  const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
+  const webhook = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
+  assert.match(app, /Sales enquiries/);
+  assert.match(app, /data-followup-schedule/);
+  assert.match(app, /followUpOutcomeSnapshot/);
+  assert.match(app, /recordType:'LEAD'/);
+  assert.match(api, /command === 'SCHEDULE'/);
+  assert.match(api, /body\.applicationId \|\| body\.leadId/);
+  assert.match(webhook, /isFollowUpOptOut/);
+  assert.match(webhook, /META_WEBHOOK_OPT_OUT/);
 });
 
 test('follow-up settings preserve last-saved attribution for administrators', () => {
@@ -232,3 +277,4 @@ test('Administrator can see approved system-level follow-up audit events', () =>
   assert.match(api, /resource === 'activity' && session\.role === 'ADMIN'/);
   assert.match(api, /globalActivityTypes\.has\(clean\(row\['Activity Type'\]\)\.toUpperCase\(\)\)/);
 });
+
