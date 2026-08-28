@@ -33,7 +33,7 @@ test('One SA login can submit Motor, Handphone or Both',()=>{
 test('Staff application entry only offers physical branches',()=>{
   assert.match(ui,/architecturePhysicalBranch/);
   assert.match(ui,/\.filter\(\(\[id,name\]\)=>architecturePhysicalBranch\(id,name\)\)/);
-  assert.match(html,/business-architecture\.js\?v=20260828-business-access-labels1/);
+  assert.match(html,/business-architecture\.js\?v=20260828-operational-records1/);
 });
 
 test('Motor and Handphone application data remain separately reportable',()=>{
@@ -54,3 +54,4 @@ test('Vacant Supervisor positions use a Regional Manager fallback',()=>{
   assert.match(fs.readFileSync(new URL('../app-v2.js',import.meta.url),'utf8'),/\['BRANCH_SUPERVISOR','BRANCH_MANAGER'\]\.includes\(user\.role\)/);
   assert.match(api,/ensureSheetHeaders\(req, 'CRM_User_Access', \['Business Access'\]\)/);
 });
+

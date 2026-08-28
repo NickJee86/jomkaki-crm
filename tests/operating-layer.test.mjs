@@ -7,6 +7,7 @@ const app = read('../app-v2.js');
 const css = read('../v2.css');
 const customer360 = read('../customer-360.css');
 const html = read('../index.html');
+const architecture = read('../business-architecture.js');
 
 test('home is an actionable daily command centre', () => {
   assert.match(app, /Today Command Centre/);
@@ -88,10 +89,21 @@ test('customer workspace reflects production messaging and excludes synthetic re
   assert.doesNotMatch(app, /Secure SharePoint records/);
 });
 
+test('effective customer workspaces keep operational filters and production-only records', () => {
+  assert.match(architecture, /visible=businessLeads\(\)\.filter/);
+  assert.match(architecture, /businessVisible=businessApplications\(\)\.filter/);
+  assert.match(architecture, /application-filter-tabs/);
+  assert.match(architecture, /applicationFilterMatch\(item,filter\)/);
+  assert.match(architecture, /<th>Next action<\/th>/);
+  assert.match(architecture, /nextActionCell\(item\)/);
+});
+
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
   assert.match(html, /app-v2\.js\?v=20260828-customer-workspace1/);
+  assert.match(html, /business-architecture\.js\?v=20260828-operational-records1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
+
