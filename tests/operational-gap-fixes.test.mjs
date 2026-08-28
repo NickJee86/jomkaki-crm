@@ -35,7 +35,7 @@ test('Messages new-message composer keeps files staged while customer templates 
   assert.doesNotMatch(app, /if\(!canAttach&&form\.attachment\.value\)form\.attachment\.value=''/);
   assert.match(app, /if\(!matchTemplateToAttachment\(\)&&form\.attachment\.files\?\.\[0\]\)/);
   assert.match(app, /File ready\. CRM will send it using the matching approved media template/);
-  assert.match(app, /openMessageQueue'\)\.onclick=\(\)=>navigateToView\('outbox'\)/);
+  assert.match(app, /openMessageQueue'\)\.addEventListener\('click',\(\)=>navigateToView\('outbox'\)/);
 });
 
 test('outbound messages are recorded and locked before Meta delivery', () => {
@@ -106,3 +106,4 @@ test('settings reveal the exact deployed knowledge snapshot and warnings', () =>
   assert.match(app, /Runtime knowledge health/);
   assert.match(app, /exact approved knowledge snapshot loaded by the deployed CRM build/);
 });
+
