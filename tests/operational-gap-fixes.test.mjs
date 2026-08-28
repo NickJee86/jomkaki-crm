@@ -14,7 +14,10 @@ test('manual WhatsApp reply exposes safe image and PDF attachments with an hones
   assert.match(app, /FOLLOW_UP_TEMPLATE_REGISTRY/);
   assert.match(app, /24-hour reply window is open/);
   assert.match(app, /attachmentField\.hidden=false/);
-  assert.match(app, /form\.attachment\.disabled=!canAttach/);
+  assert.match(app, /form\.attachment\.disabled=!cloud/);
+  assert.match(app, /matchTemplateToAttachment/);
+  assert.match(app, /File selected\. Choose a customer and CRM will load the matching approved media template/);
+  assert.match(app, /Choose an approved \$\{requiredHeader\.toLowerCase\(\)\} template for this file/);
   assert.match(app, /getWhatsAppTemplates/);
   assert.match(app, /approved Image-header or Document-header template/);
   assert.match(app, /Exact approved WhatsApp message/);
@@ -26,6 +29,13 @@ test('manual WhatsApp reply exposes safe image and PDF attachments with an hones
   assert.match(api, /selectedApprovedTemplate\.body/);
   assert.match(api, /requires a matching attachment/);
   assert.match(api, /WhatsApp 24-hour service window is closed/);
+});
+
+test('Messages new-message composer keeps files staged while customer templates load', () => {
+  assert.doesNotMatch(app, /if\(!canAttach&&form\.attachment\.value\)form\.attachment\.value=''/);
+  assert.match(app, /if\(!matchTemplateToAttachment\(\)&&form\.attachment\.files\?\.\[0\]\)/);
+  assert.match(app, /File ready\. CRM will send it using the matching approved media template/);
+  assert.match(app, /openMessageQueue'\)\.onclick=\(\)=>navigateToView\('outbox'\)/);
 });
 
 test('outbound messages are recorded and locked before Meta delivery', () => {
