@@ -113,7 +113,7 @@ const timestamp = value => {
 const upper = value => clean(value).toUpperCase();
 const splitList = value => clean(value).split(/[,;|]/).map(item => item.trim()).filter(Boolean);
 const closedApplication = application => ['COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(upper(application['Application Status'] ?? application.status));
-const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'TEMPLATE_REQUIRED', 'BLOCKED_CHANNEL'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
+const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'BLOCKED_CHANNEL'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
 
 export function isFollowUpOptOut(text = '') {
   const value = clean(text).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -195,13 +195,14 @@ export function evaluateFollowUp({ application = {}, lead = {}, documents = [], 
   let attempts = numberBetween(application['Follow Up Attempts'] ?? application.followUpAttempts, 0, 0, 999);
   if (normalized.global.replyResetsAttempts && timestamp(lastReplyAt) > timestamp(lastFollowUpAt)) attempts = 0;
   if (attempts >= rule.maxAttempts) return { eligible: false, reason: 'MAX_ATTEMPTS_REACHED', ruleId: rule.id, attempts, rule };
+  const recoveringTemplate = upper(application['Follow Up Status'] ?? application.followUpStatus) === 'TEMPLATE_REQUIRED';
   const scheduledAt = clean(application['Follow Up Scheduled At'] ?? application.followUpScheduledAt);
   const explicitNextValue = clean(application['Next Follow Up At'] ?? application.nextFollowUp);
   const explicitNext = timestamp(lastReplyAt) > timestamp(scheduledAt) ? '' : explicitNextValue;
   const base = attempts > 0 && lastFollowUpAt ? lastFollowUpAt : (lastReplyAt || application['Updated At'] || application.updated || application['Created At'] || application.created || at);
   const delay = rule.delays[Math.min(attempts, rule.delays.length - 1)];
   const calculated = new Date(timestamp(base) + delay * 3600000);
-  const dueAt = moveToFollowUpBusinessWindow(explicitNext || calculated, normalized.global);
+  const dueAt = moveToFollowUpBusinessWindow(recoveringTemplate ? at : (explicitNext || calculated), normalized.global);
   return {
     eligible: true,
     due: dueAt.valueOf() <= new Date(at).valueOf(),
