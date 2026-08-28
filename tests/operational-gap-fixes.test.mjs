@@ -35,7 +35,7 @@ test('Messages new-message composer keeps files staged while customer templates 
   assert.doesNotMatch(app, /if\(!canAttach&&form\.attachment\.value\)form\.attachment\.value=''/);
   assert.match(app, /if\(!matchTemplateToAttachment\(\)&&form\.attachment\.files\?\.\[0\]\)/);
   assert.match(app, /File ready\. CRM will send it using the matching approved media template/);
-  assert.match(app, /openMessageQueue'\)\.addEventListener\('click',\(\)=>navigateToView\('outbox'\)/);
+  assert.match(app, /messageQueue\.onclick=\(\)=>navigateToView\('outbox'\)/);
 });
 
 test('outbound messages are recorded and locked before Meta delivery', () => {

@@ -76,7 +76,12 @@ const primaryViewsForRole=role=>{
   return new Set(['dashboard','customers','workbench','followup','products','reports','management']);
 };
 function syncPrimaryNavigation(){const visible=primaryViewsForRole(state.user?.role);document.querySelectorAll('.nav-item[data-view]').forEach(item=>{item.hidden=!visible.has(item.dataset.view);item.classList.toggle('active',item.dataset.view===primaryViewFor(state.view))})}
-function bindPrimaryNavigation(){document.querySelectorAll('.nav-item[data-view]').forEach(item=>{if(item.dataset.navigationBound==='true')return;item.dataset.navigationBound='true';item.addEventListener('click',()=>navigateToView(item.dataset.view).catch(error=>showWorkspaceError(error.message)))})}
+function bindPrimaryNavigation(){document.querySelectorAll('.nav-item[data-view]').forEach(item=>{item.onclick=()=>navigateToView(item.dataset.view).catch(error=>showWorkspaceError(error.message))})}
+function bindShellNavigation(){
+  const messageQueue=document.getElementById('openMessageQueue'),notifications=document.querySelector('[aria-label="Notifications"]');
+  if(messageQueue)messageQueue.onclick=()=>navigateToView('outbox').catch(error=>showWorkspaceError(error.message));
+  if(notifications)notifications.onclick=()=>openNotificationCentre().catch(error=>showWorkspaceError(error.message));
+}
 function setNavBadge(id,value){const badge=document.getElementById(id);if(!badge)return;const count=Math.max(0,Number(value||0));badge.textContent=count;badge.hidden=count===0}
 async function navigateToView(view){state.view=view;await ensureViewData(view);render();document.getElementById('sidebar').classList.remove('open');window.scrollTo({top:0,behavior:'auto'})}
 function bindHubNavigation(){document.querySelectorAll('[data-open-view]').forEach(button=>button.onclick=()=>navigateToView(button.dataset.openView).catch(error=>showWorkspaceError(error.message)));document.querySelectorAll('[data-open-customer]').forEach(button=>button.onclick=()=>runGlobalSearch(button.dataset.openCustomer||'').catch(error=>showWorkspaceError(error.message)))}
@@ -429,7 +434,7 @@ async function ensureViewData(view){if(view==='workbench'){if(loadedResources.ha
 function renderLegacy(){const documentBadge=document.getElementById('documentBadge');if(documentBadge)documentBadge.textContent=state.data.documents.length;syncPrimaryNavigation();bindPrimaryNavigation();({dashboard,customers,pipeline,workbench,followup,products,reports,management,leads,applications,documents,inbox,outbox,catalog,pricing,handphoneCatalog:catalog,handphonePricing:pricing,team,users:usersAdmin,activity,settings}[state.view]||dashboard)();bind()}
 document.getElementById('newLeadButton').textContent='+ New application';document.getElementById('newLeadButton').onclick=async()=>{try{await ensureCatalogForForms();newApplication()}catch(error){alert(error.message)}};document.getElementById('menuButton').onclick=()=>document.getElementById('sidebar').classList.toggle('open');
 const globalSearch=document.getElementById('globalSearch');globalSearch.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();runGlobalSearch(e.target.value).catch(error=>alert(error.message))}};document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'&&!shell.hidden){e.preventDefault();globalSearch.focus();globalSearch.select()}});
-document.getElementById('openMessageQueue').addEventListener('click',()=>navigateToView('outbox').catch(error=>showWorkspaceError(error.message)));document.querySelector('[aria-label="Notifications"]').onclick=()=>openNotificationCentre().catch(error=>showWorkspaceError(error.message));
+bindShellNavigation();
 document.getElementById('logoutButton').onclick=async()=>{await fetch('/api/logout');state.loaded=false;shell.hidden=true;gate.classList.remove('hidden');form.reset()};
 form.onsubmit=async e=>{e.preventDefault();const error=document.getElementById('loginError'),button=form.querySelector('button');button.disabled=true;error.textContent='';try{const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:document.getElementById('loginUsername').value,password:document.getElementById('loginPassword').value})});if(!r.ok)throw new Error('Incorrect username or password.');if(!await load())throw new Error('Unable to load CRM data.')}catch(x){error.textContent=x.message}finally{button.disabled=false}};
 setInterval(()=>{if(state.loaded&&state.user?.mustChangePassword&&!document.querySelector('.drawer-backdrop'))changePassword(true)},500);
@@ -1369,7 +1374,7 @@ function render(){
   syncDemoFeatureData();
   const documentBadge=document.getElementById('documentBadge');if(documentBadge)documentBadge.textContent=state.data.documents.filter(record=>!isDemoRecord(record)).length;
   updateNotificationBadge();
-  syncPrimaryNavigation();bindPrimaryNavigation();
+  syncPrimaryNavigation();bindPrimaryNavigation();bindShellNavigation();
   ({dashboard,customers,pipeline,workbench,followup,products,reports,management,leads,applications,documents,inbox,outbox,catalog,pricing,handphoneCatalog:catalog,handphonePricing:pricing,team,users:usersAdmin,activity,settings}[state.view]||dashboard)();
   bind();applyDemoFeatureBanner();scheduleTableScrollDock();
 }

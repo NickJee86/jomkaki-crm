@@ -15,8 +15,10 @@ test('primary navigation keeps follow-up as a first-class daily workspace', () =
   assert.match(app, /function management\(\)/);
   assert.match(app, /function followup\(\)/);
   assert.match(app, /function bindPrimaryNavigation\(\)/);
-  assert.match(app, /dataset\.navigationBound==='true'/);
-  assert.match(app, /openMessageQueue'\)\.addEventListener\('click'/);
+  assert.match(app, /item\.onclick=\(\)=>navigateToView\(item\.dataset\.view\)/);
+  assert.match(app, /function bindShellNavigation\(\)/);
+  assert.match(app, /messageQueue\.onclick=\(\)=>navigateToView\('outbox'\)/);
+  assert.match(app, /syncPrimaryNavigation\(\);bindPrimaryNavigation\(\);bindShellNavigation\(\)/);
   assert.match(app, /Daily customer recovery, document collection and reminder delivery/);
   assert.match(app, /Customer 360/);
   assert.match(html, /Tasks & Approvals/);
