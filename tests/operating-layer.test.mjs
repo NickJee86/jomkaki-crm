@@ -57,10 +57,17 @@ test('reports are grouped into clear operating categories', () => {
   assert.match(css, /\.report-category-hidden/);
 });
 
+test('product hub totals match the records employees can open', () => {
+  assert.match(app, /const visibleCatalogRecord=item=>!\/TEMPLATE\/i\.test/);
+  assert.match(app, /approvalStatus\|\|'APPROVED'\)\.toUpperCase\(\)!=='MERGED'/);
+  assert.match(app, /visiblePricingRecord=item=>!\/TEMPLATE\/i\.test/);
+  assert.match(app, /const productCatalog=state\.data\.catalog\.filter\(visibleCatalogRecord\),productPricing=state\.data\.pricing\.filter\(visiblePricingRecord\)/);
+});
+
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260828-audit-signal1/);
+  assert.match(html, /app-v2\.js\?v=20260828-product-counts1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
