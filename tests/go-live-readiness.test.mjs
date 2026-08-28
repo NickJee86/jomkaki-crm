@@ -68,7 +68,7 @@ test('Deployment prevents stale HTML while versioning frontend assets',()=>{
   assert.equal(root.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
   assert.equal(index.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
   assert.match(html,/product-business\.js\?v=20260817-catalog-workflow2/);
-  assert.match(html,/business-architecture\.js\?v=20260828-staff-entry1/);
+  assert.match(html,/business-architecture\.js\?v=20260828-business-access-labels1/);
   assert.ok(productUi.length>60000,'Product business bundle must not be truncated during deployment');
   assert.ok(businessUi.length>50000,'Business architecture bundle must not be truncated during deployment');
   assert.ok(productUi.indexOf('function editProductPricing')<productUi.indexOf('const originalProductPricingEditor'),'Base pricing editor must exist before the safe override');
