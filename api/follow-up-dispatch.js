@@ -95,6 +95,39 @@ const routeFor = (application, lead, channels) => {
 };
 const routeReady = route => clean(route['Internal Channel ID']) && truth(route.Active) && truth(route['Outbound Enabled']) && clean(route['Phone Number ID']) && clean(route['Last Verified At']);
 const channelCredential = route => clean(process.env[`${credentialPrefix(route['Credential Key'] || route['Internal Channel ID'])}_ACCESS_TOKEN`]);
+const upper = value => clean(value).toUpperCase();
+const canonicalRegion = value => {
+  const normalized = upper(value).replace(/[^A-Z]/g, '_');
+  if (/(SARAWAK|SABAH|EAST)/.test(normalized)) return 'EAST_MALAYSIA';
+  if (/(SELANGOR|KUALA_LUMPUR|WEST|SEMENANJUNG)/.test(normalized)) return 'WEST_MALAYSIA';
+  return normalized;
+};
+const businessAllowed = (advisor, unit) => {
+  const access = upper(advisor['Business Access'] || advisor['Business Unit'] || 'BOTH'), business = upper(unit || 'MOTOR');
+  return access === 'BOTH' || access === 'ALL' || access.includes(business);
+};
+const advisorTime = advisor => new Date(advisor['Last Assigned At'] || advisor['Updated At'] || 0).valueOf() || 0;
+const chooseFollowUpAdvisor = (record, lead, advisors = []) => {
+  const region = canonicalRegion(record.Region || lead.Region), business = upper(record['Business Unit'] || lead['Business Unit'] || 'MOTOR');
+  const branch = clean(record['Assigned Branch ID'] || lead['Selected Branch ID']);
+  const eligible = advisors.filter(advisor => truth(advisor.Active) && truth(advisor['Accepting Leads']) && businessAllowed(advisor, business) && (!region || canonicalRegion(advisor.Region) === region));
+  const branchMatches = branch ? eligible.filter(advisor => clean(advisor['Branch ID']) === branch) : [];
+  return (branchMatches.length ? branchMatches : eligible).sort((left, right) => advisorTime(left) - advisorTime(right) || clean(left['SA ID']).localeCompare(clean(right['SA ID'])))[0] || null;
+};
+const approvedTemplateCache = new Map();
+async function approvedTemplateNames(route) {
+  const wabaId = clean(route['WABA ID']), accessToken = channelCredential(route);
+  if (!wabaId || !accessToken) return new Set();
+  const key = `${wabaId}:${accessToken.slice(-8)}`;
+  if (approvedTemplateCache.has(key)) return approvedTemplateCache.get(key);
+  const version = clean(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0');
+  const response = await fetch(`https://graph.facebook.com/${version}/${wabaId}/message_templates?fields=name,status&limit=250`, { headers: { authorization: `Bearer ${accessToken}` } });
+  if (!response.ok) throw new Error(`Unable to verify approved Meta templates (${response.status})`);
+  const result = await response.json().catch(() => ({}));
+  const names = new Set((result.data || []).filter(template => upper(template.status) === 'APPROVED').map(template => clean(template.name)));
+  approvedTemplateCache.set(key, names);
+  return names;
+}
 
 async function sendCloudMessage(route, phone, message, templateName, language) {
   const accessToken = channelCredential(route);
@@ -112,17 +145,27 @@ async function sendCloudMessage(route, phone, message, templateName, language) {
 export async function runFollowUpDispatch(req, { applicationId = '', dryRun = false } = {}) {
   if (!SHEET_ID) throw new Error('Spreadsheet is not configured');
   const token = await getAccessToken(req);
-  const [applicationRows, leadRows, documentRows, outboxRows, channelRows, settingsRows, activityRows] = await Promise.all([
+  const [applicationRows, leadRows, documentRows, outboxRows, channelRows, settingsRows, activityRows, conversationRows, advisorRows] = await Promise.all([
     readSheet(token, 'Applications!A1:CZ2000'), readSheet(token, 'Leads!A1:BG2000'), readSheet(token, 'Document_Log!A1:AD2000'),
     readSheet(token, 'Message_Outbox!A1:BG2000'), readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'), readSheet(token, 'Follow_Up_Settings!A1:Z100', true),
-    readSheet(token, 'Activity_Log!A1:Z1')
+    readSheet(token, 'Activity_Log!A1:Z1'), readSheet(token, 'Conversation_State!A1:AP2000', true), readSheet(token, 'SA_Master!A1:O1000', true)
   ]);
-  const applications = objects(applicationRows), leads = objects(leadRows), documents = objects(documentRows), outbox = objects(outboxRows), channels = objects(channelRows);
+  const applications = objects(applicationRows), leads = objects(leadRows), documents = objects(documentRows), outbox = objects(outboxRows), channels = objects(channelRows), conversations = objects(conversationRows), advisors = objects(advisorRows);
   const settings = normalizeFollowUpSettings(objects(settingsRows));
-  const applicationHeaders = dryRun ? (applicationRows[0] || []) : await ensureHeaders(token, 'Applications', FOLLOW_UP_APPLICATION_HEADERS);
-  const leadHeaders = dryRun ? (leadRows[0] || []) : await ensureHeaders(token, 'Leads', FOLLOW_UP_APPLICATION_HEADERS);
+  const applicationHeaders = dryRun ? (applicationRows[0] || []) : await ensureHeaders(token, 'Applications', [...FOLLOW_UP_APPLICATION_HEADERS, 'Assigned SA ID', 'Assigned Branch ID', 'Handover Reason', 'SA Review Required', 'Processing Mode', 'Application Status']);
+  const leadHeaders = dryRun ? (leadRows[0] || []) : await ensureHeaders(token, 'Leads', [...FOLLOW_UP_APPLICATION_HEADERS, 'Assigned SA ID', 'Selected Branch ID', 'Handover Reason', 'Processing Mode', 'Lead Status']);
+  const advisorHeaders = dryRun ? (advisorRows[0] || []) : await ensureHeaders(token, 'SA_Master', ['Last Assigned At']);
   const outboxHeaders = dryRun ? (outboxRows[0] || []) : await ensureHeaders(token, 'Message_Outbox', ['Automation Key', 'Follow Up Rule', 'Follow Up Attempt']);
   const activityHeaders = dryRun ? (activityRows[0] || []) : await ensureHeaders(token, 'Activity_Log', ['Activity ID', 'Occurred At', 'Lead ID', 'Application ID', 'Activity Type', 'Description', 'Actor Username']);
+  const applicationLeadIds = new Set(applications.map(application => clean(application['Lead ID'])).filter(Boolean));
+  const latestConversationByLead = new Map();
+  conversations.forEach(conversation => { const id = clean(conversation['Lead ID']);if(id)latestConversationByLead.set(id, conversation); });
+  const leadSubjects = leads.filter(lead => !applicationLeadIds.has(clean(lead['Lead ID']))).map(lead => {
+    const conversation = latestConversationByLead.get(clean(lead['Lead ID'])) || {};
+    const selectedProduct = [conversation['Selected Product Brand'], conversation['Selected Product Model'], conversation['Selected Product Variant']].filter(Boolean).join(' ');
+    return { ...lead, _recordType: 'LEAD', 'Selected Product': selectedProduct, product: selectedProduct };
+  });
+  const subjects = [...applications.map(application => ({ ...application, _recordType: 'APPLICATION' })), ...leadSubjects];
   const now = new Date(), results = [];
   const recordActivity = async (application, type, description) => {
     if (dryRun) return;
@@ -132,27 +175,30 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
       'Activity Type': type, Description: description, 'Actor Username': 'FOLLOW_UP_AUTOMATION'
     });
   };
-  for (const application of applications) {
+  for (const application of subjects) {
     if (results.filter(result => result.sent || result.queued).length >= settings.global.maxPerRun) break;
-    const id = clean(application['Application ID']);
+    const leadOnly = upper(application._recordType) === 'LEAD';
+    const id = clean(leadOnly ? application['Lead ID'] : application['Application ID']);
     if (!id || (applicationId && id !== clean(applicationId))) continue;
-    const lead = leads.find(row => clean(row['Lead ID']) === clean(application['Lead ID'])) || {};
-    const caseDocuments = documents.filter(row => clean(row['Application ID']) === id);
+    const lead = leadOnly ? application : (leads.find(row => clean(row['Lead ID']) === clean(application['Lead ID'])) || {});
+    const caseDocuments = leadOnly ? [] : documents.filter(row => clean(row['Application ID']) === id);
+    const recordSheet = leadOnly ? 'Leads' : 'Applications', recordHeaders = leadOnly ? leadHeaders : applicationHeaders;
     const evaluation = evaluateFollowUp({ application, lead, documents: caseDocuments, settings, at: now });
-    if (!evaluation.eligible || !evaluation.due) { if (applicationId) results.push({ applicationId: id, ...evaluation }); continue; }
+    const resultIdentity = { recordType: leadOnly ? 'LEAD' : 'APPLICATION', recordId: id, leadId: clean(lead['Lead ID']), applicationId: leadOnly ? '' : id };
+    if (!evaluation.eligible || !evaluation.due) { if (applicationId) results.push({ ...resultIdentity, ...evaluation }); continue; }
     const automationKey = `FOLLOWUP:${id}:${evaluation.ruleId}:${evaluation.nextAttempt}:${new Date(evaluation.dueAt).toISOString().slice(0, 13)}`;
     if (outbox.some(row => clean(row['Automation Key']) === automationKey && ['SENT', 'QUEUED', 'MANUAL_PENDING', 'DELIVERED', 'READ'].includes(clean(row['Send Status']).toUpperCase()))) {
-      results.push({ applicationId: id, skipped: 'DUPLICATE', automationKey });
+      results.push({ ...resultIdentity, skipped: 'DUPLICATE', automationKey });
       continue;
     }
     const phone = digits(application['Phone Number'] || lead['Phone Number']), route = routeFor(application, lead, channels);
     if (!phone || !routeReady(route)) {
       const reason = phone ? 'Official WhatsApp channel is not ready' : 'Customer phone number is missing';
       if (!dryRun) {
-        await updateRow(token, 'Applications', applicationHeaders, application.rowNumber, { 'Follow Up Status': 'BLOCKED_CHANNEL', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': reason, 'Next Follow Up At': '', 'Follow Up Scheduled At': '', 'Updated At': now.toISOString(), 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+        await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': 'BLOCKED_CHANNEL', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': reason, 'Next Follow Up At': '', 'Follow Up Scheduled At': '', 'Updated At': now.toISOString(), 'Updated By': 'FOLLOW_UP_AUTOMATION' });
         await recordActivity(application, 'FOLLOW_UP_BLOCKED_CHANNEL', reason);
       }
-      results.push({ applicationId: id, blocked: 'CHANNEL_OR_PHONE' });
+      results.push({ ...resultIdentity, blocked: 'CHANNEL_OR_PHONE' });
       continue;
     }
     const message = buildFollowUpMessage({ application, ruleId: evaluation.ruleId, attempt: evaluation.nextAttempt });
@@ -160,21 +206,34 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
     if (templateRequired && !templateName && clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD') {
       const reason = 'Approved Meta template required outside the 24-hour customer service window';
       if (!dryRun) {
-        await updateRow(token, 'Applications', applicationHeaders, application.rowNumber, { 'Follow Up Status': 'TEMPLATE_REQUIRED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': reason, 'Next Follow Up At': '', 'Follow Up Scheduled At': '', 'Updated At': now.toISOString(), 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+        await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': 'TEMPLATE_REQUIRED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': reason, 'Next Follow Up At': '', 'Follow Up Scheduled At': '', 'Updated At': now.toISOString(), 'Updated By': 'FOLLOW_UP_AUTOMATION' });
         await recordActivity(application, 'FOLLOW_UP_META_TEMPLATE_REQUIRED', reason);
       }
-      results.push({ applicationId: id, blocked: 'META_TEMPLATE_REQUIRED' });
+      results.push({ ...resultIdentity, blocked: 'META_TEMPLATE_REQUIRED' });
       continue;
     }
-    if (dryRun) { results.push({ applicationId: id, dueAt: evaluation.dueAt, ruleId: evaluation.ruleId, attempt: evaluation.nextAttempt, message, templateRequired }); continue; }
     const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
+    if (cloudMode && templateRequired) {
+      let approved = false, approvalError = '';
+      try { approved = (await approvedTemplateNames(route)).has(templateName); } catch (error) { approvalError = clean(error?.message); }
+      if (!approved) {
+        const reason = approvalError || `${templateName} is not approved in the customer's official Meta account`;
+        if (!dryRun) {
+          await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': 'TEMPLATE_REQUIRED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': reason, 'Next Follow Up At': '', 'Follow Up Scheduled At': '', 'Updated At': now.toISOString(), 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+          await recordActivity(application, 'FOLLOW_UP_META_TEMPLATE_REQUIRED', reason);
+        }
+        results.push({ ...resultIdentity, blocked: 'META_TEMPLATE_NOT_APPROVED', templateName, reason });
+        continue;
+      }
+    }
+    if (dryRun) { results.push({ ...resultIdentity, dueAt: evaluation.dueAt, ruleId: evaluation.ruleId, attempt: evaluation.nextAttempt, message, templateRequired, ready: true }); continue; }
     let providerMessageId = '', sendStatus = 'MANUAL_PENDING', sendError = '';
     try {
       if (cloudMode) { providerMessageId = await sendCloudMessage(route, phone, message, templateName, evaluation.rule.language); sendStatus = 'QUEUED'; }
     } catch (error) { sendStatus = 'FAILED'; sendError = clean(error?.message) || 'Follow-up delivery failed'; }
     const sentAt = now.toISOString(), outboxId = `FUP-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     await appendRow(token, 'Message_Outbox', outboxHeaders, {
-      'Outbox ID': outboxId, 'Created At': sentAt, 'Lead ID': application['Lead ID'], 'Application ID': id, 'Phone Number': phone,
+      'Outbox ID': outboxId, 'Created At': sentAt, 'Lead ID': lead['Lead ID'], 'Application ID': leadOnly ? '' : id, 'Phone Number': phone,
       'Message Type': templateName ? 'TEMPLATE' : 'TEXT', 'Message Text': message, 'Template Name': templateName, Language: evaluation.rule.language,
       'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': sendStatus === 'QUEUED' ? sentAt : '', 'Provider Message ID': providerMessageId,
       'Error Message': sendError, 'WhatsApp Number ID': route['Phone Number ID'], 'WABA ID': route['WABA ID'], 'Internal Channel ID': route['Internal Channel ID'],
@@ -183,23 +242,29 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
       'Automation Key': automationKey, 'Follow Up Rule': evaluation.ruleId, 'Follow Up Attempt': String(evaluation.nextAttempt)
     });
     if (sendStatus === 'FAILED') {
-      await updateRow(token, 'Applications', applicationHeaders, application.rowNumber, { 'Follow Up Status': 'DELIVERY_FAILED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': sendError, 'Next Follow Up At': new Date(now.valueOf() + 3600000).toISOString(), 'Follow Up Scheduled At': sentAt, 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+      await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': 'DELIVERY_FAILED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': sendError, 'Next Follow Up At': new Date(now.valueOf() + 3600000).toISOString(), 'Follow Up Scheduled At': sentAt, 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
       await recordActivity(application, 'FOLLOW_UP_DELIVERY_FAILED', `${evaluation.ruleId} attempt ${evaluation.nextAttempt}: ${sendError}`);
-      results.push({ applicationId: id, failed: sendError, outboxId });
+      results.push({ ...resultIdentity, failed: sendError, outboxId });
       continue;
     }
     const handedOver = evaluation.nextAttempt >= evaluation.rule.maxAttempts;
     const nextAt = handedOver ? '' : nextFollowUpAfterSend({ sentAt: now, rule: evaluation.rule, attempts: evaluation.nextAttempt, global: settings.global });
+    const advisor = handedOver ? chooseFollowUpAdvisor(application, lead, advisors) : null;
+    const assignment = advisor ? (leadOnly
+      ? { 'Assigned SA ID': advisor['SA ID'], 'Selected Branch ID': advisor['Branch ID'] }
+      : { 'Assigned SA ID': advisor['SA ID'], 'Assigned Branch ID': advisor['Branch ID'] }) : {};
     const changes = {
       'Follow Up Status': handedOver ? 'HANDED_OVER' : 'ACTIVE', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Attempts': String(evaluation.nextAttempt),
       'Last Follow Up At': sentAt, 'Next Follow Up At': nextAt, 'Follow Up Scheduled At': nextAt ? sentAt : '', 'Follow Up Paused At': '', 'Follow Up Pause Reason': handedOver ? 'Maximum automatic follow-up attempts reached' : '',
       'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION',
-      ...(handedOver ? { 'Processing Mode': 'AI_TO_SA_HANDOVER', 'Application Status': 'MANUAL_REVIEW', 'SA Review Required': 'TRUE', 'Handover Reason': 'Customer did not complete documents or information after three automatic follow-ups' } : {})
+      ...(handedOver ? { 'Processing Mode': 'AI_TO_SA_HANDOVER', ...(leadOnly ? { 'Lead Status': 'MANUAL_REVIEW' } : { 'Application Status': 'MANUAL_REVIEW', 'SA Review Required': 'TRUE' }), 'Handover Reason': advisor ? `Automatic follow-up assigned to ${advisor['SA ID']} after maximum attempts` : 'Maximum attempts reached; no eligible Staff was available' } : {}),
+      ...assignment
     };
-    await updateRow(token, 'Applications', applicationHeaders, application.rowNumber, changes);
-    if (lead.rowNumber) await updateRow(token, 'Leads', leadHeaders, lead.rowNumber, { 'Follow Up Status': changes['Follow Up Status'], 'Follow Up Rule': evaluation.ruleId, 'Follow Up Attempts': changes['Follow Up Attempts'], 'Last Follow Up At': sentAt, 'Next Follow Up At': nextAt, 'Follow Up Scheduled At': changes['Follow Up Scheduled At'], 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
-    await recordActivity(application, handedOver ? 'FOLLOW_UP_HANDED_TO_STAFF' : 'FOLLOW_UP_SENT', `${evaluation.ruleId} attempt ${evaluation.nextAttempt} ${cloudMode ? 'sent through WhatsApp Cloud API' : 'queued for manual WhatsApp delivery'}`);
-    results.push({ applicationId: id, outboxId, attempt: evaluation.nextAttempt, ruleId: evaluation.ruleId, status: sendStatus, sent: cloudMode, queued: !cloudMode, handedOver, nextFollowUpAt: nextAt });
+    await updateRow(token, recordSheet, recordHeaders, application.rowNumber, changes);
+    if (!leadOnly && lead.rowNumber) await updateRow(token, 'Leads', leadHeaders, lead.rowNumber, { 'Follow Up Status': changes['Follow Up Status'], 'Follow Up Rule': evaluation.ruleId, 'Follow Up Attempts': changes['Follow Up Attempts'], 'Last Follow Up At': sentAt, 'Next Follow Up At': nextAt, 'Follow Up Scheduled At': changes['Follow Up Scheduled At'], ...(advisor ? { 'Assigned SA ID': advisor['SA ID'], 'Selected Branch ID': advisor['Branch ID'] } : {}), 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+    if (advisor?.rowNumber) await updateRow(token, 'SA_Master', advisorHeaders, advisor.rowNumber, { 'Last Assigned At': sentAt });
+    await recordActivity(application, handedOver ? 'FOLLOW_UP_HANDED_TO_STAFF' : 'FOLLOW_UP_SENT', `${evaluation.ruleId} attempt ${evaluation.nextAttempt} ${cloudMode ? 'sent through WhatsApp Cloud API' : 'queued for manual WhatsApp delivery'}${advisor ? `; assigned to ${advisor['SA ID']}` : ''}`);
+    results.push({ ...resultIdentity, outboxId, attempt: evaluation.nextAttempt, ruleId: evaluation.ruleId, status: sendStatus, sent: cloudMode, queued: !cloudMode, handedOver, assignedSaId: advisor?.['SA ID'] || '', nextFollowUpAt: nextAt });
   }
   const summary = {
     due: results.length,
@@ -208,8 +273,8 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
     blocked: results.filter(result => result.blocked || result.failed).length,
     handedOver: results.filter(result => result.handedOver).length
   };
-  if (!dryRun) await recordActivity({}, 'FOLLOW_UP_RUN_COMPLETED', `Checked ${applications.length} applications; ${summary.due} due, ${summary.sent} sent, ${summary.queued} queued, ${summary.blocked} blocked and ${summary.handedOver} handed over`);
-  return { checked: applications.length, completedAt: now.toISOString(), summary, results };
+  if (!dryRun) await recordActivity({}, 'FOLLOW_UP_RUN_COMPLETED', `Checked ${applications.length} applications and ${leadSubjects.length} unconverted leads; ${summary.due} due, ${summary.sent} sent, ${summary.queued} queued, ${summary.blocked} blocked and ${summary.handedOver} handed over`);
+  return { checked: subjects.length, applicationsChecked: applications.length, leadsChecked: leadSubjects.length, completedAt: now.toISOString(), summary, results };
 }
 
 export default async function handler(req, res) {
@@ -226,3 +291,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false, error: clean(error?.message) || 'Unable to run follow-up dispatcher' });
   }
 }
+
