@@ -182,6 +182,20 @@ test('follow-up dispatcher covers lead recovery, live Meta approval and real SA 
   assert.match(dispatcher, /approvedTemplateNames/);
   assert.match(dispatcher, /chooseFollowUpAdvisor/);
   assert.match(dispatcher, /Last Assigned At/);
+  assert.match(dispatcher, /expiresAt: Date\.now\(\) \+ 5 \* 60000/);
+});
+
+test('newly approved Meta templates recover blocked follow-ups automatically', () => {
+  const blocked = {
+    status: 'OPEN',
+    followUpStatus: 'TEMPLATE_REQUIRED',
+    lastCustomerReplyAt: '2026-08-20T01:00:00.000Z',
+    updated: '2026-08-28T01:00:00.000Z'
+  };
+  const result = evaluateFollowUp({ application: blocked, settings: {}, at: new Date('2026-08-28T02:00:00.000Z') });
+  assert.equal(result.eligible, true);
+  assert.equal(result.due, true);
+  assert.equal(result.ruleId, 'DOCUMENTS_NOT_STARTED');
 });
 
 test('CRM queue supports unconverted leads, opt-out and flexible scheduling', () => {
