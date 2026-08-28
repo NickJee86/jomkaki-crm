@@ -1398,8 +1398,8 @@ function whatsappChannelManager(){
 }
 
 const FOLLOW_UP_TEMPLATE_REGISTRY={
-  jomkaki_sales_enquiry_v1:{status:'Pending Meta approval',body:'Hai, saya masih boleh bantu cari motor atau telefon yang sesuai dengan bajet anda. Balas mesej ini dengan bajet bulanan atau jenis model yang anda suka dan kami akan cadangkan beberapa pilihan Loan Kedai.'},
-  jomkaki_quote_followup_v1:{status:'Pending Meta approval',body:'Hai, kami ingin sambung semula pertanyaan anda tentang model dan ansuran Loan Kedai. Balas mesej ini jika anda mahu semak pilihan lain, warna, spesifikasi, bajet bulanan atau teruskan permohonan.'},
+  jomkaki_sales_enquiry_v1:{status:'Active',body:'Hai, saya masih boleh bantu cari motor atau telefon yang sesuai dengan bajet anda. Balas mesej ini dengan bajet bulanan atau jenis model yang anda suka dan kami akan cadangkan beberapa pilihan Loan Kedai.'},
+  jomkaki_quote_followup_v1:{status:'Active',body:'Hai, kami ingin sambung semula pertanyaan anda tentang model dan ansuran Loan Kedai. Balas mesej ini jika anda mahu semak pilihan lain, warna, spesifikasi, bajet bulanan atau teruskan permohonan.'},
   jomkaki_documents_start_v1:{status:'Active',body:'Hai, permohonan Loan Kedai anda masih belum mempunyai dokumen untuk semakan. Sila balas mesej ini dan hantar MyKad depan dan belakang bersama slip gaji terkini atau penyata EPF. Jika belum lengkap, hantar yang ada dahulu dan kami akan bantu semak.'},
   jomkaki_documents_partial_v1:{status:'Active',body:'Hai, kami telah menerima sebahagian dokumen permohonan Loan Kedai anda. Masih ada dokumen yang diperlukan untuk meneruskan semakan. Sila balas mesej ini supaya kami boleh maklumkan dokumen yang belum lengkap dan bantu anda teruskan permohonan.'},
   jomkaki_consent_unsigned_v1:{status:'Active',body:'Hai, borang persetujuan untuk permohonan Loan Kedai anda masih belum ditandatangani. Sila tandatangan dan balas mesej ini dengan PDF atau gambar borang yang jelas. Anda tidak perlu menunggu dokumen lain lengkap untuk menghantarnya.'},
@@ -1409,8 +1409,8 @@ const FOLLOW_UP_TEMPLATE_REGISTRY={
   jomkaki_image_send_v1:{status:'Active',body:'Gambar berkaitan permohonan Loan Kedai anda dilampirkan bersama mesej ini. Sila semak gambar tersebut. Jika ada bahagian yang kurang jelas, balas di WhatsApp ini dan kami akan bantu.'},
   jomkaki_direct_debit_v1:{status:'Pending Meta approval',body:'Hai, permohonan Loan Kedai anda sudah sampai ke langkah Direct Debit. Sila lengkapkan arahan Direct Debit yang dihantar supaya proses seterusnya boleh diteruskan. Jika ada bahagian yang kurang jelas, balas mesej ini dan kami akan bantu.'},
   jomkaki_agreement_unsigned_v1:{status:'Pending Meta approval',body:'Hai, perjanjian untuk permohonan Loan Kedai anda masih belum ditandatangani. Sila semak dan tandatangan perjanjian yang dihantar, kemudian balas mesej ini selepas selesai. Jika perlukan bantuan, beritahu kami.'},
-  jomkaki_continue_enquiry_v1:{status:'Pending Meta approval',body:'Hai, kami ingin sambung semula pertanyaan anda tentang model dan pelan Loan Kedai JomKaki Rider. Balas mesej ini dengan model atau soalan anda dan kami akan bantu terus dari perbualan terakhir.'},
-  jomkaki_product_image_v1:{status:'Pending Meta approval',body:'Hai, gambar model yang anda minat dilampirkan bersama mesej ini. Balas mesej ini jika anda mahu semak warna, pilihan storan, ansuran bulanan atau teruskan permohonan Loan Kedai.'}
+  jomkaki_continue_enquiry_v1:{status:'Active',body:'Hai, kami ingin sambung semula pertanyaan anda tentang model dan pelan Loan Kedai JomKaki Rider. Balas mesej ini dengan model atau soalan anda dan kami akan bantu terus dari perbualan terakhir.'},
+  jomkaki_product_image_v1:{status:'Active',body:'Hai, gambar model yang anda minat dilampirkan bersama mesej ini. Balas mesej ini jika anda mahu semak warna, pilihan storan, ansuran bulanan atau teruskan permohonan Loan Kedai.'}
 };
 const followUpUpper=value=>String(value||'').trim().toUpperCase();
 function inferredFollowUpRule(application={}){
