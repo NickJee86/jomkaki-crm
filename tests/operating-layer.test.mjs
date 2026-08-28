@@ -79,10 +79,19 @@ test('zero workload badges stay quiet and WhatsApp capacity is unambiguous', () 
   assert.doesNotMatch(app, /LIVE \/ 10 RESERVED/);
 });
 
+test('customer workspace reflects production messaging and excludes synthetic records', () => {
+  assert.match(app, /const customerDocuments=businessDocuments\(\),pendingDocuments=customerDocuments\.filter/);
+  assert.match(app, /applicationTable\(businessApplications\(\)\.slice\(0,8\)\)/);
+  assert.match(app, /WhatsApp Meta Cloud connected/);
+  assert.match(app, /if\(!cloud\)document\.querySelector\('\[data-record-reply\]'\)/);
+  assert.doesNotMatch(app, /WhatsApp Business manual test mode/);
+  assert.doesNotMatch(app, /Secure SharePoint records/);
+});
+
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260828-badge-slots1/);
+  assert.match(html, /app-v2\.js\?v=20260828-customer-workspace1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
