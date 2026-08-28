@@ -69,6 +69,11 @@ test('Administrator report supports filters and aggregate export',()=>{
   assert.match(app,/reportPeriodComparison/);
   assert.match(app,/reportMissingDocumentGroups/);
   assert.match(app,/reportIsOverdue/);
+  assert.match(app,/function reportPhysicalBranch/);
+  assert.match(app,/function reportOperationalChannel/);
+  assert.match(app,/filter\(option=>reportPhysicalBranch\(option\[0\],option\[1\]\)\)/);
+  assert.match(app,/filter\(reportOperationalChannel\)/);
+  assert.match(app,/\(RETIRED\|LEGACY\)/);
   assert.match(app,/\['created','updated'\]/);
   assert.match(app,/const source=channelReportSource\(\)/);
   assert.match(app,/Object\.assign\(state\.data,source\)/);
@@ -90,5 +95,5 @@ test('Report API exposes stable created dates and attribution fields',()=>{
 test('Report deployment uses a fresh cache version',()=>{
   assert.match(html,/v2\.css\?v=20260827-operating-layer1/);
   assert.match(html,/design-refresh\.css\?v=20260821-table-scroll1/);
-  assert.match(html,/app-v2\.js\?v=20260827-customer360-readable3/);
+  assert.match(html,/app-v2\.js\?v=20260828-report-filter1/);
 });
