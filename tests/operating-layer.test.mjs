@@ -41,6 +41,14 @@ test('notifications combine customer, document, follow-up and delivery work', ()
   assert.match(app, /urgent===1\?'needs':'need'/);
 });
 
+test('activity audit prioritises meaningful events over routine scheduler noise', () => {
+  assert.match(app, /function routineFollowUpHeartbeat\(item\)/);
+  assert.match(app, /Show.*routine scheduler checks/);
+  assert.match(app, /id="activitySearch"/);
+  assert.match(app, /Routine successful scheduler checks are collapsed by default/);
+  assert.match(app, /0 due,\\s\*0 sent,\\s\*0 queued,\\s\*0 blocked/);
+});
+
 test('reports are grouped into clear operating categories', () => {
   assert.match(app, /function organizeReports\(/);
   for (const category of ['Executive', 'Sales', 'Operations', 'Products', 'Team', 'System', 'All reports']) {
@@ -52,7 +60,7 @@ test('reports are grouped into clear operating categories', () => {
 test('internal navigation resets scroll and production assets are cache-busted', () => {
   assert.match(app, /window\.scrollTo\(\{top:0,behavior:'auto'\}\)/);
   assert.match(app, /page-breadcrumb/);
-  assert.match(html, /app-v2\.js\?v=20260828-inbox-handled1/);
+  assert.match(html, /app-v2\.js\?v=20260828-audit-signal1/);
   assert.match(html, /v2\.css\?v=20260827-operating-layer1/);
   assert.match(html, /customer-360\.css\?v=20260827-operating-layer1/);
 });
