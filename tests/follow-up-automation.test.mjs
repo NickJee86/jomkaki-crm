@@ -245,7 +245,9 @@ test('follow-up operations are separated from Management and available by role s
   assert.match(app, /Information incomplete/);
   assert.match(app, /Consent unsigned/);
   assert.match(app, /Completion steps/);
-  assert.match(app, /if\(admin&&loadedResources\.has\('followUpSettings'\)\)followUpControlCentreManager\(\);else followUpTeamWorkspace\(\)/);
+  assert.match(app, /state\.followUpView\|\|'WORK'/);
+  assert.match(app, /data-followup-view="SETTINGS"/);
+  assert.match(app, /admin&&active==='SETTINGS'&&loadedResources\.has\('followUpSettings'\)/);
   assert.doesNotMatch(app, /function settings\(\)\{\s*settingsLegacy\(\);\s*if\(state\.user\?\.role==='ADMIN'&&loadedResources\.has\('followUpSettings'\)\)/);
   assert.doesNotMatch(api, /resource === 'followUpSettings'[\s\S]{0,120}session\.role !== 'ADMIN'/);
   assert.match(css, /\.follow-up-work-row\{display:grid/);
@@ -291,4 +293,3 @@ test('Administrator can see approved system-level follow-up audit events', () =>
   assert.match(api, /resource === 'activity' && session\.role === 'ADMIN'/);
   assert.match(api, /globalActivityTypes\.has\(clean\(row\['Activity Type'\]\)\.toUpperCase\(\)\)/);
 });
-

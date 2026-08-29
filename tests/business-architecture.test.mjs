@@ -33,7 +33,7 @@ test('One SA login can submit Motor, Handphone or Both',()=>{
 test('Staff application entry only offers physical branches',()=>{
   assert.match(ui,/architecturePhysicalBranch/);
   assert.match(ui,/\.filter\(\(\[id,name\]\)=>architecturePhysicalBranch\(id,name\)\)/);
-  assert.match(html,/business-architecture\.js\?v=20260828-operational-records1/);
+  assert.match(html,/business-architecture\.js\?v=20260829-workflow1/);
 });
 
 test('Motor and Handphone application data remain separately reportable',()=>{

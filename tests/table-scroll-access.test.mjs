@@ -18,8 +18,8 @@ test('wide CRM tables receive a viewport-level horizontal scroll control',()=>{
 test('the scroll control follows dynamic page and table updates',()=>{
   assert.match(appSource,/new MutationObserver\(scheduleTableScrollDock\)\.observe\(app,\{childList:true,subtree:true\}\)/);
   assert.match(appSource,/bind\(\);applyDemoFeatureBanner\(\);scheduleTableScrollDock\(\);/);
-  assert.match(html,/app-v2\.js\?v=20260828-template-fallback1/);
-  assert.match(html,/design-refresh\.css\?v=20260821-table-scroll1/);
+  assert.match(html,/app-v2\.js\?v=20260829-workflow1/);
+  assert.match(html,/design-refresh\.css\?v=20260829-workflow1/);
 });
 
 test('the floating control is accessible and does not cover the final table row',()=>{
@@ -69,4 +69,3 @@ test('the floating scrollbar and visible table stay synchronized in both directi
   target.scrollWidth=800;context.scrollApi.syncTableScrollDock();
   assert.equal(dock.hidden,true);
 });
-
