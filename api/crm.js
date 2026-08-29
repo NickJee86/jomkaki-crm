@@ -313,20 +313,59 @@ async function ensureFolder(token, driveId, parentId, name) {
   return graph(token, `/drives/${driveId}/items/${parentId}/children`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: safe, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' }) });
 }
 
+async function resolveSharePointTarget(token) {
+  const hostname = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
+  const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
+  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
+  const site = await graph(token, `/sites/${hostname}:${sitePath}?$select=id,webUrl`);
+  const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType,webUrl`);
+  const drive = (drives.value || []).find(item => clean(item.name).toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
+  if (!drive) throw new Error('SharePoint document library was not found');
+  const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
+  return { hostname, sitePath, libraryName: drive.name || libraryName, site, drive, root };
+}
+
+export async function runControlledSharePointWriteTest(req, session) {
+  const token = await getSharePointToken();
+  const target = await resolveSharePointTarget(token);
+  const folderName = 'CRM Integration Tests';
+  const testFolder = await ensureFolder(token, target.drive.id, target.root.id, folderName);
+  const verifiedAt = new Date().toISOString();
+  const compactTimestamp = verifiedAt.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  const fileName = `JomKaki-SharePoint-Verification-${compactTimestamp}.txt`;
+  const contents = [
+    'JomKaki CRM controlled SharePoint write verification',
+    `Generated: ${verifiedAt}`,
+    `Actor: ${clean(session?.username) || 'CRM Administrator'}`,
+    'Purpose: verifies application-only Sites.Selected write access.',
+    'This file contains no customer data and is safe to delete after verification.'
+  ].join('\n');
+  const uploaded = await graph(token, `/drives/${target.drive.id}/items/${testFolder.id}:/${encodeURIComponent(fileName)}:/content?$select=id,name,webUrl`, {
+    method: 'PUT', headers: { 'content-type': 'text/plain; charset=utf-8' }, body: Buffer.from(contents, 'utf8')
+  });
+  await writeActivity(req, session, {
+    type: 'CRM_SHAREPOINT_WRITE_TEST_SUCCEEDED',
+    description: `Controlled SharePoint write test succeeded at ${target.hostname}${target.sitePath}/${target.libraryName}/${folderName}/${fileName}; no customer data was used`
+  });
+  return {
+    live: true,
+    verifiedAt,
+    hostname: target.hostname,
+    sitePath: target.sitePath,
+    libraryName: target.libraryName,
+    folderName,
+    fileName: uploaded.name || fileName,
+    webUrl: uploaded.webUrl || target.drive.webUrl || target.site.webUrl || ''
+  };
+}
+
 async function uploadDocument(req, file, caseId) {
   const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'Document' });
   const token = await getSharePointToken();
-  const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
-  const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
-  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
-  const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
-  const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
-  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
-  if (!drive) throw new Error('SharePoint document library was not found');
-  const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
-  const crmFolder = await ensureFolder(token, drive.id, root.id, 'CRM Customer Documents');
-  const caseFolder = await ensureFolder(token, drive.id, crmFolder.id, caseId || 'Unassigned');
-  return graph(token, `/drives/${drive.id}/items/${caseFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
+  const target = await resolveSharePointTarget(token);
+  const crmFolder = await ensureFolder(token, target.drive.id, target.root.id, 'CRM Customer Documents');
+  const caseFolder = await ensureFolder(token, target.drive.id, crmFolder.id, caseId || 'Unassigned');
+  return graph(token, `/drives/${target.drive.id}/items/${caseFolder.id}:/${encodeURIComponent(safeName)}:/content?$select=id,name,webUrl`, {
     method: 'PUT', headers: { 'content-type': mimeType }, body: bytes
   });
 }
@@ -770,6 +809,10 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
+      if (action === 'verifySharePointWrite') {
+        if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
+        return res.status(200).json(await runControlledSharePointWriteTest(req, session));
+      }
       if (action === 'previewFollowUpRun') {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         const { runFollowUpDispatch } = await import('./follow-up-dispatch.js');
@@ -2079,3 +2122,4 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
+
