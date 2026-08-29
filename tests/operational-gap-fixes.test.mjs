@@ -85,7 +85,8 @@ test('pending WhatsApp messages have an automatic five-minute dispatcher', () =>
 test('reply completion resolves the source inbox and refreshes live CRM state', () => {
   assert.match(api, /resolveRepliedInbox/);
   assert.match(api, /'Process Status': 'RESOLVED'/);
-  assert.match(app, /setInterval\(refreshLiveWorkspace,60000\)/);
+  assert.match(app, /setInterval\(\(\)=>refreshLiveWorkspace\(\),120000\)/);
+  assert.match(app, /const liveResourcesForView=view=>/);
   assert.match(app, /visibilitychange/);
 });
 
@@ -111,4 +112,3 @@ test('settings reveal the exact deployed knowledge snapshot and warnings', () =>
   assert.match(app, /Runtime knowledge health/);
   assert.match(app, /exact approved knowledge snapshot loaded by the deployed CRM build/);
 });
-
