@@ -1,7 +1,7 @@
 # JomKaki Rider CRM 2.0 — Completion Record
 
-Updated: 14 August 2026  
-Production: https://jomkaki-rider.vercel.app/
+Updated: 29 August 2026  
+Production: https://jomkaki-crm.vercel.app/
 
 ## Current production flow
 
@@ -28,7 +28,8 @@ Production: https://jomkaki-rider.vercel.app/
 - Uploaded documents enter `AI_QUEUED` / `PENDING_AI`; routine Staff verification is not required.
 - Managers can resolve AI document exceptions and all decisions are recorded in Activity & Audit.
 - Admin can create, edit, enable, disable, unlock and reset CRM accounts without exposing stored passwords.
-- Manual WhatsApp Business replies remain available while Meta Cloud authorization is pending.
+- WhatsApp Meta Cloud is active for the verified JomKaki production number. Every reply remains bound to the number that received the customer conversation.
+- Message Outbox exposes queued, sending, failed, sent, delivered and read states. Queued messages can be sent immediately and failed messages can be retried safely.
 - Login, page asset version and browser console were verified on the final production deployment.
 - Accounts support Motor, Handphone or Both business access.
 - Manual application submission starts with Motorcycle Loan or Handphone Loan and stores separately reportable product data.
@@ -56,7 +57,7 @@ Production: https://jomkaki-rider.vercel.app/
 
 ## Verification completed
 
-- The complete automated suite passed on 14 August 2026: 79 tests, 0 failures.
+- The complete automated suite passed on 29 August 2026: 264 tests, 0 failures.
 - JavaScript syntax checks passed for 29 frontend, API and test files.
 - Authentication/session tests passed.
 - Role-scope tests passed for Admin, Regional Manager, Business Manager, Branch Supervisor and Staff.
@@ -69,10 +70,10 @@ Production: https://jomkaki-rider.vercel.app/
 - The deployed Meta callback challenge returned the exact expected challenge, confirming that the Vercel Webhook verification path and current verification token are working.
 - WhatsApp Manager now reports West 01 as `Connected`; the display name is approved and two-step verification is enabled.
 - The protected Make S00B dispatch secret is configured in both Vercel and Make, and the new Vercel production deployment is `Ready`.
-- West 01 is enabled for inbound acceptance testing. Outbound remains disabled until an approved test phone completes the controlled live test.
+- West 01 Cloud outbound is enabled on the verified JomKaki route. A controlled approved-phone smoke test still provides the final operational evidence for delivery, read receipt and attachment handling.
 - The official JomKaki logo is saved as the production WhatsApp business profile picture; Meta may take a few minutes to display it everywhere.
 
 ## External activation blockers
 
 - LMSPRO: official API contract, sandbox endpoint and secured test credentials are still required before real case submission can be enabled.
-- WhatsApp Cloud: Meta verified the official production number on 13 August 2026. `WHATSAPP_SEND_MODE=MANUAL` and the Make Sender remain safely disabled until one approved synthetic end-to-end test passes.
+- SharePoint: credentials are present, but the site-specific write gate must remain visible until a non-PII upload has been verified and `SHAREPOINT_SITE_WRITE_VERIFIED_AT` is recorded.

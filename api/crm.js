@@ -1777,7 +1777,8 @@ export default async function handler(req, res) {
         if (action === 'retryOutboxMessage') {
           const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
           if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
-          if (clean(record['Send Status']).toUpperCase() !== 'FAILED') throw new Error('Only failed messages can be retried');
+          const currentStatus = clean(record['Send Status']).toUpperCase();
+          if (!['FAILED', 'PENDING', 'QUEUED'].includes(currentStatus)) throw new Error('Only failed or queued messages can be sent from this action');
           const route = channels.find(row => clean(row['Internal Channel ID']) === clean(record['Internal Channel ID']));
           if (!route || !truth(route.Active) || !truth(route['Outbound Enabled'])) throw new Error('The original WhatsApp channel is not available for retry');
           const credentials = channelCredentials(route);
@@ -1794,7 +1795,7 @@ export default async function handler(req, res) {
           const timestamp = now(), providerMessageId = clean(result.messages?.[0]?.id);
           await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'SENT', 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'Send Routing Status': `CLOUD_API_RETRY_SENT:${route['Internal Channel ID']}` }, 'AJ');
           await resolveRepliedInbox(req, record['Reply To Message ID']);
-          await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: 'CRM_WHATSAPP_RETRY_SENT', description: `${session.username} retried a failed WhatsApp message successfully` });
+          await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: currentStatus === 'FAILED' ? 'CRM_WHATSAPP_RETRY_SENT' : 'CRM_WHATSAPP_QUEUED_SENT', description: `${session.username} ${currentStatus === 'FAILED' ? 'retried a failed' : 'sent a queued'} WhatsApp message successfully` });
           return res.status(200).json({ live: true, outboxId: record['Outbox ID'], status: 'SENT', providerMessageId });
         }
 
@@ -2078,4 +2079,3 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
-

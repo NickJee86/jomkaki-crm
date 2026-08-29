@@ -29,7 +29,8 @@ test('refresh errors preserve the authenticated workspace', () => {
   assert.match(app, /if\(error\?\.message==='AUTH'\)/);
   assert.match(app, /if\(wasLoaded\)\{shell\.hidden=false;gate\.classList\.add\('hidden'\);render\(\);showWorkspaceError/);
   assert.match(app, /Your login is still active/);
-  assert.match(app, /if\(!await load\(\)\)return/);
+  assert.match(app, /refreshLiveWorkspace\(\{force:true,showErrors:true\}\)/);
+  assert.match(app, /const liveResourcesForView=view=>/);
 });
 
 test('sheet-backed sessions tolerate a temporary account directory outage', () => {
@@ -38,4 +39,3 @@ test('sheet-backed sessions tolerate a temporary account directory outage', () =
   assert.match(auth, /validationDeferred:\s*true/);
   assert.match(auth, /clean\(session\.authSource\)\s*===\s*'sheet'/);
 });
-
