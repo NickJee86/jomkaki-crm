@@ -10,7 +10,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
-  assert.match(html,/app-v2\.js\?v=20260829-delivery1/);
+  assert.match(html,/app-v2\.js\?v=20260829-sharepoint1/);
   assert.match(html,/v2\.css\?v=20260827-operating-layer1/);
   [
     'Go-live readiness',
@@ -75,3 +75,4 @@ test('Deployment prevents stale HTML while versioning frontend assets',()=>{
   assert.match(productUi,/const selected = isHandphoneCatalogView\(\) \? 'HANDPHONE' : 'MOTOR'/);
   assert.match(productUi,/filter\(item => unitOf\(item\) === selected/);
 });
+
