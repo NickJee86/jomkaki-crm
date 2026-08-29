@@ -1,7 +1,7 @@
 # JomKaki External Integration Activation Runbook
 
-Updated: 14 August 2026  
-Production safety rule: all Make schedules, WhatsApp Cloud automation and LMSPRO production submission remain OFF until the relevant acceptance gate is signed off.
+Updated: 29 August 2026  
+Production safety rule: WhatsApp Cloud is active only for a verified JomKaki number and every message remains bound to that original number. LMSPRO production submission remains OFF until the vendor gate is signed off.
 
 ## 1. Meta WhatsApp Cloud gate
 
@@ -12,16 +12,16 @@ Production safety rule: all Make schedules, WhatsApp Cloud automation and LMSPRO
 - Official number: `+60147952387`; Phone Number ID: `1212389721965743`; requested Meta display name: `JomKaki Rider`.
 - Webhook callback: `https://jomkaki-rider.vercel.app/api/whatsapp-webhook`.
 - The App Secret has been rotated and stored only as the Sensitive Vercel variable `META_APP_SECRET`. The verification token is stored only as `WHATSAPP_VERIFY_TOKEN`; never copy either value into Google Sheets, Make notes or this file.
-- Keep `WHATSAPP_SEND_MODE=MANUAL` and keep West 01 outbound disabled until the controlled live test passes. Inbound acceptance testing is enabled.
+- `WHATSAPP_SEND_MODE=CLOUD` is active for the verified JomKaki production route. Never switch to a LoanBuddy or unrelated Meta asset.
 - OTP verification for `+60147952387` was completed on 13 August 2026. Do not request another verification code.
 - WhatsApp Manager shows the production number as `Connected`; the Meta-approved display name is active and two-step verification is enabled.
 - The approved JomKaki square logo has been uploaded and saved as the production WhatsApp business profile picture. Meta may take a few minutes to propagate the change.
 - The callback is saved in Meta and the app is subscribed to the WhatsApp `messages` webhook field on Graph API v26.0.
 - A non-expiring production system-user token with `whatsapp_business_management` and `whatsapp_business_messaging` is stored only as the Sensitive Vercel variable `WHATSAPP_WEST_01_ACCESS_TOKEN`.
 - The Make S00B dispatcher now uses a dedicated protected dispatch secret shared only with Vercel. Map Receiver, Message Type and Message Text from the JomKaki `Message_Outbox` row.
-- Keep the Make schedule OFF during the synthetic acceptance test. Test with synthetic CRM data and an approved test phone only.
-- Verify inbound webhook, exact-number outbound routing, delivery/read status, duplicate prevention, AI reply, document collection and Manager handover.
-- Change to `WHATSAPP_SEND_MODE=CLOUD` and enable production scheduling only after the owner signs off the test evidence.
+- The Vercel dispatcher checks queued messages every five minutes. CRM users can also use **Send now** on a queued message without changing the bound official number.
+- Verify inbound webhook, exact-number outbound routing, delivery/read status, duplicate prevention, AI reply, document collection, attachment delivery and Manager handover with an approved test phone.
+- A message that remains **Sending** for more than ten minutes must be checked in Meta before any resend. This prevents accidental duplicate customer messages.
 
 ## 2. SharePoint document gate
 
@@ -83,11 +83,11 @@ Planned environment keys after the vendor package is approved:
 ## 6. Current status
 
 - Google Sheet dashboard and application state alignment: completed.
-- CRM automated suite: 79 tests passed with zero failures on 14 August 2026; syntax checks passed for the modified production scripts.
+- CRM automated suite: 264 tests passed with zero failures on 29 August 2026, including queued-message recovery, attachment delivery, follow-up, AI knowledge and duplicate-send protection.
 - Staff account mapping and role tests: completed; vacant Branch Supervisor positions continue to use the Regional Manager fallback.
 - SharePoint Entra permission: `Sites.Selected` is configured and granted; site-specific write verification remains required.
 - Meta Vercel preparation: rotated App Secret, verification token, West 01 Phone Number ID and the permanent system-user access token are stored as Sensitive variables; Production was redeployed `Ready`; the deployed callback challenge test passed.
 - Meta app and webhook: the production app is published, the CRM callback is saved, and the WhatsApp `messages` field is subscribed on Graph API v26.0.
-- Meta connection: the official number is `Connected`, two-step verification is enabled, the webhook is saved and `messages` is subscribed. West 01 inbound acceptance testing is enabled; outbound and the Make schedule remain disabled until the approved live test passes.
-- Make business-aware blueprints and safety controls are prepared and tested locally; keep the WhatsApp sender OFF until the Meta acceptance sequence passes.
+- Meta connection: the official number is `Connected`, two-step verification is enabled, the webhook is saved and `messages` is subscribed. Cloud outbound uses the same official-number binding as inbound.
+- Message Outbox now shows queued, sending, failed, sent, delivered and read states. Queued messages can be dispatched immediately; failed messages have a controlled one-time retry.
 - LMSPRO: preparation layer completed; vendor contract, sandbox and credentials remain external blockers.

@@ -50,7 +50,11 @@ test('outbound messages are recorded and locked before Meta delivery', () => {
   const meta = api.indexOf('https://graph.facebook.com/', start);
   assert.ok(start >= 0 && append > start && sending > append && meta > sending);
   assert.match(api, /retryOutboxMessage/);
-  assert.match(app, /data-retry-outbox/);
+  assert.match(app, /data-dispatch-outbox/);
+  assert.match(api, /\['FAILED', 'PENDING', 'QUEUED'\]\.includes\(currentStatus\)/);
+  assert.match(app, /Send this queued WhatsApp message now from its original official number/);
+  assert.match(app, /Scheduler delayed · send now available/);
+  assert.match(app, /<option value="DELIVERED">Delivered<\/option><option value="READ">Read<\/option>/);
   assert.match(app, /Sending · do not resend/);
 });
 
@@ -80,6 +84,15 @@ test('pending WhatsApp messages have an automatic five-minute dispatcher', () =>
   assert.ok(vercel.crons.some(item => item.path === '/api/whatsapp-outbox-send' && item.schedule === '*/5 * * * *'));
   assert.match(dispatcher, /Send Status'\]\)\.toUpperCase\(\) === 'PENDING'/);
   assert.match(dispatcher, /existingStatus === 'SENDING'/);
+});
+
+test('staff can recover a delayed queued message without bypassing original-number routing', () => {
+  assert.match(app, /data-dispatch-outbox/);
+  assert.match(app, /Send now/);
+  assert.match(app, /Waiting \$\{age\} minutes/);
+  assert.match(app, /stale Sending row must be checked in Meta before any resend/);
+  assert.match(api, /const route = channels\.find\(row => clean\(row\['Internal Channel ID'\]\) === clean\(record\['Internal Channel ID'\]\)\)/);
+  assert.match(api, /Only failed or queued messages can be sent from this action/);
 });
 
 test('reply completion resolves the source inbox and refreshes live CRM state', () => {
