@@ -1731,6 +1731,7 @@ const modelAliasStopWords = new Set([
   , 'nak', 'mahu', 'dapat', 'ada', 'tidak', 'tak', 'sekarang', 'sini', 'balas', 'tunggu'
 ]);
 const compactModelText = value => normalizedWords(value).replace(/\s+/g, '');
+const numericModelSegments = value => clean(value).match(/\d+/g) || [];
 const oneEditAway = (left, right) => {
   if (Math.abs(left.length - right.length) > 1) return false;
   let i = 0, j = 0, edits = 0;
@@ -1745,6 +1746,12 @@ const oneEditAway = (left, right) => {
 };
 
 const oneModelTypoAway = (left, right) => {
+  // Product numbers are identity, not spelling. Never "correct" Y15ZR to
+  // Y16ZR, Vario 125 to Vario 160, iPhone 16 to iPhone 17, and so on.
+  // Letter-only typos remain eligible when every numeric segment is identical.
+  const leftNumbers = numericModelSegments(left);
+  const rightNumbers = numericModelSegments(right);
+  if ((leftNumbers.length || rightNumbers.length) && leftNumbers.join('|') !== rightNumbers.join('|')) return false;
   if (oneEditAway(left, right)) return true;
   if (left.length !== right.length) return false;
   for (let index = 0; index < left.length - 1; index += 1) {
@@ -2373,6 +2380,26 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (interpretedIntent === 'INTEREST_RATE' || asksForInterestRate(text)) {
     return { handled: true, interestRateIntent: true, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'INTEREST_RATE') };
   }
+  // Answer a direct Loan Kedai question before any AI-suggested catalog item.
+  // A general financing question must never inherit or invent a model that the
+  // customer did not name in this message.
+  if (interpretedIntent === 'SHOP_LOAN' || asksAboutShopLoan(text)) {
+    const continuation = profileContinuation({
+      language,
+      state,
+      lead,
+      baseText: instantCopy(language, 'SHOP_LOAN'),
+      completeStep: step || 'STEP_03_PRODUCT'
+    });
+    const needsModelQuestion = continuation.nextStep === 'STEP_03_PRODUCT' && !selectedModel;
+    return {
+      handled: true,
+      shopLoanIntent: true,
+      nextStep: continuation.nextStep,
+      productUnit: explicitUnit || fallbackUnit || 'MOTOR',
+      text: [continuation.text, needsModelQuestion ? instantCopy(language, 'SHOP_LOAN_MODEL') : ''].filter(Boolean).join(' ')
+    };
+  }
   if ((interpretedIntent === 'FOLLOW_UP_TIME' || asksHowLongForAnswer(text)) && followsPendingBranchCheck(state)) {
     return { handled: true, aiUnderstood: !!interpretedIntent, nextStep: step || 'STEP_03_PRODUCT', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'FOLLOW_UP_TIME') };
   }
@@ -2519,11 +2546,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const aiSelectedProduct = clean(aiIntent?.catalogId)
     ? allCatalogs.find(row => clean(row['Catalog ID']) === clean(aiIntent.catalogId))
     : null;
+  const explicitModelCodeSignal = normalizedWords(text).split(' ').some(word => /(?:[a-z]\d|\d[a-z])/i.test(word))
+    || /\b\d{2,4}\b/.test(normalizedWords(text));
+  const safeAiSelectedProduct = aiSelectedProduct
+    && (!explicitModelCodeSignal || !!matchInstantProduct(text, [aiSelectedProduct]).product)
+    ? aiSelectedProduct
+    : null;
   let productMatch = deterministicProductMatch.product || deterministicProductMatch.ambiguous
     ? deterministicProductMatch
-    : aiSelectedProduct
-      ? { product: aiSelectedProduct, options: [], ambiguous: false }
-      : matchInstantProduct(aiIntent?.normalizedModel || text, catalogPool);
+    : safeAiSelectedProduct
+      ? { product: safeAiSelectedProduct, options: [], ambiguous: false }
+      : matchInstantProduct(explicitModelCodeSignal ? text : (aiIntent?.normalizedModel || text), catalogPool);
   const mayContinueClarification = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
     && previousCustomerText && previousCustomerText !== clean(text)
     && previousCustomerText.length <= 80 && clean(text).length <= 40
@@ -2624,7 +2657,10 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     || (interpretedIntent === 'MODEL_SELECTION' && !!clean(aiIntent?.normalizedModel))
     || looksLikeProductAvailabilityQuestion(text);
   if (unlistedProductIntent) {
-    const requestedProduct = unlistedProductLabel(text, aiIntent?.normalizedModel);
+    const customerNumbers = numericModelSegments(text);
+    const aiNumbers = numericModelSegments(aiIntent?.normalizedModel);
+    const aiModelKeepsCustomerNumber = !explicitModelCodeSignal || !aiNumbers.length || customerNumbers.join('|') === aiNumbers.join('|');
+    const requestedProduct = unlistedProductLabel(text, aiModelKeepsCustomerNumber ? aiIntent?.normalizedModel : '');
     return {
       handled: true,
       productIntent: true,
@@ -2636,23 +2672,6 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: explicitUnit || fallbackUnit || 'MOTOR',
       requestedProduct,
       text: instantCopy(language, 'UNLISTED_PRODUCT_CHECK', { model: requestedProduct })
-    };
-  }
-  if (interpretedIntent === 'SHOP_LOAN' || asksAboutShopLoan(text)) {
-    const continuation = profileContinuation({
-      language,
-      state,
-      lead,
-      baseText: instantCopy(language, 'SHOP_LOAN'),
-      completeStep: step || 'STEP_03_PRODUCT'
-    });
-    const needsModelQuestion = continuation.nextStep === 'STEP_03_PRODUCT' && !selectedModel;
-    return {
-      handled: true,
-      shopLoanIntent: true,
-      nextStep: continuation.nextStep,
-      productUnit: unit,
-      text: [continuation.text, needsModelQuestion ? instantCopy(language, 'SHOP_LOAN_MODEL') : ''].filter(Boolean).join(' ')
     };
   }
   if (interpretedIntent === 'DOCUMENT_STATUS' || (step === 'STEP_04_DOCUMENTS' && isDocumentStatusQuestion(text))) {
@@ -3520,4 +3539,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ ok: false });
   }
 }
-

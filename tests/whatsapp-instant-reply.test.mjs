@@ -1427,6 +1427,40 @@ test('exact customer model overrides an incorrect AI catalogue guess', () => {
   assert.doesNotMatch(decision.text, /Y16ZR|RM365/);
 });
 
+test('numeric model codes are never typo-corrected to a different product number', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'Y15zr',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'Y16', Brand: 'Yamaha', Model: 'Y16ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED' }],
+    motorPricing: [{ 'Catalog ID': 'Y16', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' }],
+    aiIntent: { intent: 'MODEL_SELECTION', language: 'MS', businessUnit: 'MOTOR', catalogId: 'Y16', normalizedModel: 'Y16ZR', confidence: 0.99 }
+  });
+  assert.equal(decision.product, undefined);
+  assert.equal(decision.unlistedProductIntent, true);
+  assert.match(decision.requestedProduct, /Y15zr/i);
+  assert.doesNotMatch(decision.text, /Y16ZR|RM365/i);
+});
+
+test('direct Loan Kedai question wins over an AI-invented catalog selection', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Test' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'Loan kedai ada?',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    motorCatalog: [{ 'Catalog ID': 'Y16', Brand: 'Yamaha', Model: 'Y16ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED' }],
+    motorPricing: [{ 'Catalog ID': 'Y16', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '365' }],
+    aiIntent: { intent: 'SHOP_LOAN', language: 'MS', businessUnit: 'MOTOR', catalogId: 'Y16', normalizedModel: 'Y16ZR', confidence: 0.99 }
+  });
+  assert.equal(decision.shopLoanIntent, true);
+  assert.equal(decision.product, undefined);
+  assert.match(decision.text, /loan kedai/i);
+  assert.doesNotMatch(decision.text, /Y16ZR|RM365/i);
+});
+
 test('Loan Kedai interest rate is answered deterministically from approved knowledge', () => {
   for (const text of ['kadar loan kedai berapa', 'interest setahun berapa', '年利率多少']) {
     const decision = buildInstantSalesDecision({ state: { 'Current Step': 'STEP_03_PRODUCT' }, text, messageType: 'text', routeBusinessUnit: 'MOTOR' });
