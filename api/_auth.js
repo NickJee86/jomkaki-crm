@@ -130,6 +130,10 @@ export async function authenticate(req, username, password) {
 
 export async function validateSession(req, session) {
   if (!session?.username) return false;
+  if (process.env.VERCEL_ENV === 'preview' && clean(session.authSource) === 'environment') {
+    const previewAccount = environmentAccounts().find(item => item.username.toLowerCase() === clean(session.username).toLowerCase());
+    if (previewAccount?.role === 'ADMIN') return session;
+  }
   const directory = await dynamicAccountDirectory(req);
   if (!directory.available) {
     // A temporary Google/Sheets outage must not sign out a user who still has a
