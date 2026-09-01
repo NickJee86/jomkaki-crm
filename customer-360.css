@@ -68,7 +68,9 @@
 .customer-360-file span{margin-top:3px;color:var(--c360-muted);font-size:8px;overflow-wrap:anywhere}
 .customer-360-file small{margin-top:4px;color:#8b9aa3;font-size:8px}
 .customer-360-conversation-section{padding-bottom:10px}
-.customer-360-conversation{display:flex;flex-direction:column;gap:10px;max-height:560px;overflow:auto;padding:3px 6px 9px 2px;scrollbar-color:#a7b7bd transparent;scrollbar-width:thin}
+.customer-360-conversation{display:flex;flex-direction:column;gap:12px;max-height:560px;overflow:auto;padding:3px 6px 9px 2px;scrollbar-color:#a7b7bd transparent;scrollbar-width:thin}
+.customer-360-turn{display:flex;flex-direction:column;gap:7px;padding:10px;border:1px solid #e5edef;border-radius:17px;background:#fbfcfc}
+.customer-360-turn-number{align-self:center;padding:3px 8px;border-radius:999px;background:#eef3f4;color:#73858f;font-size:7px;font-weight:800;letter-spacing:.35px;text-transform:uppercase}
 .customer-360-message{width:min(82%,520px);padding:11px 13px;border:1px solid #dfe8ea;border-radius:15px 15px 15px 4px;background:#f4f7f8;box-shadow:0 3px 10px rgba(7,28,43,.04)}
 .customer-360-message.outgoing{align-self:flex-end;border-color:#cae9e5;border-radius:15px 15px 4px 15px;background:#e9f7f4}
 .customer-360-message.needs-human{border-color:#f3bd86;background:#fff7ec}
