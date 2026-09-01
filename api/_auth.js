@@ -106,6 +106,10 @@ export function getSession(req) {
 
 export async function authenticate(req, username, password) {
   const wanted = clean(username || 'admin').toLowerCase();
+  const environmentAccount = environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password)));
+  // Preview deployments need an isolated administrator credential so staging
+  // access is not coupled to the live Sheet-backed account directory.
+  if (process.env.VERCEL_ENV === 'preview' && environmentAccount?.role === 'ADMIN') return environmentAccount;
   const dynamic = await dynamicAccounts(req);
   const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted);
   if (dynamicAccount?.passwordHash) {
@@ -121,7 +125,7 @@ export async function authenticate(req, username, password) {
     return false;
   }
   if (dynamicAccount && !dynamicAccount.active) return false;
-  return environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password))) || false;
+  return environmentAccount || false;
 }
 
 export async function validateSession(req, session) {
