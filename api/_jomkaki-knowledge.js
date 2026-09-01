@@ -371,7 +371,7 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
       enabled: true,
       model: 'gpt-5.6-terra',
       reasoningEffort: 'none',
-      timeoutMs: 4200,
+      timeoutMs: 8500,
       maximumCharacters: 420,
       noSilenceFallback: true
     })
