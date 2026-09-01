@@ -35,6 +35,10 @@ test('Customer 360 joins every operational record without changing the Sheet mod
   assert.match(app,/item\.time\|\|item\.received\|\|item\.created\|\|context\.lead\?\.lastInboundAt\|\|context\.lead\?\.lastCustomerReplyAt/);
   assert.match(app,/replyToMessageId:String\(item\.replyToMessageId\|\|''\)\.trim\(\)/);
   assert.match(app,/directReplies\.get\(String\(item\.id\|\|''\)\.trim\(\)\)/);
+  assert.match(app,/const firstReplyTime=replyTimes\.length\?Math\.min\(\.\.\.replyTimes\):0/);
+  assert.match(app,/incomingTime>firstReplyTime/);
+  assert.match(app,/turns\.sort\(\(a,b\)=>a\.time-b\.time/);
+  assert.match(app,/conversationPane\.scrollTop=conversationPane\.scrollHeight/);
   assert.match(app,/customer360IncomingStatus/);
   assert.match(app,/class="customer-360-turn"/);
   assert.match(app,/data-360-resolve-reply>Mark reply handled/);
@@ -51,7 +55,7 @@ test('API returns the full permitted history and the UI protects sensitive data'
 });
 
 test('Customer 360 has a dedicated responsive brand design',()=>{
-  assert.match(html,/customer-360\.css\?v=20260901-conversation1/);
+  assert.match(html,/customer-360\.css\?v=20260901-conversation2/);
   assert.match(css,/\.customer-360-drawer/);
   assert.match(css,/\.customer-360-conversation/);
   assert.match(css,/\.customer-360-message\.outgoing/);
@@ -66,7 +70,7 @@ test('Customer 360 cannot remain on an endless loading screen',()=>{
   assert.match(app,/data-360-retry/);
   assert.match(app,/The customer record could not be loaded/);
   assert.match(css,/\.customer-360-load-warning/);
-  assert.match(html,/app-v2\.js\?v=20260901-conversation1/);
+  assert.match(html,/app-v2\.js\?v=20260901-conversation2/);
   assert.match(app,/function customer360DocumentRequirement/);
   assert.match(app,/IDENTITY_DOCUMENT/);
   assert.match(app,/Received · Pending AI/);
