@@ -1966,7 +1966,12 @@ export function matchInstantProduct(text, catalogs = []) {
   return { product: ranked[0].row, options: [], ambiguous: false };
 }
 
-const approvedCatalogRow = row => truth(row.Active) && (!clean(row['Approval Status']) || clean(row['Approval Status']).toUpperCase() === 'APPROVED');
+const approvedCatalogRow = row => {
+  const approvalStatus = clean(row['Approval Status']).toUpperCase();
+  // Approval is the customer-facing stock authority. Older rows that predate
+  // the approval workflow still fall back to Active for backwards compatibility.
+  return approvalStatus ? approvalStatus === 'APPROVED' : truth(row.Active);
+};
 
 const splitPhoneVariant = row => {
   const directStorage = clean(row.Storage || row.Capacity || row['Storage Capacity']);

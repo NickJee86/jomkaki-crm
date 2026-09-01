@@ -794,7 +794,7 @@ test('a casual available-motor question returns real options instead of repeatin
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
-test('a full model-list request returns every active approved catalogue model even when some prices are not filled', () => {
+test('a full model-list request returns every approved catalogue model even when legacy Active is false or prices are not filled', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
     lead: { 'Customer Name': 'Nick', Region: 'WEST_MALAYSIA', 'City or Area': 'Kuala Lumpur' },
@@ -811,10 +811,10 @@ test('a full model-list request returns every active approved catalogue model ev
     ]
   });
   assert.equal(decision.availableModelsIntent, true);
-  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160']);
+  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160', 'Honda Wave Alpha']);
   assert.match(decision.text, /\*Yamaha\*\n• Y15ZR Standard\n• NMAX/);
-  assert.match(decision.text, /\*Honda\*\n• ADV160/);
-  assert.doesNotMatch(decision.text, /Honda RS150R|Honda Wave Alpha|bukan semua|popular|pengesahan cawangan/i);
+  assert.match(decision.text, /\*Honda\*\n• ADV160\n• Wave Alpha/);
+  assert.doesNotMatch(decision.text, /Honda RS150R|bukan semua|popular|pengesahan cawangan/i);
   assert.doesNotMatch(decision.text, /Y15ZR Standard, Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
@@ -1440,6 +1440,20 @@ test('an approved catalogue stock question is answered directly without exposing
   assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
   assert.match(decision.text, /Ya, Yamaha Y15ZR Standard ada/i);
   assert.doesNotMatch(decision.text, /sistem|system|catalog|katalog|senarai|cawangan sahkan|branch confirmation/i);
+});
+
+test('approval status is the stock authority even when a legacy Active flag is false', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'Y15ZR ada stock tak?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'FALSE', 'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg' }]
+  });
+  assert.equal(decision.stockIntent, true);
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
+  assert.match(decision.text, /Yamaha Y15ZR Standard ada/i);
+  assert.doesNotMatch(decision.text, /nama penuh|gambar supaya|sistem|system|catalog|katalog|senarai/i);
 });
 
 test('numeric model codes are never typo-corrected to a different product number', () => {
