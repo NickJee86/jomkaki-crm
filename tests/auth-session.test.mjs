@@ -66,6 +66,11 @@ includeAdminAccount = true;
 process.env.VERCEL_ENV = 'preview';
 const previewAdmin = await auth.authenticate({ headers: {} }, 'admin', 'environment-password');
 assert.equal(previewAdmin.authSource, 'environment', 'Preview must accept its isolated administrator credential even when the live Sheet has an admin account');
+const previewHeaders = {};
+auth.setSession({ setHeader(name, value) { previewHeaders[name] = value; } }, previewAdmin);
+const previewCookie = previewHeaders['Set-Cookie'].split(';')[0];
+const previewSession = auth.getSession({ headers: { cookie: previewCookie } });
+assert.equal((await auth.validateSession({ headers: { cookie: previewCookie } }, previewSession)).authSource, 'environment', 'Preview must preserve its isolated administrator session during CRM data refreshes');
 delete process.env.VERCEL_ENV;
 
 console.log('auth-session tests passed');
