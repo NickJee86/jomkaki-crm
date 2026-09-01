@@ -1416,7 +1416,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
   const catalogChoices = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
-  ].filter(row => truth(row.Active)).filter(row => {
+  ].filter(approvedCatalogRow).filter(row => {
     const key = [row.__businessUnit, row.Brand, row.Model, row.Variant, row['Search Keywords']].map(normalizedWords).join('|');
     if (!key.replace(/\|/g, '') || seenCatalogChoices.has(key)) return false;
     seenCatalogChoices.add(key);

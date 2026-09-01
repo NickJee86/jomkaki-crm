@@ -1621,8 +1621,11 @@ test('knowledge AI fallback request is privacy-preserving, fast and cannot expos
   assert.equal(sanitizeAiFallbackReply('Saya adalah AI yang membantu anda.', 'MS'), '');
 });
 
-test('AI intent understanding uses a strict grounded schema and never receives the raw phone number', async () => {
-  const catalog = [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard', Active: 'TRUE', 'Search Keywords': 'nmax n max yamaha' }];
+test('AI intent understanding uses every approved product, a strict grounded schema and never receives the raw phone number', async () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard', Active: 'TRUE', 'Search Keywords': 'nmax n max yamaha' },
+    { 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'FALSE', 'Approval Status': 'APPROVED', 'Search Keywords': 'y15zr y15 zr yamaha' }
+  ];
   const request = buildAiIntentRequest({
     text: 'nma berapa sebulan bah',
     state: { 'Current Step': 'STEP_01_NAME', 'Last AI Message': 'Boleh saya tahu nama anda?' },
@@ -1638,6 +1641,7 @@ test('AI intent understanding uses a strict grounded schema and never receives t
   assert.equal(request.text.format.strict, true);
   assert.equal(request.input.includes('60123456789'), false);
   assert.match(request.input, /MTR-YAM-NMAX/);
+  assert.match(request.input, /MTR-YAM-Y15ZR/);
   assert.match(JSON.stringify(request), /BRANCH_LOCATION/);
   assert.match(request.instructions, /Answer → Understand → Recommend → Prove → Advance/);
   assert.match(request.input, /documentConversion/);
