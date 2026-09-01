@@ -150,7 +150,11 @@ async function getAccessToken(req) {
     method: 'POST', headers: { authorization: `Bearer ${federatedToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ scope: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.file'], lifetime: '3600s' })
   });
-  if (!tokenResponse.ok) throw new Error(`Google service account authorization failed (${tokenResponse.status})`);
+  if (!tokenResponse.ok) {
+    const failure = await tokenResponse.json().catch(() => ({}));
+    const reason = clean(failure?.error?.message).replace(/\s+/g, ' ').slice(0, 320);
+    throw new Error(`Google service account authorization failed (${tokenResponse.status})${reason ? `: ${reason}` : ''}`);
+  }
   return (await tokenResponse.json()).accessToken;
 }
 
@@ -2122,4 +2126,3 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
-
