@@ -14,6 +14,7 @@ const passwordHash = auth.hashPassword('Temporary!123');
 let enabled = true;
 let authVersion = '2026-08-07T10:00:00.000Z';
 let includeLegacyPlaceholder = false;
+let includeAdminAccount = false;
 let directoryAvailable = true;
 
 const headers = ['Account ID','Username','Display Name','Role','SA ID','Branch ID','Region','Status','Access Scope','Login Enabled','Last Verified','Notes','Password Hash','Must Change Password','Failed Login Attempts','Locked Until','Last Password Reset','Updated At','Business Access'];
@@ -25,6 +26,7 @@ globalThis.fetch = async url => {
     if (!directoryAvailable) return new Response(JSON.stringify({ error: 'temporary outage' }), { status: 503 });
     const row = ['STAFF-1','staff.one','Staff One','STAFF','SA-1','BR-1','EAST_MALAYSIA',enabled?'ACTIVE':'DISABLED','Own customers',enabled?'TRUE':'FALSE','','',passwordHash,'FALSE','0','','',authVersion,'BOTH'];
     const values = [headers, row];
+    if (includeAdminAccount) values.push(['ADMIN-1','admin','Production Admin','ADMIN','','','ALL','ACTIVE','All customers','TRUE','','',auth.hashPassword('production-only-password'),'FALSE','0','','','2026-09-01T10:00:00.000Z','BOTH']);
     if (includeLegacyPlaceholder) values.push(['STAFF-LEGACY','legacy.staff','Legacy Staff','STAFF','SA-2','BR-1','EAST_MALAYSIA','ACTIVE','Own customers','TRUE','','Legacy Vercel account','','FALSE','0','','','','BOTH']);
     return new Response(JSON.stringify({ values }), { status: 200 });
   }
@@ -59,6 +61,12 @@ auth.setSession({ setHeader(name, value) { legacyHeaders[name] = value; } }, leg
 const legacyCookie = legacyHeaders['Set-Cookie'].split(';')[0];
 const legacySession = auth.getSession({ headers: { cookie: legacyCookie } });
 assert.equal((await auth.validateSession({ headers: { cookie: legacyCookie } }, legacySession)).username, 'legacy.staff', 'a legacy environment session must remain valid while its Sheet row has no hash');
+
+includeAdminAccount = true;
+process.env.VERCEL_ENV = 'preview';
+const previewAdmin = await auth.authenticate({ headers: {} }, 'admin', 'environment-password');
+assert.equal(previewAdmin.authSource, 'environment', 'Preview must accept its isolated administrator credential even when the live Sheet has an admin account');
+delete process.env.VERCEL_ENV;
 
 console.log('auth-session tests passed');
 
