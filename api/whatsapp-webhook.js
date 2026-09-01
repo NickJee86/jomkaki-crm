@@ -838,12 +838,13 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
       MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. Its approved monthly plan still needs branch confirmation, and I can arrange that check for you.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
-      OTHER_MODELS_EXHAUSTED: 'Those are the other active options I can confirm from the current approved catalogue. If you have another model in mind, send me its name or a photo and I will still arrange a branch check for you.',
+      OTHER_MODELS_EXHAUSTED: 'Those are the other available options. If you have another model in mind, send me its name or a photo and I will help check it for you.',
       OTHER_MODELS_CHECK: 'Yes, I can check other motorcycles too. Do you prefer a scooter, cub/moped, sport bike, or would you like suggestions based on a comfortable monthly budget?',
       AVAILABLE_MODELS: `The motorcycle models available now are ${models}. Which one would you like me to check?`,
-      MOTOR_CATEGORY_OPTIONS: `Yes, I can check ${category} options. Approved choices currently include ${models}. Is there a specific model you prefer, or what monthly budget is comfortable for you?`,
-      MOTOR_CATEGORY_CHECK: `Yes, I can help check a ${category}. If your preferred choice is not on the current list yet, I will still ask the branch to check it for you. Do you have a model, photo, or monthly budget in mind?`,
-      UNLISTED_PRODUCT_CHECK: `Yes, I can check ${model || 'that choice'} for you. Even if it is not on the current list yet, I will still ask the branch to confirm the exact model and plan. Can you send the full model name or a photo?`,
+      MOTOR_CATEGORY_OPTIONS: `Yes, I can check ${category} options. Available choices include ${models}. Is there a specific model you prefer, or what monthly budget is comfortable for you?`,
+      MOTOR_CATEGORY_CHECK: `Yes, I can help check a ${category}. Do you have a model, photo, or monthly budget in mind?`,
+      UNLISTED_PRODUCT_CHECK: `Yes, I can help check ${model || 'that choice'} for you. Can you send the full model name or a photo so I can confirm the right one?`,
+      STOCK_AVAILABLE: `Yes, ${brand} ${model} is available. Would you like me to check the monthly instalment as well?`,
       COMBINED_APPLICATION: 'Yes, you may apply for a motorcycle and a phone at the same time. They will be handled as two separate applications and assessed separately based on eligibility. Which one would you like me to check first?',
       SERVICE_RECOVERY: 'Sorry, my earlier reply did not answer your question. I do not want to give you another unrelated or inaccurate answer, so I will ask a manager to review your original question and reply here.',
       SERVICE_RECOVERY_PREFIX: 'Sorry, my earlier reply did not answer your question.',
@@ -858,7 +859,7 @@ const instantCopy = (language, key, values = {}) => {
       HELP: 'Sure. Tell me what you would like to know and I will check it for you.',
       DOCUMENT: 'Your document has been received. I am checking all files submitted for this application. There is no need to resend anything now; I will tell you clearly if something is still missing.',
       TENURE_QUOTE: `For ${brand} ${model}, the ${localizedTenure.replace(/\s+(year|month)s?$/i, '-$1')} instalment is RM${amount} per month, subject to branch confirmation. If it suits your budget, send your MyKad front/back and latest payslip or EPF statement to start the shop-loan check.`,
-      TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available in the approved system rates. Would you like me to check the available tenure instead?`,
+      TENURE_UNAVAILABLE: `The ${localizedTenure} instalment for ${brand} ${model} is not available. Would you like me to check another tenure instead?`,
       DEPOSIT_QUOTE: `For ${brand} ${model}, the approved deposit is RM${deposit}, subject to branch confirmation. To start the shop-loan check, send your MyKad front/back and latest payslip or EPF statement here.`,
       DEPOSIT_UNAVAILABLE: `The approved deposit for ${brand} ${model} still needs branch confirmation, and I can arrange that check for you.`,
       CASH_PRICE_QUOTE: `For ${brand} ${model}, the approved cash price is RM${cashPrice}, subject to branch confirmation.`,
@@ -878,7 +879,7 @@ const instantCopy = (language, key, values = {}) => {
       HANDPHONE_DEPOSIT_POLICY: `For phones, I can only share the approved monthly instalment. The deposit and selling price are not quoted to customers.`,
       INTEREST_RATE: 'The JomKaki Rider shop-loan rate is 10% per year using Hire Purchase. The actual monthly instalment depends on the approved model, deposit and tenure. To start the check, send your MyKad front/back and latest payslip or EPF statement here.',
       DRIVING_LICENCE_ELIGIBILITY: 'Yes, you may start even if you do not have a driving licence; final eligibility remains subject to checking. Send your MyKad front/back and latest payslip or EPF statement here to begin. You may send everything together or whatever you have first.',
-      COLOUR_OPTIONS: `For ${brand} ${model}, the approved catalogue colours are ${colours}.`,
+      COLOUR_OPTIONS: `For ${brand} ${model}, the available colours are ${colours}.`,
       STORAGE_OPTIONS: `For ${brand} ${model}, the approved storage options are ${storage}.`,
       STORAGE_AVAILABLE: `Yes, ${brand} ${model} is available in ${requestedStorage}. The approved storage options are ${storage}.`,
       STORAGE_UNAVAILABLE: `${requestedStorage} is not recorded for ${brand} ${model}. The approved storage options are ${storage}.`,
@@ -903,12 +904,13 @@ const instantCopy = (language, key, values = {}) => {
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
       MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Pelan ansuran yang diluluskan masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
-      OTHER_MODELS_EXHAUSTED: 'Itulah pilihan aktif lain yang saya boleh sahkan daripada katalog semasa. Kalau anda ada model lain dalam fikiran, hantar nama atau gambarnya dan saya tetap akan bantu minta cawangan semak.',
+      OTHER_MODELS_EXHAUSTED: 'Itulah pilihan lain yang ada. Kalau anda ada model lain dalam fikiran, hantar nama atau gambarnya dan saya bantu semak.',
       OTHER_MODELS_CHECK: 'Boleh, saya boleh semak motor lain juga. Anda lebih suka skuter, kapcai/moped, motor sport, atau mahu saya cadangkan ikut bajet bulanan yang selesa?',
       AVAILABLE_MODELS: `Model motor yang ada sekarang ialah ${models}. Yang mana satu anda mahu saya semak?`,
       MOTOR_CATEGORY_OPTIONS: `Ada pilihan ${category} yang boleh saya semak. Antara pilihan diluluskan sekarang ialah ${models}. Anda ada model tertentu, atau bajet bulanan berapa yang selesa?`,
-      MOTOR_CATEGORY_CHECK: `Boleh, ${category} pun saya boleh bantu semak. Kalau pilihan yang anda mahu belum ada dalam senarai semasa, saya tetap akan minta cawangan semak. Anda ada model, gambar atau bajet bulanan yang sesuai?`,
-      UNLISTED_PRODUCT_CHECK: `Boleh, saya akan semak ${model || 'pilihan itu'} untuk anda. Walaupun belum ada dalam senarai semasa, saya tetap akan minta cawangan sahkan model dan pelannya. Boleh hantar nama penuh model atau gambar?`,
+      MOTOR_CATEGORY_CHECK: `Boleh, ${category} pun saya boleh bantu semak. Anda ada model, gambar atau bajet bulanan yang sesuai?`,
+      UNLISTED_PRODUCT_CHECK: `Boleh, saya bantu semak ${model || 'pilihan itu'} untuk anda. Boleh hantar nama penuh model atau gambar supaya saya semak yang betul?`,
+      STOCK_AVAILABLE: `Ya, ${brand} ${model} ada. Nak saya semak ansuran bulanan sekali?`,
       COMBINED_APPLICATION: 'Boleh mohon motor dan telefon pada masa yang sama. Kedua-duanya akan dibuat sebagai dua permohonan berasingan dan dinilai berasingan mengikut kelayakan. Anda mahu saya semak motor atau telefon dahulu?',
       SERVICE_RECOVERY: 'Maaf, jawapan tadi memang tidak menjawab soalan anda. Saya tak mahu beri satu lagi jawapan yang tidak berkaitan atau tidak tepat, jadi saya akan minta pengurus semak soalan asal anda dan balas di sini.',
       SERVICE_RECOVERY_PREFIX: 'Maaf, jawapan tadi memang tidak menjawab soalan anda.',
@@ -943,7 +945,7 @@ const instantCopy = (language, key, values = {}) => {
       HANDPHONE_DEPOSIT_POLICY: `Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Deposit dan harga jualan tidak diberikan kepada pelanggan.`,
       INTEREST_RATE: 'Kadar Loan Kedai JomKaki Rider ialah 10% setahun menggunakan kaedah Hire Purchase. Ansuran sebenar ikut model, deposit dan tempoh yang diluluskan. Untuk mula semakan, hantar IC depan/belakang serta slip gaji terkini atau penyata EPF di sini.',
       DRIVING_LICENCE_ELIGIBILITY: 'Boleh mula memohon walaupun belum ada lesen memandu; kelayakan akhir masih tertakluk pada semakan. Hantar IC depan/belakang serta slip gaji terkini atau penyata EPF untuk mula. Semua sekali atau yang ada dahulu pun boleh.',
-      COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang direkodkan dalam katalog diluluskan ialah ${colours}.`,
+      COLOUR_OPTIONS: `Untuk ${brand} ${model}, warna yang ada ialah ${colours}.`,
       STORAGE_OPTIONS: `Untuk ${brand} ${model}, pilihan kapasiti yang diluluskan ialah ${storage}.`,
       STORAGE_AVAILABLE: `Ada. ${brand} ${model} tersedia dalam ${requestedStorage}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
       STORAGE_UNAVAILABLE: `${requestedStorage} tidak direkodkan untuk ${brand} ${model}. Pilihan kapasiti yang diluluskan ialah ${storage}.`,
@@ -964,12 +966,13 @@ const instantCopy = (language, key, values = {}) => {
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
       OTHER_MODELS: `目前其他可选型号包括 ${models}。你想让我查询哪一款？`,
-      OTHER_MODELS_EXHAUSTED: '目前获批目录中可确认的其他在售选择已经列完。如果你心里还有别的型号，请发型号名称或照片给我，我仍然可以安排分行查询。',
+      OTHER_MODELS_EXHAUSTED: '目前其他可选型号已经列完。如果你心里还有别的型号，请发型号名称或照片给我，我可以继续帮你查询。',
       OTHER_MODELS_CHECK: '可以，我也能帮你查询其他摩托车。你比较喜欢踏板车、弯梁车、跑车款，还是要我按照舒服的月供预算推荐？',
       AVAILABLE_MODELS: `目前有的摩托车型是：${models}。你想先查看哪一款？`,
-      MOTOR_CATEGORY_OPTIONS: `可以，我能查询${category}。目前获批的选择包括 ${models}。你有指定型号，还是希望月供控制在多少？`,
-      MOTOR_CATEGORY_CHECK: `可以，我能帮你查询${category}。即使你想要的款式暂时不在现有清单里，我也会请分行继续确认。你有型号、照片或月供预算吗？`,
-      UNLISTED_PRODUCT_CHECK: `可以，我会帮你查询 ${model || '这款产品'}。即使暂时不在现有清单里，我也会请分行确认准确型号和方案。可以发完整型号或照片吗？`,
+      MOTOR_CATEGORY_OPTIONS: `可以，我能查询${category}。目前可选型号包括 ${models}。你有指定型号，还是希望月供控制在多少？`,
+      MOTOR_CATEGORY_CHECK: `可以，我能帮你查询${category}。你有型号、照片或月供预算吗？`,
+      UNLISTED_PRODUCT_CHECK: `可以，我会帮你查询 ${model || '这款产品'}。可以发完整型号或照片，让我确认正确款式吗？`,
+      STOCK_AVAILABLE: `有，${brand} ${model} 可以申请。要我也帮你查看每月供款吗？`,
       COMBINED_APPLICATION: '可以同时申请摩托车和手机，两项会作为独立申请，并分别按照资格审核。你想先查询摩托车还是手机？',
       SERVICE_RECOVERY: '抱歉，刚才没有回答你的问题。我不想再给你不相关或不准确的答案，所以会请经理查看你原本的问题，并在这里回复。',
       SERVICE_RECOVERY_PREFIX: '抱歉，刚才没有回答你的问题。',
@@ -1688,10 +1691,15 @@ const motorCategoryCatalogRows = (catalogs = [], category = null) => {
   });
 };
 
+const asksProductAvailability = value => {
+  const normalized = normalizedWords(value);
+  return !!normalized && /(?:\b(?:ada\s*(?:tak|ke|ka|kah)?|available|availability|stock|stok|have)\b|有没有|有吗)/i.test(normalized);
+};
+
 const looksLikeProductAvailabilityQuestion = value => {
   const text = clean(value), normalized = normalizedWords(text);
   if (!text || asksForAvailableModels(text)) return false;
-  const asksAvailability = /(?:\b(?:ada\s*(?:tak|ke|ka|kah)?|available|availability|stock|have)\b|有没有|有吗)/i.test(normalized);
+  const asksAvailability = asksProductAvailability(normalized);
   const productSignal = /(?:\b(?:motor|moto|motosikal|motorcycle|model|phone|handphone|telefon|iphone)\b|\b[a-z]{1,8}\s*[- ]?\d{2,4}[a-z]{0,4}\b)/i.test(normalized);
   return asksAvailability && productSignal;
 };
@@ -2578,6 +2586,23 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   }
   if (product) {
     const pricingRegion = lead.Region || routeRegion;
+    if (asksProductAvailability(text)) {
+      const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
+        && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
+        && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
+      const approvedImage = !sameSelectedProduct && truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
+      return {
+        handled: true,
+        productIntent: true,
+        stockIntent: true,
+        answerCustomerQuestionFirst: true,
+        nextStep: step || 'STEP_03_PRODUCT',
+        productUnit: unit,
+        product,
+        imageUrl: approvedImage,
+        text: instantCopy(language, 'STOCK_AVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) })
+      };
+    }
     let rate = instantRate(product, pricing, unit, pricingRegion);
     if (cashPriceQuestion) {
       return {
@@ -3091,8 +3116,8 @@ export default async function handler(req, res) {
     const loadApplications = () => applicationsPromise ||= readSheet(token, 'Applications!A:CZ').then(objects);
     const loadDocuments = () => documentsPromise ||= readSheet(token, 'Document_Log!A:AD').then(objects);
     const loadCatalogData = () => catalogDataPromise ||= Promise.all([
-      readSheet(token, 'Motor_Model_Catalog!A1:Q1000'),
-      readSheet(token, 'Motor_Loan_Pricing!A1:Z1000'),
+      readSheet(token, 'Motor_Model_Catalog!A1:AD1000'),
+      readSheet(token, 'Motor_Loan_Pricing!A1:AM1000'),
       readSheet(token, 'Handphone_Model_Catalog!A1:AB1000'),
       readSheet(token, 'Handphone_Loan_Pricing!A1:AO1000')
     ]).then(([motorCatalogRows, motorPricingRows, handphoneCatalogRows, handphonePricingRows]) => ({
@@ -3187,7 +3212,13 @@ export default async function handler(req, res) {
         const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
-        const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting
+        const fastAvailabilityMatch = conversationalText && asksProductAvailability(text)
+          ? matchInstantProduct(text, [
+            ...catalogData.motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
+            ...catalogData.handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
+          ])
+          : { product: null };
+        const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting && !fastAvailabilityMatch.product
           ? await requestAiIntent({
             text,
             state: conversationState || {},
@@ -3229,7 +3260,7 @@ export default async function handler(req, res) {
         }
         if (progressiveProfile.location?.teamId) teamId = progressiveProfile.location.teamId;
         if (routeUsable && !human && instantDecision.aiFallback) {
-          const remainingReplyBudgetMs = Math.max(500, 4700 - (Date.now() - aiTurnStartedAt));
+          const remainingReplyBudgetMs = Math.max(1500, 17000 - (Date.now() - aiTurnStartedAt));
           const generatedReply = await requestAiFallbackReply({
             text: instantDecision.aiFallbackQuestion || text,
             state: { ...(conversationState || {}), ...progressiveProfile.stateChanges },

@@ -1427,6 +1427,21 @@ test('exact customer model overrides an incorrect AI catalogue guess', () => {
   assert.doesNotMatch(decision.text, /Y16ZR|RM365/);
 });
 
+test('an approved catalogue stock question is answered directly without exposing internal systems', () => {
+  const decision = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
+    lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'Y15ZR ada stock tak?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg' }]
+  });
+  assert.equal(decision.handled, true);
+  assert.equal(decision.stockIntent, true);
+  assert.equal(decision.product.Model, 'Y15ZR');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
+  assert.match(decision.text, /Ya, Yamaha Y15ZR Standard ada/i);
+  assert.doesNotMatch(decision.text, /sistem|system|catalog|katalog|senarai|cawangan sahkan|branch confirmation/i);
+});
+
 test('numeric model codes are never typo-corrected to a different product number', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT' },
@@ -1839,7 +1854,8 @@ test('motor category spelling variants never fall through to the generic help me
     assert.equal(decision.catalogReviewRequired, true);
     assert.equal(decision.humanFollowUpRequired, true);
     assert.match(decision.text, /skuter.*bantu semak/i);
-    assert.match(decision.text, /tetap akan minta cawangan semak/i);
+    assert.match(decision.text, /model, gambar atau bajet bulanan/i);
+    assert.doesNotMatch(decision.text, /sistem|system|catalog|katalog|senarai semasa/i);
     assert.doesNotMatch(decision.text, /model, ansuran bulanan, dokumen|anda mahu saya semak yang mana/i);
     assert.doesNotMatch(decision.text, /tak ada|tiada|tidak ada|unavailable|not available/i);
     assert.equal((decision.text.match(/\?/g) || []).length, 1);
@@ -1888,8 +1904,8 @@ test('an unlisted named model remains a valid enquiry and is queued for confirma
     assert.equal(decision.catalogReviewRequired, true);
     assert.equal(decision.humanFollowUpRequired, true);
     assert.equal(decision.requestedProduct, 'Aveta Nova 160');
-    assert.match(decision.text, /akan semak Aveta Nova 160/i);
-    assert.match(decision.text, /tetap akan minta cawangan sahkan/i);
+    assert.match(decision.text, /bantu semak Aveta Nova 160/i);
+    assert.doesNotMatch(decision.text, /sistem|system|catalog|katalog|senarai semasa/i);
     assert.doesNotMatch(decision.text, /anda mahu saya semak yang mana|model.*mana.*minat/i);
     assert.equal((decision.text.match(/\?/g) || []).length, 1);
   }
@@ -1991,7 +2007,7 @@ test('rephrasing the same alternative-model question does not repeat the same li
   assert.equal(guarded.replyContractRecovered, undefined);
   assert.equal(guarded.humanFollowUpRequired, undefined);
   assert.doesNotMatch(guarded.text, /Yamaha NMAX|Honda RS150R/);
-  assert.match(guarded.text, /Itulah pilihan aktif lain/);
+  assert.match(guarded.text, /Itulah pilihan lain yang ada/);
   assert.doesNotMatch(guarded.text, /pengurus|mungkin salah|tanpa anda perlu ulang/i);
 });
 
@@ -2020,7 +2036,7 @@ test('successive alternative-model questions page through fresh approved suggest
   assert.match(second.text, /Yamaha Y16ZR/);
   assert.match(second.text, /Honda Wave Alpha/);
   assert.deepEqual(third.suggestedModels, []);
-  assert.match(third.text, /Itulah pilihan aktif lain/);
+  assert.match(third.text, /Itulah pilihan lain yang ada/);
   assert.doesNotMatch(third.text, /Yamaha NMAX|Honda RS150R|Honda ADV160|Yamaha LC135|Yamaha Y16ZR|Honda Wave Alpha/);
   assert.match(source, /Last Suggested Models JSON': JSON\.stringify\(mergeSuggestedModelHistory\(conversationState, instantDecision\.suggestedModels\)\)/);
 });
