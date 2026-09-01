@@ -153,7 +153,7 @@ async function getAccessToken(req) {
   if (!tokenResponse.ok) {
     const failure = await tokenResponse.json().catch(() => ({}));
     const reason = clean(failure?.error?.message).replace(/\s+/g, ' ').slice(0, 320);
-    throw new Error(`Google service account authorization failed (${tokenResponse.status})${reason ? `: ${reason}` : ''}`);
+    throw new Error(`Google service account authorization failed (${tokenResponse.status}) for ${CLIENT_EMAIL} via project ${PROJECT_NUMBER}${reason ? `: ${reason}` : ''}`);
   }
   return (await tokenResponse.json()).accessToken;
 }
