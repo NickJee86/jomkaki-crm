@@ -1,4 +1,5 @@
 import { NOTION_SYNCED_KNOWLEDGE } from './_notion-knowledge.generated.js';
+import { JOMKAKI_SALES_PROMPT_VERSION } from './_jomkaki-sales-prompt.js';
 
 const freezeList = values => Object.freeze([...values]);
 
@@ -365,6 +366,7 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
   ]),
   conversation: Object.freeze({
     defaultLanguage: 'MS',
+    salesChampionPromptVersion: JOMKAKI_SALES_PROMPT_VERSION,
     targetReplySeconds: 5,
     discloseAutomation: false,
     maximumQuestionsPerReply: 1,

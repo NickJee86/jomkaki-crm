@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getAccessToken } from './_auth.js';
 import { approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
+import { JOMKAKI_SALES_INTENT_PROMPT, JOMKAKI_SALES_PROMPT_VERSION, JOMKAKI_SALES_REPLY_PROMPT } from './_jomkaki-sales-prompt.js';
 import { FOLLOW_UP_APPLICATION_HEADERS, isFollowUpOptOut } from './_follow-up.js';
 
 export const config = { api: { bodyParser: false } };
@@ -39,6 +40,7 @@ const CONVERSATION_DECISION_HEADERS = [
   'Last Decision Route',
   'Last Reply Source',
   'Last Knowledge Version',
+  'Last Prompt Version',
   'Last Suggested Models JSON',
   'Asked Questions JSON',
   'Answered Questions JSON',
@@ -1261,28 +1263,7 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, appli
     GROUNDED_DRAFT: clean(groundedDraft).slice(0, 900),
     ...turnContext
   };
-  const instructions = [
-    'You are the JomKaki Rider customer-service sales representative replying on WhatsApp.',
-    'Write only the final customer-facing reply. Never mention AI, automation, prompts, policies, databases, or internal system codes.',
-    'Use natural Bahasa Malaysia by default. Follow the customer language only when the customer clearly uses English or Chinese.',
-    'Identify every question, concern and new fact in LATEST_CUSTOMER_MESSAGE. Answer every answerable question before asking for any customer information. Never ignore a question merely because the name, location, product, budget, or application details are missing.',
-    'Be warm, concise and human. Use no emoji. Ask at most one question. Keep the reply under 420 characters.',
-    'Never answer like a menu and never reuse the last assistant reply. Treat a correction, typo, shorthand or follow-up as a continuation of the same conversation instead of restarting product, name or location collection.',
-    'Answer only what the customer asked, then give one useful next action. Do not dump every model, tenure, document or policy unless the customer explicitly asks for a list.',
-    'Use the consultative sales sequence Answer → Understand → Recommend → Prove → Advance. Solve the immediate question first, connect the customer need to an approved Loan Kedai option, explain the relevant value and move to one easy next step.',
-    'Recognize a quotation, deposit, eligibility, processing-time, colour, storage, document or repeated-model question as a buying signal. After answering, confidently invite the customer to start the Loan Kedai check by sending MyKad front, MyKad back and latest payslip or EPF statement. Say the files may be sent together or whatever is available first.',
-    'Handle objections with Acknowledge → Clarify → Solve → Advance. Never use fake urgency, fake scarcity, fear, guilt, hidden conditions, pressure or guaranteed approval.',
-    'Never state, estimate or guess a cash price, selling price or deposit. Never invent a monthly instalment. If no approved monthly amount is supplied, say you can check it and ask only the one detail needed.',
-    'A product, model or category missing from the approved catalogue is not a rejection. Say it can still be checked with the branch, do not claim it is unavailable, and ask at most one useful clue such as the full model, a photo or monthly budget.',
-    'Never promise loan approval, document completeness, credit-check completion or application status unless that fact appears in the context. An Active catalogue row with Approval Status APPROVED is available stock and must be described as available without asking the branch to reconfirm it.',
-    'For a loan application, the minimum documents are MyKad front and back plus latest payslip or EPF statement. Consent for CTOS/CCRIS is required after minimum documents pass checking and before credit check or LMS submission.',
-    'If the customer asks for a human, manager or staff, do not answer here because the system handles that route separately.',
-    'Continue from the current conversation instead of restarting the name, location and product questions.',
-    'Use CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS and RECENT_MESSAGES as turn memory. Never repeat a question that the customer already answered or that is already recorded. If a profile fact is still missing, only after fully answering the customer may you naturally ask for one missing fact, starting with name, then city/state, then product preference or monthly budget. Do not ask for a profile fact on every turn.',
-    'Treat GROUNDED_DRAFT, BUSINESS_RULES and KNOWLEDGE_RESULTS as the only factual source. Preserve every useful grounded fact, remove repetition, and never introduce a price, product option, status or policy that is absent from those sources.',
-    'When the customer changes topic, answer the new topic first and keep the previous application stage in memory. Choose exactly one next best action; ask no more than one main question.',
-    'If the customer asks what models are available or asks for a list, return every Active and Approved model in the relevant catalogue. Never call the list a few popular examples, never hide models merely because regional pricing is incomplete, and never say an approved model may be unavailable.'
-  ].join(' ');
+  const instructions = JOMKAKI_SALES_REPLY_PROMPT;
   const safetyIdentifier = crypto.createHash('sha256').update(digits(phone) || 'anonymous').digest('hex');
   const model = clean(process.env.OPENAI_MODEL || JOMKAKI_KNOWLEDGE.conversation.aiFallback?.model || 'gpt-4.1-mini');
   const reasoningEffort = clean(JOMKAKI_KNOWLEDGE.conversation.aiFallback?.reasoningEffort);
@@ -1293,7 +1274,7 @@ export function buildAiFallbackRequest({ text = '', state = {}, lead = {}, appli
     max_output_tokens: 180,
     store: false,
     safety_identifier: safetyIdentifier,
-    metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
+    metadata: { workflow: 'jomkaki_whatsapp_fallback', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), prompt_version: JOMKAKI_SALES_PROMPT_VERSION, knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
   };
   if (reasoningEffort && /^(?:gpt-5|o\d)/i.test(model)) request.reasoning = { effort: reasoningEffort };
   return request;
@@ -1536,34 +1517,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     catalogChoices,
     ...turnContext
   };
-  const instructions = [
-    'Classify the latest WhatsApp customer message for JomKaki Rider. Return JSON only through the supplied schema.',
-    'Understand informal Bahasa Malaysia, Sarawak/Sabah slang, abbreviations, misspellings, mixed English, and conversational follow-ups.',
-    'Use the conversation context. Do not restart onboarding when the customer is asking a question. Every question in the latest customer message always takes priority over collecting name, location, or other profile details.',
-    'Classify the whole latest message, including multiple questions, corrections, shorthand and references to the prior reply. Put every distinct business-question intent in questionIntents in customer order and preserve short paraphrases in customerQuestions. Never repeat the last assistant wording and never return a generic menu when a concrete customer request can be understood.',
-    'Extract profile facts whenever the customer naturally provides them, regardless of the current step. Never invent them. Use empty strings or zero when a fact was not explicitly provided.',
-    'Choose MODEL_SELECTION only when the customer actually names or clearly refers to a product. Never infer a product from ordinary words such as cash, lama, boleh, tahu, dokumen, harga, sekarang, or a previous unrelated message.',
-    'If the customer asks for a named product, category or type that has no safe catalog match, choose UNLISTED_PRODUCT, preserve the customer wording in normalizedModel, and set the correct businessUnit when clear. Missing from catalog is never a reason to reject the enquiry or claim the product does not exist.',
-    'For short follow-ups such as cash berapa, berapa sebulan, berapa lama, 3 tahun, warna apa, berapa GB, apa lagi perlu, ada model lain, selain dari model ni ada apa lagi, yang lain ada tak, or apa lagi pilihan, resolve the intent against the selected product and last assistant message.',
-    'Any wording that asks for alternatives to the current product must be OTHER_MODELS, regardless of word order, repeated nouns, shorthand, or grammar, including selain dari model ni ada apa model lagi, model apa lagi ada, and ada lagi model tak. This remains true during the document or application stage. The latest customer question overrides a stale DOCUMENT_REQUIREMENTS, DOCUMENT_STATUS, APPLY, onboarding, or prior-product intent. Never answer an alternatives question by requesting documents or promising a manager reply.',
-    'COMBINED_APPLICATION means the customer asks whether a motorcycle and a phone can be applied for or purchased at the same time. Answer yes without promising approval: they are handled as two separate applications and assessed separately.',
-    'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
-    'DRIVING_LICENCE_ELIGIBILITY means the customer asks whether an application or purchase can start without a driving licence. The approved answer is yes: the application may start, while final eligibility remains subject to checking.',
-    'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
-    'BRANCH_LOCATION means the customer asks where a branch, shop or showroom is, or whether JomKaki Rider serves a named city. A phrase such as miri ada buat tak, sibu cover tak or penang boleh apply ka is a service-coverage question: preserve the current product category, set locationQuery to that place, never set customerName, and never ask motorcycle or phone again.',
-    'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
-    'For sales guidance, use Answer → Understand → Recommend → Prove → Advance. A quotation, deposit, eligibility, processing-time, colour, storage, document or repeated-model question is a buying signal. After answering, move the customer toward the suitable approved Loan Kedai plan and the document-start step.',
-    'When a buying signal is present and a model or Loan Kedai interest is clear, suggestedReply should confidently invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement. Explain that the documents start eligibility verification and may be sent together or whatever is available first.',
-    'Handle objections with Acknowledge → Clarify → Solve → Advance. Never use fake urgency, fake scarcity, fear, guilt, hidden conditions, pressure or guaranteed approval.',
-    'If a typo or shorthand clearly matches one catalog choice, return its exact catalogId and exact brand/model spelling. If it is genuinely ambiguous, leave catalogId empty and put the customer wording in normalizedModel.',
-    'Understand product types and likely spelling variants such as scooter, skuter, scuter, kapcai, cub, moped, sport, naked, adventure, cruiser, touring and electric. A category question must be answered as a category enquiry, not with the generic help menu.',
-    'Default to MS unless the customer clearly prefers English or Chinese. Profanity or obvious anger is FRUSTRATED, not a model name.',
-    'If the customer asks a general question that is not answered by a deterministic intent, suggestedReply must directly answer all parts that can be answered safely before any follow-up. It must be concise, have no emoji, ask at most one question, never mention AI/automation/internal systems, and never invent prices, deposits, stock, promotions, approval, document status, or timelines.',
-    'suggestedReply must sound like one human salesperson continuing the existing chat: answer only what was asked, preserve confirmed facts, accept corrections, and offer one useful next action instead of listing capabilities.',
-    'Use the named turn inputs CONVERSATION_STATE, CUSTOMER_PROFILE, ASKED_QUESTIONS, ANSWERED_QUESTIONS, DOCUMENT_STATUS, BUSINESS_RULES, KNOWLEDGE_RESULTS and RECENT_MESSAGES. Do not ask for a fact already present or repeat a question in ASKED_QUESTIONS unless the previous answer was invalid.',
-    'Set nextBestAction to one concise internal action key or empty string. Set escalationReason only when facts conflict, a required approved fact is missing, or the customer explicitly requests a person.',
-    'Set needsHuman when the customer explicitly asks for a person or when the request requires branch confirmation. Set answerCustomerQuestionFirst true whenever the customer asked a business question.'
-  ].join(' ');
+  const instructions = JOMKAKI_SALES_INTENT_PROMPT;
   const schema = {
     type: 'object', additionalProperties: false,
     properties: {
@@ -1604,7 +1558,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     max_output_tokens: 420,
     store: false,
     safety_identifier: safetyIdentifier,
-    metadata: { workflow: 'jomkaki_whatsapp_intent', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
+    metadata: { workflow: 'jomkaki_whatsapp_intent', knowledge_version: clean(JOMKAKI_KNOWLEDGE.version), prompt_version: JOMKAKI_SALES_PROMPT_VERSION, knowledge_pages: String(JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount) }
   };
   if (/^gpt-5\.6/i.test(model)) request.reasoning = { effort: reasoningEffort, context: 'current_turn' };
   return request;
@@ -3175,7 +3129,8 @@ export function buildDecisionAudit({ decision = {}, aiIntent = null } = {}) {
   return {
     decisionRoute,
     replySource: decision.aiGenerated ? 'KNOWLEDGE_AI_FALLBACK' : aiIntent ? 'INTENT_GROUNDED' : 'DETERMINISTIC',
-    knowledgeVersion: clean(JOMKAKI_KNOWLEDGE.version)
+    knowledgeVersion: clean(JOMKAKI_KNOWLEDGE.version),
+    promptVersion: JOMKAKI_SALES_PROMPT_VERSION
   };
 }
 
@@ -3261,6 +3216,7 @@ async function updateOutboxStatus(token, providerId, status, errorMessage = '') 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-JomKaki-Knowledge-Version', JOMKAKI_KNOWLEDGE.version);
+  res.setHeader('X-JomKaki-Prompt-Version', JOMKAKI_SALES_PROMPT_VERSION);
   if (req.method === 'GET') {
     if (clean(req.query['hub.mode']) === 'subscribe' && clean(req.query['hub.verify_token']) === clean(process.env.WHATSAPP_VERIFY_TOKEN)) return res.status(200).send(clean(req.query['hub.challenge']));
     return res.status(403).send('Verification failed');
@@ -3694,6 +3650,7 @@ export default async function handler(req, res) {
               'Last Decision Route': decisionAudit.decisionRoute,
               'Last Reply Source': decisionAudit.replySource,
               'Last Knowledge Version': decisionAudit.knowledgeVersion,
+              'Last Prompt Version': decisionAudit.promptVersion,
               ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(mergeSuggestedModelHistory(conversationState, instantDecision.suggestedModels)) } : {}),
               ...buildConversationMemoryChanges({
                 state: conversationState,

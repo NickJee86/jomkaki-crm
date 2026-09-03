@@ -53,6 +53,7 @@ import {
 } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { APPROVED_KNOWLEDGE_PAGES, approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
+import { JOMKAKI_SALES_CHAMPION_PROMPT, JOMKAKI_SALES_PROMPT_VERSION } from '../api/_jomkaki-sales-prompt.js';
 
 const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
 const route = {
@@ -65,6 +66,7 @@ const route = {
 test('approved Notion knowledge snapshot governs language, pricing and consent rules', () => {
   assert.equal(JOMKAKI_KNOWLEDGE.status, 'APPROVED');
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.defaultLanguage, 'MS');
+  assert.equal(JOMKAKI_KNOWLEDGE.conversation.salesChampionPromptVersion, JOMKAKI_SALES_PROMPT_VERSION);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.targetReplySeconds, 5);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.discloseAutomation, false);
   assert.equal(JOMKAKI_KNOWLEDGE.conversation.answerCustomerIntentBeforeProfileQuestions, true);
@@ -536,6 +538,29 @@ test('sales onboarding safely captures the customer name', () => {
     assert.equal(extractCustomerName(location), '', location);
   }
   assert.equal(extractCustomerName('hi'), '');
+});
+
+test('one versioned Sales Champion prompt governs both understanding and customer replies', () => {
+  const fallback = buildAiFallbackRequest({ text: 'saya minat y15 tapi ansuran macam tinggi', routeBusinessUnit: 'MOTOR' });
+  const intent = buildAiIntentRequest({ text: 'saya minat y15 tapi ansuran macam tinggi', routeBusinessUnit: 'MOTOR' });
+
+  assert.equal(fallback.metadata.prompt_version, JOMKAKI_SALES_PROMPT_VERSION);
+  assert.equal(intent.metadata.prompt_version, JOMKAKI_SALES_PROMPT_VERSION);
+  for (const instructions of [fallback.instructions, intent.instructions]) {
+    assert.match(instructions, /JomKaki Rider Sales Champion/);
+    assert.match(instructions, /Answer → Understand → Recommend → Prove → Advance/);
+    assert.match(instructions, /Acknowledge → Clarify → Solve → Advance/);
+    assert.match(instructions, /naturally advance genuine interest toward a JomKaki Rider Loan Kedai application/i);
+    assert.match(instructions, /ask at most one main question/i);
+    assert.match(instructions, /do not ask for documents after a casual greeting or broad browsing question/i);
+    assert.match(instructions, /a question is never a customer name/i);
+    assert.match(instructions, /Never discuss AI, bots, automation/i);
+    assert.match(instructions, /never create fake urgency or scarcity/i);
+  }
+  assert.match(JOMKAKI_SALES_CHAMPION_PROMPT, /monthly payment feels high/i);
+  assert.match(JOMKAKI_SALES_CHAMPION_PROMPT, /customer is only browsing/i);
+  assert.match(JOMKAKI_SALES_CHAMPION_PROMPT, /available files may be sent first/i);
+  assert.ok(JOMKAKI_SALES_CHAMPION_PROMPT.length > 5000);
 });
 
 test('location entities always outrank AI name guesses and preserve the active product context', () => {
@@ -2169,7 +2194,8 @@ test('every customer reply can be traced to a decision route and knowledge versi
   assert.deepEqual(deterministic, {
     decisionRoute: 'BRANCH_LOCATION',
     replySource: 'DETERMINISTIC',
-    knowledgeVersion: JOMKAKI_KNOWLEDGE.version
+    knowledgeVersion: JOMKAKI_KNOWLEDGE.version,
+    promptVersion: JOMKAKI_SALES_PROMPT_VERSION
   });
   const ai = buildDecisionAudit({ decision: { handled: true, aiGenerated: true }, aiIntent: { intent: 'GENERAL' } });
   assert.equal(ai.decisionRoute, 'AI_FALLBACK');
