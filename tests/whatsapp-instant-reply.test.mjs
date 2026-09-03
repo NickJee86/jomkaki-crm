@@ -1466,7 +1466,7 @@ test('an approved model image is independent from regional monthly pricing', () 
   assert.equal(firstSelection.humanFollowUpRequired, true);
 
   const monthlyFollowUp = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'NMAX', 'Selected Product Variant': 'Standard' },
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'NMAX', 'Selected Product Variant': 'Standard', 'Last Product Image URL': 'https://cdn.example.test/nmax.jpg' },
     lead: { 'Customer Name': 'Nick', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
     text: 'berapa sebulan', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog, motorPricing: []
@@ -1475,6 +1475,25 @@ test('an approved model image is independent from regional monthly pricing', () 
   assert.equal(monthlyFollowUp.imageUrl, undefined);
   assert.equal(monthlyFollowUp.humanFollowUpRequired, true);
   assert.match(monthlyFollowUp.text, /semak dengan cawangan/i);
+});
+
+test('an older selected-model state without a successful image record recovers by sending the approved photo once', () => {
+  const decision = buildInstantSalesDecision({
+    state: {
+      'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR',
+      'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'NMAX', 'Selected Product Variant': 'Standard',
+      'Last AI Message': 'Yamaha NMAX Standard memang ada. Ansuran bulanan untuk kawasan anda saya semak dengan cawangan.'
+    },
+    lead: { 'Customer Name': 'Nick', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog: [{
+      'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard',
+      'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax.jpg'
+    }],
+    motorPricing: []
+  });
+  assert.equal(decision.product.Model, 'NMAX');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax.jpg');
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
@@ -1554,7 +1573,7 @@ test('a short model choice outranks stale name onboarding and is never saved as 
 
 test('a tenure follow-up answers only the requested monthly rate without resending the product image', () => {
   const decision = buildInstantSalesDecision({
-    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Ego Gear', 'Last Customer Message': 'ego gear' },
+    state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Ego Gear', 'Last Product Image URL': 'https://cdn.example.test/ego-gear.jpg', 'Last Customer Message': 'ego gear' },
     lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' },
     text: 'berapa bulanan kalau 3 tahun', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-EGOG', Brand: 'Yamaha', Model: 'Ego Gear', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/ego-gear.jpg' }],
@@ -1964,7 +1983,7 @@ test('AI follow-up intent cannot be misread as another model and repeated model 
     { 'Catalog ID': 'M2', Brand: 'Honda', Model: 'Dash 125 FI', Active: 'TRUE', 'Search Keywords': 'dash 125 fi' }
   ];
   const pricing = [{ 'Catalog ID': 'M1', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Deposit (RM)': '500' }];
-  const state = { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR', 'Last AI Message': 'Harga tunai belum ada. Saya sudah masukkan permintaan untuk pengesahan cawangan.' };
+  const state = { 'Current Step': 'STEP_04_DOCUMENTS', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15ZR', 'Last Product Image URL': 'https://example.com/y15.jpg', 'Last AI Message': 'Harga tunai belum ada. Saya sudah masukkan permintaan untuk pengesahan cawangan.' };
   const timing = buildInstantSalesDecision({
     state, lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Bintulu' }, text: 'pastu berapa lama boleh tau', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, motorPricing: pricing,
     aiIntent: { intent: 'FOLLOW_UP_TIME', language: 'MS', businessUnit: 'MOTOR', confidence: 0.98 }
