@@ -963,7 +963,41 @@ test('loan kedai perlukan apa returns the required documents even when AI miscla
   assert.match(decision.text, /IC depan dan belakang/i);
   assert.match(decision.text, /slip gaji terkini atau penyata EPF/i);
   assert.match(decision.text, /semua sekali/i);
-  assert.doesNotMatch(decision.text, /1[–-]3 hari|model|bajet bulanan/i);
+  assert.doesNotMatch(decision.text, /1[–-]3 hari|model|bajet bulanan|nama anda|bandar atau negeri/i);
+});
+
+test('overlapping document requirement and status intents produce one focused checklist', () => {
+  const base = {
+    state: {
+      'Current Step': 'STEP_02_LOCATION',
+      'Customer Name': 'Jack',
+      'Product Category': 'MOTOR',
+      'Selected Product Brand': 'Yamaha',
+      'Selected Product Model': 'Y15ZR'
+    },
+    lead: { 'Customer Name': 'Jack' },
+    documents: [],
+    text: 'apa lagi u perlu',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    aiIntent: {
+      intent: 'DOCUMENT_REQUIREMENTS',
+      questionIntents: ['DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS'],
+      language: 'MS',
+      confidence: 0.99
+    }
+  };
+  const baseDecision = buildInstantSalesDecision(base);
+  const decision = buildMultiQuestionSalesDecision({ ...base, baseDecision });
+  const guarded = enforceConversationReplyContract({ state: base.state, text: base.text, decision });
+
+  assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
+  assert.equal(decision.documentStatusIntent, true);
+  assert.match(guarded.text, /belum nampak dokumen/i);
+  assert.equal((guarded.text.match(/IC depan dan belakang/gi) || []).length, 1);
+  assert.equal((guarded.text.match(/slip gaji/gi) || []).length, 1);
+  assert.doesNotMatch(guarded.text, /nama anda|bandar atau negeri|pengurus/i);
+  assert.deepEqual(decision.answeredQuestionKeys, ['DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS']);
 });
 
 test('frustration after a missed document question answers the original question instead of suggesting models', () => {
