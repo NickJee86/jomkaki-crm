@@ -1410,7 +1410,7 @@ test('motor variants remain distinct and an exact Street request cannot receive 
   assert.equal(decision.product.Variant, 'Street');
   assert.match(decision.text, /Vario 125 Street/i);
   assert.doesNotMatch(decision.text, /RM222|RM1000/);
-  assert.notEqual(decision.imageUrl, 'https://cdn.example.test/vario-standard.jpg');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/vario-street.jpg');
   assert.equal(decision.humanFollowUpRequired, true);
 });
 
@@ -1439,13 +1439,42 @@ test('a recognised model without approved regional pricing gets a useful reply i
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
     lead: { 'Customer Name': 'Kamis', Region: 'EAST_MALAYSIA', State: 'Sarawak', 'City or Area': 'Bintulu' }, text: 'nak nmax', messageType: 'text', routeBusinessUnit: 'MOTOR',
-    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Search Keywords': 'yamaha nmax' }],
+    motorCatalog: [{ 'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Active: 'TRUE', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax.jpg', 'Search Keywords': 'yamaha nmax' }],
     motorPricing: []
   });
   assert.equal(decision.handled, true);
   assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/nmax.jpg');
   assert.match(decision.text, /NMAX/);
   assert.match(decision.text, /pengesahan cawangan|semak dengan cawangan/i);
+});
+
+test('an approved model image is independent from regional monthly pricing', () => {
+  const motorCatalog = [{
+    'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard',
+    'Approval Status': 'APPROVED', Active: 'TRUE', 'Image Approved': 'TRUE',
+    'Image URL': 'https://cdn.example.test/nmax.jpg', 'Search Keywords': 'yamaha nmax n max'
+  }];
+  const firstSelection = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Last Customer Message': 'motor model apa yg ada promosi skg' },
+    lead: { 'Customer Name': 'Nick', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog, motorPricing: []
+  });
+  assert.equal(firstSelection.product.Model, 'NMAX');
+  assert.equal(firstSelection.imageUrl, 'https://cdn.example.test/nmax.jpg');
+  assert.equal(firstSelection.humanFollowUpRequired, true);
+
+  const monthlyFollowUp = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'NMAX', 'Selected Product Variant': 'Standard' },
+    lead: { 'Customer Name': 'Nick', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
+    text: 'berapa sebulan', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
+    motorCatalog, motorPricing: []
+  });
+  assert.equal(monthlyFollowUp.product.Model, 'NMAX');
+  assert.equal(monthlyFollowUp.imageUrl, undefined);
+  assert.equal(monthlyFollowUp.humanFollowUpRequired, true);
+  assert.match(monthlyFollowUp.text, /semak dengan cawangan/i);
 });
 
 test('ambiguous shorthand asks one natural clarification instead of guessing', () => {
