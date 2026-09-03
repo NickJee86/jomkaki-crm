@@ -529,12 +529,12 @@ const documentProgress = documents => {
   return { rows, types, pending, pendingTypes, failed, missing, missingCodes, verifiedMissingCodes, verifiedComplete: verifiedMissingCodes.length === 0 && !failed, labels };
 };
 
-export function buildDocumentProgressReply(language = 'MS', documents = []) {
+export function buildDocumentProgressReply(language = 'MS', documents = [], { followUp = false } = {}) {
   const status = documentProgress(documents);
   if (!status.rows.length) {
-    if (language === 'ZH') return '我目前还没有在您的申请里看到文件。请把 MyKad 正反面，以及最新薪水单或 EPF 记录发到这里。';
-    if (language === 'EN') return 'I cannot see any document in your application yet. Please send the front and back of your MyKad, plus your latest payslip or EPF statement here.';
-    return 'Saya belum nampak dokumen dalam permohonan anda. Boleh hantar IC depan dan belakang, serta slip gaji terkini atau penyata EPF di sini.';
+    if (language === 'ZH') return `${followUp ? '还是缺这 3 项：' : '目前还没收到：'}\n• MyKad 正面\n• MyKad 反面\n• 最新薪水单或 EPF 记录\n\n可以先发手上已有的。`;
+    if (language === 'EN') return `${followUp ? 'These 3 items are still missing:' : 'I have not received these items yet:'}\n• MyKad front\n• MyKad back\n• Latest payslip or EPF statement\n\nYou can send whichever one you have first.`;
+    return `${followUp ? 'Masih 3 ini ya:' : 'Yang masih belum diterima:'}\n• IC depan\n• IC belakang\n• Slip gaji terkini atau penyata EPF\n\nBoleh hantar mana yang ada dulu.`;
   }
   const received = status.labels.length ? status.labels.join(', ') : `${status.rows.length} fail`;
   if (status.failed) {
@@ -1157,7 +1157,12 @@ const AI_FALLBACK_BLOCKED_CLAIMS = /\b(?:guaranteed approval|guaranteed to pass|
 const AI_FALLBACK_DISCLOSURE = /\b(?:artificial intelligence|automated (?:assistant|system)|chatbot|bot reply|as an ai|saya (?:ialah|adalah) ai|saya bot)\b/i;
 const AI_FALLBACK_UNSUPPORTED_AMOUNT = /\bRM\s*\d[\d,.]*/i;
 
-const stripEmoji = value => clean(value).replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s{2,}/g, ' ').trim();
+const stripEmoji = value => clean(value)
+  .replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '')
+  .replace(/[^\S\r\n]{2,}/g, ' ')
+  .replace(/\r?\n[ \t]*/g, '\n')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
 
 export function sanitizeAiFallbackReply(value = '', language = 'MS') {
   let reply = stripEmoji(clean(value)
@@ -2350,7 +2355,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     return { handled: true, payslipPeriodIntent: true, answerCustomerQuestionFirst: true, nextStep: step || 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'PAYSLIP_PERIOD') };
   }
   if (documentStatusQuestion) {
-    return { handled: true, documentStatusIntent: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents) };
+    const progressReply = buildDocumentProgressReply(language, documents);
+    const repeatedProgress = normalizedWords(state['Last AI Message']) === normalizedWords(progressReply);
+    return { handled: true, documentStatusIntent: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: buildDocumentProgressReply(language, documents, { followUp: repeatedProgress }) };
   }
   // A combined motor + phone application is a direct business question. Answer it
   // before the broad APPLY/document rules so the customer is not diverted into a
@@ -3030,7 +3037,7 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
   if (!decision?.handled || decision.applicationDetails || decision.consentDispatch || !clean(decision.text)) return decision;
   const language = instantLanguage(text, state);
   const priorReply = clean(state['Last AI Message']);
-  let reply = stripEmoji(decision.text).replace(/\s{2,}/g, ' ').trim();
+  let reply = stripEmoji(decision.text).replace(/[^\S\r\n]{2,}/g, ' ').replace(/\r?\n[ \t]*/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const groundedIntentReply = [
     'availableModelsIntent', 'branchLocationIntent', 'cashPriceIntent', 'combinedApplicationIntent',
     'documentRequirementsIntent', 'documentStatusIntent', 'interestRateIntent', 'loanKedaiIntent',
@@ -3050,7 +3057,7 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
     if (questionSeen) return language === 'ZH' ? '。' : '.';
     questionSeen = true;
     return mark;
-  }).replace(/\.{2,}/g, '.').replace(/\s{2,}/g, ' ').trim();
+  }).replace(/\.{2,}/g, '.').replace(/[^\S\r\n]{2,}/g, ' ').replace(/\r?\n[ \t]*/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return {
     ...decision,
     text: reply,
