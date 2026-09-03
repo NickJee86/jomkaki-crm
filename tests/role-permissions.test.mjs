@@ -17,6 +17,9 @@ const FUTURE_REPORTING_FIELDS = { meta: [], lms: [] };
 const integrationReadiness = () => ({ meta: {}, lms: {}, safety: {} });
 const publicIntegrationRecords = () => [];
 `);
+source = source.replace("import { validatePublicImageLink } from './_media-validation.js';", `
+const validatePublicImageLink = async () => ({ ok: true });
+`);
 const { default: handler, scopeData, deriveDocumentReadiness } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 
 function response() {

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmentAccounts, setSession, validateSession } from './_auth.js';
 import { FUTURE_REPORTING_FIELDS, integrationReadiness, publicIntegrationRecords } from './_integrations.js';
+import { validatePublicImageLink } from './_media-validation.js';
 
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
@@ -1130,6 +1131,10 @@ export default async function handler(req, res) {
           if (decision === 'REJECTED' && !notes) throw new Error('Add a rejection reason so the branch can correct the item');
           const approved = decision === 'APPROVED', publish = approved && truth(record['Publish Requested']), supersedesCatalogId = clean(record['Supersedes Catalog ID']);
           if (publish && !clean(record['Image URL'])) throw new Error('Add a product image before approving publication');
+          if (publish) {
+            const imageValidation = await validatePublicImageLink(record['Image URL'], { timeoutMs: 5000 });
+            if (!imageValidation.ok) throw new Error(`The product image cannot be approved because it is not publicly available (${imageValidation.reason})`);
+          }
           const publishFields = businessUnit === 'HANDPHONE' ? handphoneCatalogPublishFields : motorCatalogPublishFields;
           if (approved && supersedesCatalogId) {
             const current = catalogRecords.find(row => clean(row['Catalog ID']) === supersedesCatalogId);
@@ -1221,14 +1226,21 @@ export default async function handler(req, res) {
           const [catalogRows] = await readRanges(req, [`${config.catalog}!A1:${config.catalogMax}1000`]), existingCatalog = rowsToObjects(catalogRows), existingRecord = existingCatalog.find(row => clean(row['Catalog ID']) === catalogId);
           if (catalogId && !existingRecord) throw new Error('Catalog item was not found');
           if (admin && existingRecord && productApprovalStatus(existingRecord) !== 'APPROVED') throw new Error('Use Approve or Reject for submitted product catalog changes');
+          const imageUrl = validUrl(body.imageUrl, 'Image URL');
+          const imageApproved = admin && truth(body.imageApproved);
+          if (imageApproved) {
+            if (!imageUrl) throw new Error('Add a working product image before approving it');
+            const imageValidation = await validatePublicImageLink(imageUrl, { timeoutMs: 5000 });
+            if (!imageValidation.ok) throw new Error(`The product image cannot be approved because it is not publicly available (${imageValidation.reason})`);
+          }
           const delegated = !admin, timestamp = now(), publishRequested = truth(body.publishRequested ?? body.active);
           const submittedRegion = delegated ? canonicalRegion(session.region) : canonicalRegion(body.regionAvailability || existingRecord?.['Submitted Region']);
           const existingApproval = existingRecord ? productApprovalStatus(existingRecord) : '', supersedesCatalogId = delegated && existingRecord ? (existingApproval === 'APPROVED' ? catalogId : clean(existingRecord['Supersedes Catalog ID'])) : '';
           if (delegated && !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(submittedRegion)) throw new Error('A valid permitted region is required for product submission');
           const record = {
             Brand: brand, Model: model, Variant: variant, Category: category, ...(businessUnit === 'HANDPHONE' ? { 'Operating System': operatingSystem } : { 'Fuel Type': fuel }), 'Popularity Tier': tier,
-            'Product Page URL': validUrl(body.productPageUrl, 'Product page URL'), 'Image URL': validUrl(body.imageUrl, 'Image URL'),
-            'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': delegated ? 'FALSE' : (truth(body.imageApproved) ? 'TRUE' : 'FALSE'),
+            'Product Page URL': validUrl(body.productPageUrl, 'Product page URL'), 'Image URL': imageUrl,
+            'Image Caption (MS)': clean(body.imageCaption), 'Image Approved': delegated ? 'FALSE' : (imageApproved ? 'TRUE' : 'FALSE'),
             Active: delegated ? 'FALSE' : (truth(body.active) ? 'TRUE' : 'FALSE'), 'Stock Check Mode': stock, ...(businessUnit === 'HANDPHONE' ? { 'Region Availability': delegated ? clean(existingRecord?.['Region Availability'] || submittedRegion) : clean(body.regionAvailability || body.branchAvailability) } : { 'Branch Availability': clean(body.branchAvailability) }),
             'Warehouse Availability': clean(body.warehouseAvailability), 'Search Keywords': clean(body.searchKeywords), 'Last Verified At': timestamp.slice(0, 10),
             'Approval Status': delegated ? 'PENDING_APPROVAL' : 'APPROVED', 'Submitted By': session.username, 'Submitted At': timestamp, 'Approved By': delegated ? '' : session.username, 'Approved At': delegated ? '' : timestamp, 'Approval Notes': '', 'Publish Requested': publishRequested ? 'TRUE' : 'FALSE', 'Submitted Region': submittedRegion || 'ALL', 'Submitted Branch ID': delegated ? clean(session.branchId) : clean(body.submittedBranchId || existingRecord?.['Submitted Branch ID']), ...(businessUnit === 'HANDPHONE' ? { 'Branch Availability': clean(existingRecord?.['Branch Availability']) } : {}), 'Supersedes Catalog ID': supersedesCatalogId

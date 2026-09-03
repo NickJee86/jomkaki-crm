@@ -3,6 +3,7 @@ import { getAccessToken } from './_auth.js';
 import { approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from './_jomkaki-knowledge.js';
 import { JOMKAKI_SALES_INTENT_PROMPT, JOMKAKI_SALES_PROMPT_VERSION, JOMKAKI_SALES_REPLY_PROMPT } from './_jomkaki-sales-prompt.js';
 import { FOLLOW_UP_APPLICATION_HEADERS, isFollowUpOptOut } from './_follow-up.js';
+import { validatePublicImageLink } from './_media-validation.js';
 
 export const config = { api: { bodyParser: false } };
 
@@ -2757,6 +2758,11 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         baseText: instantCopy(language, approvedImage ? 'MODEL_IMAGE_PRICE_CHECK' : 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
         completeStep: 'STEP_03_PRODUCT'
       });
+      const mediaFallbackContinuation = approvedImage ? profileContinuation({
+        language, state, lead,
+        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
+        completeStep: 'STEP_03_PRODUCT'
+      }) : null;
       return {
         handled: true,
         productIntent: true,
@@ -2764,6 +2770,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         productUnit: unit,
         product,
         ...(approvedImage ? { imageUrl: approvedImage } : {}),
+        ...(mediaFallbackContinuation ? { mediaFallbackText: mediaFallbackContinuation.text } : {}),
         text: continuation.text,
         humanFollowUpRequired: true
       };
@@ -3164,30 +3171,49 @@ export function instantChannelCredentials(route = {}, env = process.env) {
   return { channelId, phoneNumberId, accessToken, version: clean(env.WHATSAPP_GRAPH_VERSION || 'v25.0') };
 }
 
+export const validateInstantImageLink = validatePublicImageLink;
+
 async function sendInstantSalesMessage({ route, phone, decision }) {
   if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
   const binding = instantChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
   const documentUrl = clean(decision.documentUrl);
+  const imageValidation = imageUrl ? await validateInstantImageLink(imageUrl) : { ok: false, reason: '' };
+  let effectiveImageUrl = imageValidation.ok ? imageUrl : '';
+  let mediaFallbackReason = imageUrl && !imageValidation.ok ? imageValidation.reason : '';
+  const fallbackText = clean(decision.mediaFallbackText) || clean(decision.text);
   const payload = documentUrl
     ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'document', document: { link: documentUrl, filename: clean(decision.documentFilename) || 'JomKaki Rider CTOS CCRIS Consent Form.pdf', caption: clean(decision.text).slice(0, 1024) } }
-    : imageUrl
-    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: imageUrl, caption: clean(decision.text).slice(0, 1024) } }
-    : { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: clean(decision.text) } };
-  const response = await fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
+    : effectiveImageUrl
+    ? { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'image', image: { link: effectiveImageUrl, caption: clean(decision.text).slice(0, 1024) } }
+    : { messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: fallbackText } };
+  const sendPayload = body => fetch(`https://graph.facebook.com/${binding.version}/${binding.phoneNumberId}/messages`, {
     method: 'POST',
     headers: { authorization: `Bearer ${binding.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(body)
   });
-  const result = await response.json().catch(() => ({}));
+  let response = await sendPayload(payload);
+  let result = await response.json().catch(() => ({}));
+  if (!response.ok && effectiveImageUrl && !documentUrl) {
+    const imageError = clean(result.error?.message) || `Meta API error ${response.status}`;
+    mediaFallbackReason = `META_IMAGE_REJECTED:${imageError}`;
+    effectiveImageUrl = '';
+    response = await sendPayload({ messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: fallbackText } });
+    result = await response.json().catch(() => ({}));
+  }
+  if (mediaFallbackReason) console.warn('whatsapp_image_fallback', { reason: mediaFallbackReason, model: clean(decision.product?.Model) });
+  const imageSent = response.ok && !!effectiveImageUrl;
   return {
     sent: response.ok,
     binding,
     providerMessageId: clean(result.messages?.[0]?.id),
     error: response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
+    imageSent,
+    imageUrl: imageSent ? effectiveImageUrl : '',
+    mediaFallbackReason,
     messageType: documentUrl
       ? 'DOCUMENT'
-      : imageUrl
+      : imageSent
       ? (decision.productUnit === 'HANDPHONE' ? 'HANDPHONE_IMAGE' : 'MOTOR_IMAGE')
       : 'TEXT'
   };
@@ -3221,7 +3247,7 @@ async function sendImmediateAcknowledgement(token, { route, phone, text, message
 }
 
 async function updateOutboxStatus(token, providerId, status, errorMessage = '') {
-  const rows = await readSheet(token, 'Message_Outbox!A:AC');
+  const rows = await readSheet(token, 'Message_Outbox!A:AJ');
   const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId));
   if (rowIndex < 1) return;
@@ -3252,16 +3278,24 @@ export default async function handler(req, res) {
   const reservedMessageIds = [];
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}');
-    const inboundMessages = (payload.entry || []).flatMap(entry => (entry.changes || []).flatMap(change => change.value?.messages || []));
-    if (!inboundMessages.length) return res.status(200).json({ ok: true, statusOnly: true });
+    const changes = (payload.entry || []).flatMap(entry => entry.changes || []);
+    const inboundMessages = changes.flatMap(change => change.value?.messages || []);
+    const statusEvents = changes.flatMap(change => change.value?.statuses || []);
+    if (!inboundMessages.length && !statusEvents.length) return res.status(200).json({ ok: true, statusOnly: true });
     for (const message of inboundMessages) {
       if (!message.id) continue;
       if (reserveInboundMessage(message.id)) reservedMessageIds.push(clean(message.id));
       else message.__skipDuplicate = true;
     }
-    if (!inboundMessages.some(message => !message.__skipDuplicate)) return res.status(200).json({ ok: true, duplicate: true });
+    const hasFreshInbound = inboundMessages.some(message => !message.__skipDuplicate);
+    if (!hasFreshInbound && !statusEvents.length) return res.status(200).json({ ok: true, duplicate: true });
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
+    for (const status of statusEvents) {
+      const statusError = clean(status.errors?.[0]?.error_data?.details || status.errors?.[0]?.message || status.errors?.[0]?.title);
+      await updateOutboxStatus(token, status.id, status.status, statusError);
+    }
+    if (!hasFreshInbound) return res.status(200).json({ ok: true, statusOnly: true, updated: statusEvents.length });
     const [leadRows, routeRows, branchRows, stateRows, inboxRows, outboxRows] = await Promise.all([
       readSheet(token, 'Leads!A:AP'),
       readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'),
@@ -3392,13 +3426,13 @@ export default async function handler(req, res) {
         const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
-        const fastAvailabilityMatch = conversationalText && asksProductAvailability(text)
+        const fastProductMatch = conversationalText
           ? matchInstantProduct(text, [
             ...catalogData.motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
             ...catalogData.handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
           ])
           : { product: null };
-        const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting && !fastAvailabilityMatch.product
+        const aiIntent = routeUsable && !human && conversationalText && !simpleGreeting && !fastProductMatch.product && !fastProductMatch.ambiguous
           ? await requestAiIntent({
             text,
             state: conversationState || {},
@@ -3672,7 +3706,7 @@ export default async function handler(req, res) {
               'Last Reply Source': decisionAudit.replySource,
               'Last Knowledge Version': decisionAudit.knowledgeVersion,
               'Last Prompt Version': decisionAudit.promptVersion,
-              ...(instantDecision.imageUrl ? { 'Last Product Image URL': clean(instantDecision.imageUrl) } : {}),
+              ...(instantResult.imageSent ? { 'Last Product Image URL': clean(instantResult.imageUrl || instantDecision.imageUrl) } : {}),
               ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(mergeSuggestedModelHistory(conversationState, instantDecision.suggestedModels)) } : {}),
               ...buildConversationMemoryChanges({
                 state: conversationState,
@@ -3700,14 +3734,14 @@ export default async function handler(req, res) {
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
           const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
-          const outboxId = instantDecision.imageUrl && message.id ? `${imageOutboxPrefix}-${message.id}` : makeId('OUT');
+          const outboxId = instantResult.imageSent && message.id ? `${imageOutboxPrefix}-${message.id}` : makeId('OUT');
           await appendObject(token, 'Message_Outbox', {
             'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
-            'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantDecision.text), 'Image URL': clean(instantDecision.imageUrl || instantDecision.documentUrl),
+            'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantResult.imageSent ? instantDecision.text : instantDecision.mediaFallbackText || instantDecision.text), 'Image URL': clean(instantResult.imageSent ? instantResult.imageUrl : instantDecision.documentUrl),
             'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
-            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}:${channelId}:${decisionAudit.decisionRoute}:KB${decisionAudit.knowledgeVersion}`,
+            'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}${instantResult.mediaFallbackReason ? ':MEDIA_FALLBACK' : ''}:${channelId}:${decisionAudit.decisionRoute}:KB${decisionAudit.knowledgeVersion}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
           });
         }
@@ -3743,7 +3777,6 @@ export default async function handler(req, res) {
         }
         if (message.id) existingMessageIds.add(clean(message.id));
       }
-      for (const status of value.statuses || []) await updateOutboxStatus(token, status.id, status.status, status.errors?.[0]?.title || '');
     }
     return res.status(200).json({ ok: true });
   } catch (error) {
