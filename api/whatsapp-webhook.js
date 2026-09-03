@@ -41,6 +41,7 @@ const CONVERSATION_DECISION_HEADERS = [
   'Last Reply Source',
   'Last Knowledge Version',
   'Last Prompt Version',
+  'Last Product Image URL',
   'Last Suggested Models JSON',
   'Asked Questions JSON',
   'Answered Questions JSON',
@@ -2347,7 +2348,8 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
       && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
       && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
-    return sameSelectedProduct ? '' : imageUrl;
+    const sameImageAlreadySent = sameSelectedProduct && clean(state['Last Product Image URL']) === imageUrl;
+    return sameImageAlreadySent ? '' : imageUrl;
   };
   const previousCustomerText = clean(state['Last Customer Message']);
   const otherModelsIntent = !asksForPromotion(text) && (
@@ -3670,6 +3672,7 @@ export default async function handler(req, res) {
               'Last Reply Source': decisionAudit.replySource,
               'Last Knowledge Version': decisionAudit.knowledgeVersion,
               'Last Prompt Version': decisionAudit.promptVersion,
+              ...(instantDecision.imageUrl ? { 'Last Product Image URL': clean(instantDecision.imageUrl) } : {}),
               ...(instantDecision.availableModelsIntent ? { 'Last Suggested Models JSON': JSON.stringify(mergeSuggestedModelHistory(conversationState, instantDecision.suggestedModels)) } : {}),
               ...buildConversationMemoryChanges({
                 state: conversationState,
