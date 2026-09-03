@@ -15,6 +15,7 @@ test('Motor and Handphone catalog forms support direct camera or file photo uplo
   assert.match(ui, /capture="environment"/);
   assert.match(ui, /validateBrowserFile\(photo, \{ imageOnly: true \}\)/);
   assert.match(ui, /uploadProductCatalogImage/);
+  assert.match(ui, /imageApproved = 'FALSE'/);
   assert.match(ui, /fileData\(photo\)/);
   assert.match(ui, /productPhotoPreview/);
 });
@@ -22,6 +23,8 @@ test('Motor and Handphone catalog forms support direct camera or file photo uplo
 test('Product photos are stored in the dedicated SharePoint catalog folder and remain controlled by approval', () => {
   assert.match(api, /CRM Product Catalog Photos/);
   assert.match(api, /Image File ID/);
+  assert.match(api, /validatePublicImageLink/);
+  assert.match(api, /not publicly available/);
   assert.match(api, /Image MIME Type/);
   assert.match(api, /pendingApproval \? 'FALSE' : 'TRUE'/);
   assert.match(api, /CATALOG_IMAGE_UPLOADED/);

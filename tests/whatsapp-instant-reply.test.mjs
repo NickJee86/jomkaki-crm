@@ -49,7 +49,8 @@ import {
   shouldDispatchEarlyConsent,
   shouldSendImmediateAcknowledgement,
   shouldStartApplicationDetails,
-  usableCustomerName
+  usableCustomerName,
+  validateInstantImageLink
 } from '../api/whatsapp-webhook.js';
 import { verifyMediaProxyQuery } from '../api/whatsapp-media.js';
 import { APPROVED_KNOWLEDGE_PAGES, approvedKnowledgeForRuntime, approvedMonthlyRateFields, JOMKAKI_KNOWLEDGE } from '../api/_jomkaki-knowledge.js';
@@ -62,6 +63,43 @@ const route = {
   'Credential Key': 'WHATSAPP_WEST_01',
   'Outbound Enabled': 'TRUE'
 };
+
+test('instant product images are checked before Meta receives the link', async () => {
+  let request;
+  const result = await validateInstantImageLink('https://cdn.example.test/nmax.jpg', {
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        status: 206,
+        headers: { get: name => ({ 'content-type': 'image/jpeg', 'content-length': '2048' })[name.toLowerCase()] || '' },
+        body: { cancel: async () => {} }
+      };
+    }
+  });
+  assert.equal(result.ok, true);
+  assert.equal(request.url, 'https://cdn.example.test/nmax.jpg');
+  assert.equal(request.options.method, 'GET');
+  assert.equal(request.options.headers.Range, 'bytes=0-1023');
+});
+
+test('broken or non-image product links fall back instead of creating a silent media send', async () => {
+  const result = await validateInstantImageLink('https://cdn.example.test/missing.jpg', {
+    fetchImpl: async () => ({
+      ok: false,
+      status: 404,
+      headers: { get: name => name.toLowerCase() === 'content-type' ? 'text/html' : '' },
+      body: { cancel: async () => {} }
+    })
+  });
+  assert.deepEqual(result, { ok: false, reason: 'IMAGE_HTTP_404', contentType: 'text/html', contentLength: 0 });
+});
+
+test('Meta delivery-only webhooks are persisted before the handler returns', () => {
+  assert.match(source, /const statusEvents = changes\.flatMap/);
+  assert.match(source, /Message_Outbox!A:AJ/);
+  assert.ok(source.indexOf('for (const status of statusEvents)') < source.indexOf("if (!hasFreshInbound) return res.status(200).json({ ok: true, statusOnly: true"));
+});
 
 test('approved Notion knowledge snapshot governs language, pricing and consent rules', () => {
   assert.equal(JOMKAKI_KNOWLEDGE.status, 'APPROVED');
