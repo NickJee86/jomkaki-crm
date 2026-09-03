@@ -818,6 +818,18 @@ const instantLanguage = (text, state = {}) => customerLanguageSignal(text)
   || customerLanguageSignal(state['Last Customer Message'])
   || JOMKAKI_KNOWLEDGE.conversation.defaultLanguage;
 
+export function effectiveConversationStep(state = {}) {
+  const storedStep = clean(state['Current Step']).toUpperCase();
+  const lastReply = clean(state['Last AI Message']);
+  if (!lastReply) return storedStep;
+  // The question the customer actually saw is the authority for the next
+  // reply. This repairs stale worksheet steps without restarting onboarding.
+  if (/(?:tinggal|berada|sekarang).*?(?:bandar|negeri)|which city or state|what city or state|哪个城市|哪個城市|城市或州/i.test(lastReply)) return 'STEP_02_LOCATION';
+  if (/(?:boleh saya tahu|may i know|what is).*?nama anda|may i know your name|what is your name|怎么称呼|如何称呼/i.test(lastReply)) return 'STEP_01_NAME';
+  if (/(?:maksud anda|did you mean|adakah anda maksudkan).*?(?:pilih satu|choose one)|model (?:motor|telefon).*?(?:minat|interested)|哪个型号|哪個型號/i.test(lastReply)) return 'STEP_03_PRODUCT';
+  return storedStep;
+}
+
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
   const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), googleMapsUrl = clean(values.googleMapsUrl), wazeUrl = clean(values.wazeUrl), branches = clean(values.branches);
@@ -830,6 +842,7 @@ const instantCopy = (language, key, values = {}) => {
       NAME_RETRY: 'Sorry, may I know your name so I can continue checking the right options for you?',
       LOCATION: `Nice to meet you${name ? `, ${name}` : ''}. Which city or state are you from?`,
       LOCATION_RETRY: 'Which city or state are you currently staying in?',
+      LOCATION_SPECIFIC_RETRY: 'I understand. I only need the city or state name, for example Kuching, Bintulu or Petaling Jaya. Which city are you staying in?',
       PRODUCT: `Thank you${location ? `, noted ${location}` : ''}. Are you looking for a motorcycle or phone? You can tell me the model directly.`,
       MODEL: 'Which motorcycle or phone model are you interested in? You can send me the model name directly.',
       MOTOR_MODEL: 'All right, a motorcycle. Is there a particular model you are looking for? If not, tell me your comfortable monthly budget and I can suggest a few options.',
@@ -896,6 +909,7 @@ const instantCopy = (language, key, values = {}) => {
       NAME_RETRY: 'Maaf, boleh saya tahu nama anda supaya saya boleh teruskan semakan?',
       LOCATION: `Salam kenal${name ? `, ${name}` : ''}. Anda tinggal di bandar atau negeri mana?`,
       LOCATION_RETRY: 'Boleh beritahu anda sekarang tinggal di bandar atau negeri mana?',
+      LOCATION_SPECIFIC_RETRY: 'Baik, saya faham. Saya cuma perlukan nama bandar atau negeri, contohnya Kuching, Bintulu atau Petaling Jaya. Anda tinggal di bandar mana?',
       PRODUCT: `Baik${location ? `, saya dah catat ${location}` : ''}. Anda nak cari motor atau telefon? Kalau dah ada model, terus bagi nama model ya.`,
       MODEL: 'Model motor atau telefon yang mana anda minat? Boleh terus hantar nama model kepada saya.',
       MOTOR_MODEL: 'Baik, nak cari motor ya. Ada model yang anda minat, atau mahu saya cadangkan ikut bajet bulanan?',
@@ -962,6 +976,7 @@ const instantCopy = (language, key, values = {}) => {
       NAME_RETRY: '不好意思，请问该怎么称呼您？我好继续为您查询。',
       LOCATION: `很高兴认识你${name ? `，${name}` : ''}。请问你目前住在哪个城市或州属？`,
       LOCATION_RETRY: '请问你目前住在哪个城市或州属？',
+      LOCATION_SPECIFIC_RETRY: '明白。我只需要城市或州属名称，例如古晋、民都鲁或八打灵再也。请问你住在哪个城市？',
       PRODUCT: `谢谢${location ? `，已记录你在 ${location}` : ''}。你想找摩托还是手机？可以直接告诉我型号。`,
       MODEL: '你对哪一款摩托或手机有兴趣？可以直接把型号发给我。',
       MODEL_CLARIFY: `请问你是指 ${options}？请选择一个，我才能发送正确的照片和月供。`,
@@ -2256,7 +2271,7 @@ export const mergeSuggestedModelHistory = (state = {}, suggestions = []) => boun
 export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [], text = '', messageType = 'text', routeBusinessUnit = '', routeRegion = '', branches = [], motorCatalog = [], motorPricing = [], handphoneCatalog = [], handphonePricing = [], aiIntent = null, suppressDocumentAcknowledgement = false } = {}) {
   const interpretedIntent = clean(aiIntent?.intent).toUpperCase();
   const language = ['MS', 'EN', 'ZH'].includes(clean(aiIntent?.language).toUpperCase()) ? clean(aiIntent.language).toUpperCase() : instantLanguage(text, state);
-  const step = clean(state['Current Step']).toUpperCase();
+  const step = effectiveConversationStep(state);
   if (['image', 'document'].includes(clean(messageType).toLowerCase())) return suppressDocumentAcknowledgement
     ? { handled: false, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: '' }
     : { handled: true, documentQueued: true, nextStep: step || 'STEP_04_DOCUMENTS', text: instantCopy(language, 'DOCUMENT') };
@@ -2454,6 +2469,16 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       productUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit),
       location,
       text: instantCopy(language, 'PRODUCT', { location: location.city || location.state })
+    };
+    const locationAnswerAttempt = interpretedIntent === 'PROVIDE_LOCATION'
+      || frustrationDetected
+      || /\b(?:bandar|negeri|city|state|tinggal|duduk|stay|staying|live|located)\b|城市|州属|州屬|住在/i.test(clean(text));
+    if (locationAnswerAttempt) return {
+      handled: true,
+      locationClarificationIntent: true,
+      nextStep: 'STEP_02_LOCATION',
+      productUnit: canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit),
+      text: instantCopy(language, 'LOCATION_SPECIFIC_RETRY')
     };
   }
   const catalogPool = explicitUnit ? allCatalogs.filter(row => row.__businessUnit === explicitUnit) : allCatalogs;
@@ -2984,7 +3009,7 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
   const groundedIntentReply = [
     'availableModelsIntent', 'branchLocationIntent', 'cashPriceIntent', 'combinedApplicationIntent',
     'documentRequirementsIntent', 'documentStatusIntent', 'interestRateIntent', 'loanKedaiIntent',
-    'payslipPeriodIntent', 'productCategoryIntent', 'productIntent', 'productOptionsIntent',
+    'locationClarificationIntent', 'payslipPeriodIntent', 'productCategoryIntent', 'productIntent', 'productOptionsIntent',
     'promotionIntent', 'shopLoanIntent', 'unlistedProductIntent'
   ].some(key => decision[key] === true);
   // A customer may repeat or rephrase the same question. When the router has
@@ -3187,6 +3212,22 @@ export default async function handler(req, res) {
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
         const previousInboundAt = clean(lead?.['Last Inbound At']);
         let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1) : null;
+        // The sent-message log is the record of what the customer actually saw.
+        // Reconcile it before routing in case a duplicate/stale state row trails
+        // the latest successful reply.
+        const latestDeliveredReply = outboxObjects
+          .filter(row => {
+            if (clean(row['Send Status']).toUpperCase() !== 'SENT' || !clean(row['Message Text'])) return false;
+            const sameLead = clean(lead?.['Lead ID']) && clean(row['Lead ID']) === clean(lead['Lead ID']);
+            const samePhone = digits(row['Phone Number']) === phone;
+            const sameChannel = !channelId || !clean(row['Internal Channel ID']) || clean(row['Internal Channel ID']) === channelId;
+            return (sameLead || samePhone) && sameChannel;
+          })
+          .sort((left, right) => Date.parse(clean(right['Sent At'] || right['Created At'])) - Date.parse(clean(left['Sent At'] || left['Created At'])))[0];
+        const deliveredReplyAt = clean(latestDeliveredReply?.['Sent At'] || latestDeliveredReply?.['Created At']);
+        if (conversationState && latestDeliveredReply && (!Number.isFinite(Date.parse(conversationState['Last AI Message At'])) || Date.parse(deliveredReplyAt) > Date.parse(conversationState['Last AI Message At']))) {
+          conversationState = { ...conversationState, 'Last AI Message': clean(latestDeliveredReply['Message Text']), 'Last AI Message At': deliveredReplyAt };
+        }
         const latestKnownInboundAt = [previousInboundAt, clean(conversationState?.['Last Customer Reply At'])]
           .filter(value => Number.isFinite(Date.parse(value)))
           .sort((left, right) => Date.parse(right) - Date.parse(left))[0] || '';
@@ -3228,7 +3269,7 @@ export default async function handler(req, res) {
           continue;
         }
         let human = requiresManager(text);
-        const currentStep = clean(conversationState?.['Current Step']).toUpperCase();
+        const currentStep = effectiveConversationStep(conversationState || {});
         const mediaInbound = ['image', 'document'].includes(clean(message.type).toLowerCase());
         const inferredInboundDocumentType = inferDocumentTypeFromFileName(message.document?.filename || '');
         const documentAckKey = `${channelId || numberId || 'UNROUTED'}:${phone}`;
@@ -3285,7 +3326,7 @@ export default async function handler(req, res) {
           state: conversationState || {}, lead: lead || {}, documents: leadDocuments, text, messageType: message.type || 'text', routeBusinessUnit, routeRegion, branches,
           ...catalogData, aiIntent, suppressDocumentAcknowledgement, baseDecision: instantDecision
         });
-        instantDecision = guardConversationProgress({ state: conversationState || {}, documents: leadDocuments, text, decision: instantDecision });
+        instantDecision = guardConversationProgress({ state: { ...(conversationState || {}), 'Current Step': currentStep }, documents: leadDocuments, text, decision: instantDecision });
         const progressiveProfile = buildProgressiveProfileChanges({
           text,
           aiIntent,
