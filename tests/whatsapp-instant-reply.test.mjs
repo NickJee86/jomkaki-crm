@@ -993,11 +993,39 @@ test('overlapping document requirement and status intents produce one focused ch
 
   assert.equal(decision.nextStep, 'STEP_04_DOCUMENTS');
   assert.equal(decision.documentStatusIntent, true);
-  assert.match(guarded.text, /belum nampak dokumen/i);
-  assert.equal((guarded.text.match(/IC depan dan belakang/gi) || []).length, 1);
+  assert.match(guarded.text, /masih belum diterima/i);
+  assert.match(guarded.text, /\n• IC depan\n• IC belakang\n• Slip gaji/i);
+  assert.match(guarded.text, /penyata EPF\n\nBoleh hantar/i);
+  assert.equal((guarded.text.match(/IC depan/gi) || []).length, 1);
   assert.equal((guarded.text.match(/slip gaji/gi) || []).length, 1);
   assert.doesNotMatch(guarded.text, /nama anda|bandar atau negeri|pengurus/i);
   assert.deepEqual(decision.answeredQuestionKeys, ['DOCUMENT_REQUIREMENTS', 'DOCUMENT_STATUS']);
+});
+
+test('a rephrased missing-document question gets a concise human follow-up instead of the same reply', () => {
+  const documents = [];
+  const first = buildInstantSalesDecision({
+    state: { 'Current Step': 'STEP_04_DOCUMENTS' },
+    documents,
+    text: 'apa lagi u perlu',
+    messageType: 'text',
+    aiIntent: { intent: 'DOCUMENT_STATUS', questionIntents: ['DOCUMENT_STATUS'], language: 'MS', confidence: 0.99 }
+  });
+  const secondState = { 'Current Step': 'STEP_04_DOCUMENTS', 'Last AI Message': first.text };
+  const second = buildInstantSalesDecision({
+    state: secondState,
+    documents,
+    text: 'apa document yg kurang',
+    messageType: 'text',
+    aiIntent: { intent: 'DOCUMENT_STATUS', questionIntents: ['DOCUMENT_STATUS'], language: 'MS', confidence: 0.99 }
+  });
+  const guarded = enforceConversationReplyContract({ state: secondState, text: 'apa document yg kurang', decision: second });
+
+  assert.notEqual(guarded.text, first.text);
+  assert.match(guarded.text, /^Masih 3 ini ya:/i);
+  assert.match(guarded.text, /\n• IC depan\n• IC belakang\n• Slip gaji/i);
+  assert.match(guarded.text, /penyata EPF\n\nBoleh hantar/i);
+  assert.doesNotMatch(guarded.text, /bandar|nama anda|pengurus/i);
 });
 
 test('frustration after a missed document question answers the original question instead of suggesting models', () => {
