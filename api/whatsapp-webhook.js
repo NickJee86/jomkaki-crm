@@ -897,7 +897,8 @@ const instantCopy = (language, key, values = {}) => {
       HANDPHONE_MODEL: 'All right, a phone. Which model are you looking for? If you are not sure, tell me your comfortable monthly budget and I can suggest a few options.',
       RETURNING_GREETING: `Hi${name ? `, ${name}` : ''}. Welcome back to JomKaki Rider. What would you like me to check for you today?`,
       MODEL_CLARIFY: `Do you mean ${options}? Choose one so I can send the correct photo and monthly instalment.`,
-      MODEL_UNAVAILABLE: `I understand you mean ${brand} ${model}. Its approved monthly plan still needs branch confirmation, and I can arrange that check for you.`,
+      MODEL_UNAVAILABLE: `${brand} ${model} is available. I am checking the monthly instalment for your area with the branch.`,
+      MODEL_IMAGE_PRICE_CHECK: `${brand} ${model} is available. I have sent the photo first, and I am checking the monthly instalment for your area with the branch.`,
       OTHER_MODELS: `Other available options include ${models}. Which one would you like me to check?`,
       OTHER_MODELS_EXHAUSTED: 'Those are the other available options. If you have another model in mind, send me its name or a photo and I will help check it for you.',
       OTHER_MODELS_CHECK: 'Yes, I can check other motorcycles too. Do you prefer a scooter, cub/moped, sport bike, or would you like suggestions based on a comfortable monthly budget?',
@@ -966,7 +967,8 @@ const instantCopy = (language, key, values = {}) => {
       HANDPHONE_MODEL: 'Baik, telefon. Model mana yang anda sedang cari? Kalau belum pasti, beritahu bajet bulanan yang selesa dan saya boleh cadangkan beberapa pilihan.',
       RETURNING_GREETING: `Hai${name ? `, ${name}` : ''}. Selamat kembali ke JomKaki Rider. Apa yang anda mahu saya semak hari ini?`,
       MODEL_CLARIFY: `Maksud anda ${options}? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.`,
-      MODEL_UNAVAILABLE: `Baik, anda maksudkan ${brand} ${model}. Pelan ansuran yang diluluskan masih perlukan pengesahan cawangan, dan saya boleh bantu semak untuk anda.`,
+      MODEL_UNAVAILABLE: `${brand} ${model} memang ada. Ansuran bulanan untuk kawasan anda saya semak dengan cawangan.`,
+      MODEL_IMAGE_PRICE_CHECK: `${brand} ${model} memang ada. Saya hantar gambarnya dulu, dan ansuran bulanan untuk kawasan anda saya semak dengan cawangan.`,
       OTHER_MODELS: `Antara pilihan lain yang ada ialah ${models}. Yang mana satu anda mahu saya semak?`,
       OTHER_MODELS_EXHAUSTED: 'Itulah pilihan lain yang ada. Kalau anda ada model lain dalam fikiran, hantar nama atau gambarnya dan saya bantu semak.',
       OTHER_MODELS_CHECK: 'Boleh, saya boleh semak motor lain juga. Anda lebih suka skuter, kapcai/moped, motor sport, atau mahu saya cadangkan ikut bajet bulanan yang selesa?',
@@ -2338,6 +2340,15 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
   const selectedVariant = normalizedWords(state['Selected Product Variant']);
+  const approvedImageForNewSelection = product => {
+    if (!product || !truth(product['Image Approved'])) return '';
+    const imageUrl = clean(product['Image URL']);
+    if (!/^https:\/\//i.test(imageUrl)) return '';
+    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
+      && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
+      && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
+    return sameSelectedProduct ? '' : imageUrl;
+  };
   const previousCustomerText = clean(state['Last Customer Message']);
   const otherModelsIntent = !asksForPromotion(text) && (
     ['OTHER_MODELS', 'AVAILABLE_MODELS'].includes(interpretedIntent)
@@ -2604,12 +2615,14 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       : storageQuestion && hasStorage ? 'STORAGE_OPTIONS'
       : 'PRODUCT_OPTIONS_UNAVAILABLE';
     const missingLabel = [colourQuestion && !hasColours ? (language === 'MS' ? 'warna' : language === 'ZH' ? '颜色' : 'colour') : '', storageQuestion && !hasStorage ? (language === 'MS' ? 'kapasiti' : language === 'ZH' ? '容量' : 'storage') : ''].filter(Boolean).join(language === 'ZH' ? '和' : ' dan ');
+    const approvedImage = approvedImageForNewSelection(optionProduct);
     return {
       handled: true,
       productOptionsIntent: true,
       nextStep: step || 'STEP_03_PRODUCT',
       productUnit: optionUnit,
       product: optionProduct,
+      ...(approvedImage ? { imageUrl: approvedImage } : {}),
       text: instantCopy(language, copyKey, {
         brand: optionProduct.Brand,
         model: customerProductModel(optionProduct, optionUnit),
@@ -2656,7 +2669,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
           : requestedRate?.deposit ? 'DEPOSIT_QUOTE' : 'DEPOSIT_UNAVAILABLE', {
           brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), deposit: requestedRate?.deposit
         })
-        : instantCopy(language, requestedRate ? (monthlyQuestion && !requestedTenure ? 'QUOTE_ONLY' : 'TENURE_QUOTE') : 'TENURE_UNAVAILABLE', {
+        : instantCopy(language, requestedRate ? (monthlyQuestion && !requestedTenure ? 'QUOTE_ONLY' : 'TENURE_QUOTE') : requestedTenure ? 'TENURE_UNAVAILABLE' : 'MODEL_UNAVAILABLE', {
           brand: selectedProduct.Brand, model: customerProductModel(selectedProduct, selectedUnit), tenure: requestedTenure || requestedRate?.tenure, amount: requestedRate?.amount, deposit: requestedRate?.deposit
         });
       const continuation = cashPriceQuestion
@@ -2664,6 +2677,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         : requestedRate
         ? profileContinuation({ language, state, lead, baseText, completeStep: step || 'STEP_03_PRODUCT' })
         : { nextStep: 'STEP_03_PRODUCT', text: baseText };
+      const approvedImage = cashPriceQuestion ? '' : approvedImageForNewSelection(selectedProduct);
       return {
         handled: true,
         productIntent: true,
@@ -2671,8 +2685,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         nextStep: continuation.nextStep,
         productUnit: selectedUnit,
         product: selectedProduct,
+        ...(approvedImage ? { imageUrl: approvedImage } : {}),
         text: continuation.text,
-        humanFollowUpRequired: (cashPriceQuestion && selectedUnit === 'MOTOR' && !requestedRate?.cashPrice) || (depositQuestion && selectedUnit === 'MOTOR' && !requestedRate?.deposit) || undefined
+        humanFollowUpRequired: (!requestedRate || (cashPriceQuestion && selectedUnit === 'MOTOR' && !requestedRate?.cashPrice) || (depositQuestion && selectedUnit === 'MOTOR' && !requestedRate?.deposit)) || undefined
       };
     }
   }
@@ -2703,10 +2718,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   if (product) {
     const pricingRegion = lead.Region || routeRegion;
     if (asksProductAvailability(productQuestionText)) {
-      const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
-        && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
-        && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
-      const approvedImage = !sameSelectedProduct && truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
+      const approvedImage = approvedImageForNewSelection(product);
       return {
         handled: true,
         productIntent: true,
@@ -2737,17 +2749,24 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
       };
     }
     if (!rate) {
+      const approvedImage = approvedImageForNewSelection(product);
       const continuation = profileContinuation({
         language, state, lead,
-        baseText: instantCopy(language, 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
+        baseText: instantCopy(language, approvedImage ? 'MODEL_IMAGE_PRICE_CHECK' : 'MODEL_UNAVAILABLE', { brand: product.Brand, model: customerProductModel(product, unit) }),
         completeStep: 'STEP_03_PRODUCT'
       });
-      return { handled: true, productIntent: true, nextStep: continuation.nextStep, productUnit: unit, product, text: continuation.text, humanFollowUpRequired: true };
+      return {
+        handled: true,
+        productIntent: true,
+        nextStep: continuation.nextStep,
+        productUnit: unit,
+        product,
+        ...(approvedImage ? { imageUrl: approvedImage } : {}),
+        text: continuation.text,
+        humanFollowUpRequired: true
+      };
     }
-    const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
-      && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
-      && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
-    const approvedImage = !sameSelectedProduct && truth(product['Image Approved']) && /^https:\/\//i.test(clean(product['Image URL'])) ? clean(product['Image URL']) : '';
+    const approvedImage = approvedImageForNewSelection(product);
     const continuation = identityReady
       ? { nextStep: 'STEP_04_DOCUMENTS', text: instantCopy(language, 'QUOTE', { brand: product.Brand, model: customerProductModel(product, unit), tenure: rate.tenure, amount: rate.amount, deposit: rate.deposit }) }
       : profileContinuation({
