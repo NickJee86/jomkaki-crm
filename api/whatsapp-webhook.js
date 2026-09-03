@@ -2383,8 +2383,9 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     return buildBranchLocationDecision({ language, state, lead, text, routeBusinessUnit: explicitUnit || fallbackUnit || routeBusinessUnit, branches, aiIntent });
   }
   if (documentRequirementQuestion) {
-    const continuation = profileContinuation({ language, state, lead, baseText: instantCopy(language, 'APPLY'), completeStep: 'STEP_04_DOCUMENTS' });
-    return { handled: true, documentRequirementsIntent: true, nextStep: continuation.nextStep, productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: continuation.text };
+    // A document question already has a clear next action: send the files.
+    // Do not dilute it with an unrelated name or location question.
+    return { handled: true, documentRequirementsIntent: true, nextStep: 'STEP_04_DOCUMENTS', productUnit: explicitUnit || fallbackUnit || 'MOTOR', text: instantCopy(language, 'APPLY') };
   }
   if (recoveringDocumentQuestion) {
     return {
@@ -2868,17 +2869,41 @@ const withoutDocumentSalesAdvance = value => {
   return sentences.filter(sentence => !/(?:MyKad|IC depan|IC belakang|payslip|slip gaji|EPF statement|penyata EPF)/i.test(sentence)).join(' ').replace(/\s{2,}/g, ' ').trim();
 };
 
+const collapseOverlappingQuestionIntents = (intents = []) => {
+  const result = [...intents];
+  const remove = intent => {
+    const index = result.indexOf(intent);
+    if (index >= 0) result.splice(index, 1);
+  };
+  // These pairs describe one customer request, not two questions. Keeping both
+  // creates repeated paragraphs from different deterministic handlers.
+  if (result.includes('DOCUMENT_REQUIREMENTS') && result.includes('DOCUMENT_STATUS')) remove('DOCUMENT_REQUIREMENTS');
+  if (result.includes('MONTHLY_INSTALMENT') && result.includes('TENURE')) remove('MONTHLY_INSTALMENT');
+  if (result.includes('AVAILABLE_MODELS') && result.includes('OTHER_MODELS')) remove('OTHER_MODELS');
+  return result;
+};
+
 export function buildMultiQuestionSalesDecision(args = {}) {
   const detected = approvedQuestionIntents(args.aiIntent?.questionIntents, args.text).filter(intent => MULTI_QUESTION_INTENTS.has(intent));
+  const answerIntents = collapseOverlappingQuestionIntents(detected);
   const baseDecision = args.baseDecision || buildInstantSalesDecision(args);
-  if (detected.length < 2) return { ...baseDecision, answeredQuestionKeys: detected.length ? detected : undefined };
-  const decisions = detected.map(intent => buildInstantSalesDecision({
+  if (answerIntents.length < 2) {
+    const collapsedDecision = detected.length > answerIntents.length && answerIntents.length === 1
+      ? buildInstantSalesDecision({
+        ...args,
+        text: intentProbeText({ intent: answerIntents[0], originalText: args.text, state: args.state, aiIntent: args.aiIntent }),
+        aiIntent: { ...(args.aiIntent || {}), intent: answerIntents[0], questionIntents: [answerIntents[0]] }
+      })
+      : baseDecision;
+    return { ...collapsedDecision, answeredQuestionKeys: detected.length ? detected : undefined };
+  }
+  const decisions = answerIntents.map(intent => buildInstantSalesDecision({
     ...args,
     text: intentProbeText({ intent, originalText: args.text, state: args.state, aiIntent: args.aiIntent }),
     aiIntent: { ...(args.aiIntent || {}), intent, questionIntents: [intent] }
   })).filter(decision => decision?.handled && clean(decision.text));
   const buyingSignalIntents = new Set(['MONTHLY_INSTALMENT', 'DEPOSIT', 'TENURE', 'INTEREST_RATE', 'PRODUCT_COLOUR', 'PRODUCT_STORAGE', 'DRIVING_LICENCE_ELIGIBILITY', 'DOCUMENT_REQUIREMENTS', 'SHOP_LOAN', 'PROCESSING_TIME']);
-  const shouldAdvanceToDocuments = detected.some(intent => buyingSignalIntents.has(intent)) && !detected.includes('DOCUMENT_STATUS');
+  const shouldAdvanceToDocuments = answerIntents.some(intent => buyingSignalIntents.has(intent)) && !answerIntents.includes('DOCUMENT_STATUS');
   const answerParts = boundedUnique(decisions.map(decision => declarativeReplyPart(
     shouldAdvanceToDocuments ? withoutDocumentSalesAdvance(decision.text) : decision.text
   )).filter(Boolean), 8);
@@ -2886,13 +2911,13 @@ export function buildMultiQuestionSalesDecision(args = {}) {
   const language = instantLanguage(args.text, args.state || {});
   const documentAdvance = shouldAdvanceToDocuments ? instantCopy(language, 'APPLY') : '';
   const combinedAnswer = [...answerParts, documentAdvance].filter(Boolean).join(' ').slice(0, 760).trim();
-  const continuation = profileContinuation({
-    language,
-    state: args.state || {},
-    lead: args.lead || {},
-    baseText: combinedAnswer,
-    completeStep: clean(baseDecision.nextStep) || clean(args.state?.['Current Step']) || 'STEP_03_PRODUCT'
-  });
+  // Multi-question replies already contain the requested facts and, where
+  // appropriate, one document CTA. Never append an unrelated onboarding
+  // question to the same message.
+  const continuation = {
+    nextStep: shouldAdvanceToDocuments ? 'STEP_04_DOCUMENTS' : clean(baseDecision.nextStep) || clean(args.state?.['Current Step']) || 'STEP_03_PRODUCT',
+    text: combinedAnswer
+  };
   const productDecision = decisions.find(decision => decision.product) || baseDecision;
   return {
     ...baseDecision,
