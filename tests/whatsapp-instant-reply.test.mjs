@@ -23,6 +23,7 @@ import {
   CREDIT_CONSENT_TEMPLATE_URL,
   customerAskedQuestion,
   detectCustomerQuestionIntents,
+  effectiveConversationStep,
   enforceConversationReplyContract,
   extractCustomerName,
   guardConversationProgress,
@@ -704,6 +705,59 @@ test('a pure greeting asks for the customer name before the location', () => {
   assert.equal(location.nextStep, 'STEP_03_PRODUCT');
   assert.equal(location.location.branchId, 'BR-WM-PJ');
   assert.match(location.text, /motor atau telefon/i);
+});
+
+test('the last question shown to the customer repairs stale onboarding steps', () => {
+  const staleNameState = {
+    'Current Step': 'STEP_01_NAME',
+    'Last AI Message': 'Untuk Yamaha Y15 SE Standard, ansuran 5 tahun ialah RM285 sebulan. Anda tinggal di bandar atau negeri mana?'
+  };
+  assert.equal(effectiveConversationStep(staleNameState), 'STEP_02_LOCATION');
+  const incompleteLocation = buildInstantSalesDecision({
+    state: staleNameState,
+    text: 'bandar',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    aiIntent: { intent: 'PROVIDE_NAME', customerName: 'bandar', language: 'MS' }
+  });
+  assert.equal(incompleteLocation.nextStep, 'STEP_02_LOCATION');
+  assert.equal(incompleteLocation.locationClarificationIntent, true);
+  assert.match(incompleteLocation.text, /nama bandar atau negeri/i);
+  assert.doesNotMatch(incompleteLocation.text, /nama anda|pengurus/i);
+
+  const staleLocationState = {
+    'Current Step': 'STEP_02_LOCATION',
+    'Last AI Message': 'Maaf, boleh saya tahu nama anda supaya saya boleh teruskan semakan?'
+  };
+  assert.equal(effectiveConversationStep(staleLocationState), 'STEP_01_NAME');
+  const name = buildInstantSalesDecision({ state: staleLocationState, text: 'Jack', messageType: 'text' });
+  assert.equal(name.customerName, 'Jack');
+  assert.equal(name.nextStep, 'STEP_02_LOCATION');
+});
+
+test('an incomplete location reply stays helpful even when the customer is frustrated', () => {
+  const state = {
+    'Current Step': 'STEP_01_NAME',
+    'Customer Name': 'Jack',
+    'Last AI Message': 'Salam kenal, Jack. Anda tinggal di bandar atau negeri mana?'
+  };
+  const decision = buildInstantSalesDecision({
+    state,
+    lead: { 'Customer Name': 'Jack' },
+    text: 'tinggal di bandar bodoh',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    aiIntent: { intent: 'FRUSTRATED', language: 'MS' }
+  });
+  const protectedReply = enforceConversationReplyContract({
+    state: { ...state, 'Last AI Message': decision.text }, text: 'bandar la', decision
+  });
+  assert.equal(decision.locationClarificationIntent, true);
+  assert.equal(decision.humanFollowUpRequired, undefined);
+  assert.match(decision.text, /Kuching.*Bintulu.*Petaling Jaya/i);
+  assert.doesNotMatch(decision.text, /pengurus|soalan asal/i);
+  assert.equal(protectedReply.replyContractRecovered, undefined);
+  assert.doesNotMatch(protectedReply.text, /pengurus/i);
 });
 
 test('a known returning customer gets a useful question instead of a stripped greeting', () => {
