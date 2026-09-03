@@ -186,6 +186,7 @@
       const button = form.querySelector('[type=submit]'), message = document.getElementById('formMessage'), values = Object.fromEntries(new FormData(form)), photo = form.photo.files[0];
       delete values.photo;
       values.businessUnit = selectedUnit && editing ? selectedUnit : form.businessUnit.value;
+      if (photo && canDirectPublish()) values.imageApproved = 'FALSE';
       try { if (photo) { validateBrowserFile(photo, { imageOnly: true }); if (!['image/jpeg', 'image/png', 'image/webp'].includes(String(photo.type || '').toLowerCase())) throw new Error('Use a JPG, PNG or WebP product photo so WhatsApp can display it.'); } }
       catch (error) { message.textContent = error.message; return; }
       button.disabled = true;
