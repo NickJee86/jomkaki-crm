@@ -1053,9 +1053,14 @@ const explicitCustomerName = ({ text = '', aiIntent = null, currentStep = '' } =
   return '';
 };
 
-export function buildProgressiveProfileChanges({ text = '', aiIntent = null, state = {}, lead = {}, application = {}, currentStep = '', routeBusinessUnit = '', branches = [] } = {}) {
+export function buildProgressiveProfileChanges({ text = '', aiIntent = null, state = {}, lead = {}, application = {}, currentStep = '', routeBusinessUnit = '', branches = [], suppressPlainName = false } = {}) {
   const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
-  const customerName = explicitCustomerName({ text, aiIntent, currentStep });
+  // A short model/variant clarification such as "SE", "Pro" or "Street" can
+  // look like a person's name while the lead is still in onboarding. Product
+  // routing gets first priority; only an explicitly introduced name should be
+  // captured on those turns.
+  const profileIntent = suppressPlainName && aiIntent ? { ...aiIntent, customerName: '' } : aiIntent;
+  const customerName = explicitCustomerName({ text, aiIntent: profileIntent, currentStep: suppressPlainName ? 'STEP_03_PRODUCT' : currentStep });
   const locationQuery = clean(aiIntent?.locationQuery);
   const location = locationQuery
     ? resolveCustomerLocation(locationQuery, unit, branches)
@@ -2455,10 +2460,52 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const storedSelectedProduct = catalogPool.find(row => normalizedWords(row.Model) === selectedModel
     && (!selectedBrand || normalizedWords(row.Brand) === selectedBrand)
     && (!selectedVariant || normalizedWords(row.Variant) === selectedVariant));
-  const deterministicProductMatch = matchInstantProduct(text, catalogPool);
+  const directProductMatch = matchInstantProduct(text, catalogPool);
+  const previousProductMatch = previousCustomerText ? matchInstantProduct(previousCustomerText, catalogPool) : { product: null, options: [], ambiguous: false };
+  const previousAssistantRequestedModelChoice = /(?:maksud anda|did you mean|adakah anda maksudkan|pilih satu|choose one|which one|您是指|你是指|请选择|請選擇)/i.test(clean(state['Last AI Message']));
+  const shortClarificationReply = previousCustomerText
+    && normalizedWords(previousCustomerText) !== normalizedWords(text)
+    && previousCustomerText.length <= 100
+    && clean(text).length > 0
+    && clean(text).length <= 40;
+  const clarificationContextAllowed = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
+    || previousAssistantRequestedModelChoice
+    || previousProductMatch.ambiguous;
+  const rawContextualProductText = `${previousCustomerText} ${clean(text)}`.trim();
+  const rawContextualProductMatch = shortClarificationReply && clarificationContextAllowed
+    ? matchInstantProduct(rawContextualProductText, catalogPool)
+    : { product: null, options: [], ambiguous: false };
+  const previousOptionKeys = new Set(previousProductMatch.options.map(normalizedWords));
+  const clarificationTokens = normalizedWords(text).split(' ')
+    .filter(token => token.length >= 2 && !['yang', 'itu', 'ini', 'ni', 'model', 'satu', 'the', 'one'].includes(token));
+  const narrowedOptionRows = shortClarificationReply && previousOptionKeys.size && clarificationTokens.length
+    ? catalogPool.filter(row => {
+      const label = normalizedWords(customerProductLabel(row));
+      if (!previousOptionKeys.has(label)) return false;
+      const searchable = normalizedWords([row.Brand, row.Model, row.Variant, row['Search Keywords']].filter(Boolean).join(' '));
+      return clarificationTokens.every(token => includesTerm(searchable, token));
+    })
+    : [];
+  const optionNarrowedMatch = narrowedOptionRows.length === 1
+    ? { product: narrowedOptionRows[0], options: [], ambiguous: false }
+    : narrowedOptionRows.length > 1
+      ? { product: null, options: narrowedOptionRows.map(customerProductLabel), ambiguous: true }
+      : { product: null, options: [], ambiguous: false };
+  const contextualProductMatch = rawContextualProductMatch.product && !rawContextualProductMatch.ambiguous
+    ? rawContextualProductMatch
+    : optionNarrowedMatch.product || optionNarrowedMatch.ambiguous
+      ? optionNarrowedMatch
+      : rawContextualProductMatch;
+  const resolvedFromClarification = !!contextualProductMatch.product
+    && !contextualProductMatch.ambiguous
+    && (!directProductMatch.product || directProductMatch.ambiguous);
+  const productQuestionText = resolvedFromClarification
+    ? `${customerProductLabel(contextualProductMatch.product)} ${previousCustomerText} ${clean(text)}`.trim()
+    : text;
+  const deterministicProductMatch = resolvedFromClarification ? contextualProductMatch : directProductMatch;
   const optionProduct = deterministicProductMatch.product || storedSelectedProduct;
-  const colourQuestion = interpretedIntent === 'PRODUCT_COLOUR' || asksForProductColour(text);
-  const storageQuestion = interpretedIntent === 'PRODUCT_STORAGE' || asksForProductStorage(text);
+  const colourQuestion = interpretedIntent === 'PRODUCT_COLOUR' || asksForProductColour(productQuestionText);
+  const storageQuestion = interpretedIntent === 'PRODUCT_STORAGE' || asksForProductStorage(productQuestionText);
   if (storageQuestion && !optionProduct && handphoneCatalog.some(approvedCatalogRow)) {
     const overview = approvedPhoneStorageOverview(handphoneCatalog);
     if (overview) return {
@@ -2475,7 +2522,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     const phoneOptions = approvedPhoneOptions(optionProduct, familyCatalog);
     const hasColours = phoneOptions.colours.length > 0, hasStorage = phoneOptions.storage.length > 0;
     const requestedBoth = colourQuestion && storageQuestion;
-    const requestedStorage = requestedProductStorage(text);
+    const requestedStorage = requestedProductStorage(productQuestionText);
     const requestedStorageAvailable = requestedStorage && phoneOptions.storage.some(value => normalizedWords(value) === normalizedWords(requestedStorage));
     const copyKey = requestedBoth && hasColours && hasStorage
       ? 'COLOUR_STORAGE_OPTIONS'
@@ -2503,10 +2550,10 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   }
   const requestedTenure = aiIntent?.tenureYears
     ? (canonicalBusinessUnit(explicitUnit || fallbackUnit || routeBusinessUnit) === 'HANDPHONE' ? `${Number(aiIntent.tenureYears) * 12} months` : `${aiIntent.tenureYears} years`)
-    : requestedMonthlyTenure(text, fallbackUnit || routeBusinessUnit);
-  const cashPriceQuestion = interpretedIntent === 'CASH_PRICE' || asksForCashPrice(text);
-  const depositQuestion = interpretedIntent === 'DEPOSIT' || asksForDeposit(text);
-  const monthlyQuestion = interpretedIntent === 'MONTHLY_INSTALMENT' || asksForMonthlyInstalment(text);
+    : requestedMonthlyTenure(productQuestionText, fallbackUnit || routeBusinessUnit);
+  const cashPriceQuestion = interpretedIntent === 'CASH_PRICE' || asksForCashPrice(productQuestionText);
+  const depositQuestion = interpretedIntent === 'DEPOSIT' || asksForDeposit(productQuestionText);
+  const monthlyQuestion = interpretedIntent === 'MONTHLY_INSTALMENT' || asksForMonthlyInstalment(productQuestionText);
   if (cashPriceQuestion && !optionProduct) {
     const unit = explicitUnit || fallbackUnit || 'MOTOR';
     return {
@@ -2559,26 +2606,17 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   const aiSelectedProduct = clean(aiIntent?.catalogId)
     ? allCatalogs.find(row => clean(row['Catalog ID']) === clean(aiIntent.catalogId))
     : null;
-  const explicitModelCodeSignal = normalizedWords(text).split(' ').some(word => /(?:[a-z]\d|\d[a-z])/i.test(word))
-    || /\b\d{2,4}\b/.test(normalizedWords(text));
+  const explicitModelCodeSignal = normalizedWords(productQuestionText).split(' ').some(word => /(?:[a-z]\d|\d[a-z])/i.test(word))
+    || /\b\d{2,4}\b/.test(normalizedWords(productQuestionText));
   const safeAiSelectedProduct = aiSelectedProduct
-    && (!explicitModelCodeSignal || !!matchInstantProduct(text, [aiSelectedProduct]).product)
+    && (!explicitModelCodeSignal || !!matchInstantProduct(productQuestionText, [aiSelectedProduct]).product)
     ? aiSelectedProduct
     : null;
-  let productMatch = deterministicProductMatch.product || deterministicProductMatch.ambiguous
+  const productMatch = deterministicProductMatch.product || deterministicProductMatch.ambiguous
     ? deterministicProductMatch
     : safeAiSelectedProduct
       ? { product: safeAiSelectedProduct, options: [], ambiguous: false }
-      : matchInstantProduct(explicitModelCodeSignal ? text : (aiIntent?.normalizedModel || text), catalogPool);
-  const mayContinueClarification = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(step)
-    && previousCustomerText && previousCustomerText !== clean(text)
-    && previousCustomerText.length <= 80 && clean(text).length <= 40
-    && !requestedTenure && !interpretedIntent && (!productMatch.product || productMatch.ambiguous);
-  if (mayContinueClarification) {
-    const contextualMatch = matchInstantProduct(`${previousCustomerText} ${text}`, catalogPool);
-    if (contextualMatch.product && !contextualMatch.ambiguous) productMatch = contextualMatch;
-    else if (contextualMatch.ambiguous && (!productMatch.ambiguous || contextualMatch.options.length < productMatch.options.length)) productMatch = contextualMatch;
-  }
+      : matchInstantProduct(explicitModelCodeSignal ? productQuestionText : (aiIntent?.normalizedModel || productQuestionText), catalogPool);
   let product = productMatch.product;
   let unit = clean(product?.__businessUnit).toUpperCase() || explicitUnit || fallbackUnit || 'MOTOR';
   let pricing = unit === 'HANDPHONE' ? handphonePricing : motorPricing;
@@ -2591,7 +2629,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
   }
   if (product) {
     const pricingRegion = lead.Region || routeRegion;
-    if (asksProductAvailability(text)) {
+    if (asksProductAvailability(productQuestionText)) {
       const sameSelectedProduct = normalizedWords(product.Model) === selectedModel
         && (!selectedBrand || normalizedWords(product.Brand) === selectedBrand)
         && (!selectedVariant || normalizedWords(product.Variant) === selectedVariant);
@@ -3255,7 +3293,8 @@ export default async function handler(req, res) {
           lead: lead || {},
           currentStep,
           routeBusinessUnit,
-          branches
+          branches,
+          suppressPlainName: !!instantDecision.productIntent
         });
         if (!instantDecision.location && progressiveProfile.location) instantDecision = { ...instantDecision, location: progressiveProfile.location };
         if (progressiveProfile.customerName && ['STEP_01_WELCOME', 'STEP_01_NAME'].includes(clean(instantDecision.nextStep).toUpperCase())) {

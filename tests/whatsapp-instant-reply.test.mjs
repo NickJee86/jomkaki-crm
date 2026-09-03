@@ -1283,6 +1283,35 @@ test('short clarification answers are combined with the previous customer model 
   assert.doesNotMatch(decision.text, /Gear Hybrid|Pilih satu/i);
 });
 
+test('a short model choice outranks stale name onboarding and is never saved as the customer name', () => {
+  const catalog = [
+    { 'Catalog ID': 'MTR-YAM-Y15SE', Brand: 'Yamaha', Model: 'Y15 SE', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15-se.jpg', 'Search Keywords': 'yamaha y15 y15 se' },
+    { 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'TRUE', 'Approval Status': 'APPROVED', 'Search Keywords': 'yamaha y15 y15zr y15 zr' }
+  ];
+  const state = {
+    'Current Step': 'STEP_01_NAME',
+    'Product Category': 'MOTOR',
+    'Last Customer Message': 'Y15 ada stock tak?',
+    'Last AI Message': 'Maksud anda Yamaha Y15 SE Standard atau Yamaha Y15ZR Standard? Pilih satu ya supaya saya boleh hantar gambar dan ansuran bulanan yang betul.'
+  };
+  const aiIntent = { intent: 'PROVIDE_NAME', customerName: 'SE', language: 'MS' };
+  const decision = buildInstantSalesDecision({
+    state, text: 'SE', messageType: 'text', routeBusinessUnit: 'MOTOR', motorCatalog: catalog, aiIntent
+  });
+  assert.equal(decision.product.Model, 'Y15 SE');
+  assert.equal(decision.stockIntent, true);
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15-se.jpg');
+  assert.match(decision.text, /Y15 SE/);
+  assert.doesNotMatch(decision.text, /Salam kenal, SE|bandar atau negeri/i);
+
+  const profile = buildProgressiveProfileChanges({
+    state, currentStep: state['Current Step'], text: 'SE', routeBusinessUnit: 'MOTOR', aiIntent,
+    suppressPlainName: !!decision.productIntent
+  });
+  assert.equal(profile.customerName, '');
+  assert.equal(profile.stateChanges['Customer Name'], undefined);
+});
+
 test('a tenure follow-up answers only the requested monthly rate without resending the product image', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Ego Gear', 'Last Customer Message': 'ego gear' },
