@@ -62,6 +62,7 @@ export const APPROVED_RUNTIME_KNOWLEDGE = Object.freeze({
     'Active plus Approved catalogue status means the product is available stock for customer conversations. Pricing completeness is separate and must never hide an approved model from an availability list.',
     'A correction, typo, shorthand, changed preference or follow-up continues the same conversation and must never restart onboarding or the model question.',
     'Ask at most one useful next question, preserve prior answers and never save a greeting, question, location or model as the customer name.',
+    'A city followed by wording such as ada buat tak, cover tak, boleh apply or ada servis is a service-coverage question. Answer the coverage directly, preserve the known product category and never treat the city as the customer name.',
     'Interpret safe typos and short forms from context, but never invent a model, price, promotion, image, colour or stock status.',
     'When the customer is frustrated, acknowledge briefly, answer the real question and use controlled human takeover only when required.',
     'A topic switch is normal: answer the new topic first, retain the saved application stage and resume the most useful next step without restarting.',
@@ -358,6 +359,10 @@ export const JOMKAKI_KNOWLEDGE = Object.freeze({
     livePricesExcluded: true,
     syncWarnings: freezeList(Array.isArray(NOTION_SYNCED_KNOWLEDGE?.warnings) ? NOTION_SYNCED_KNOWLEDGE.warnings : [])
   }),
+  serviceAreas: freezeList([
+    'Kuala Lumpur', 'Selangor', 'Klang Valley', 'Seremban', 'Nilai', 'Penang',
+    'Kuching', 'Serian', 'Sri Aman', 'Sibu', 'Bintulu', 'Miri'
+  ]),
   conversation: Object.freeze({
     defaultLanguage: 'MS',
     targetReplySeconds: 5,

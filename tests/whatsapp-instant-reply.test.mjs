@@ -532,7 +532,77 @@ test('sales onboarding safely captures the customer name', () => {
   assert.equal(extractCustomerName('apa model motor ada'), '');
   assert.equal(extractCustomerName('berapa ansuran bulanan'), '');
   assert.equal(usableCustomerName('apa model motor ada'), '');
+  for (const location of ['Miri', 'Kuching', 'Sibu', 'Bintulu', 'Kuala Lumpur', 'Penang', 'Johor Bahru']) {
+    assert.equal(extractCustomerName(location), '', location);
+  }
   assert.equal(extractCustomerName('hi'), '');
+});
+
+test('location entities always outrank AI name guesses and preserve the active product context', () => {
+  const state = {
+    'Current Step': 'STEP_02_LOCATION',
+    'Product Category': 'MOTOR',
+    'Last Customer Message': 'motor model apa yg ada skg',
+    'Last AI Message': 'Model motor yang ada sekarang:'
+  };
+  const wrongAiIntent = {
+    intent: 'PROVIDE_NAME',
+    customerName: 'Miri',
+    businessUnit: 'HANDPHONE',
+    language: 'MS',
+    confidence: 0.99
+  };
+  const decision = buildInstantSalesDecision({
+    state,
+    text: 'miri ada buat tak',
+    messageType: 'text',
+    routeBusinessUnit: 'MOTOR',
+    aiIntent: wrongAiIntent
+  });
+
+  assert.equal(customerAskedQuestion('miri ada buat tak'), true);
+  assert.ok(detectCustomerQuestionIntents('miri ada buat tak').includes('BRANCH_LOCATION'));
+  assert.equal(decision.serviceCoverageIntent, true);
+  assert.equal(decision.productUnit, 'MOTOR');
+  assert.equal(decision.nextStep, 'STEP_03_PRODUCT');
+  assert.equal(decision.location.city, 'Miri');
+  assert.match(decision.text, /Miri.*kawasan servis.*motor/i);
+  assert.doesNotMatch(decision.text, /motor atau telefon|nama anda|bandar atau negeri/i);
+
+  const profile = buildProgressiveProfileChanges({
+    state,
+    text: 'miri ada buat tak',
+    currentStep: 'STEP_02_LOCATION',
+    routeBusinessUnit: 'MOTOR',
+    aiIntent: wrongAiIntent,
+    suppressPlainName: true
+  });
+  assert.equal(profile.customerName, '');
+  assert.equal(profile.leadChanges['Customer Name'], undefined);
+  assert.equal(profile.location.city, 'Miri');
+  assert.equal(profile.leadChanges['City or Area'], 'Miri');
+});
+
+test('service coverage understands Malaysian shorthand across approved and unconfirmed areas', () => {
+  const approved = [
+    ['sibu cover tak', 'Sibu'],
+    ['penang boleh apply ka', 'Penang'],
+    ['kch ada service tak', 'Kuching'],
+    ['bintulu ada buat ke', 'Bintulu']
+  ];
+  for (const [text, area] of approved) {
+    const decision = buildInstantSalesDecision({ state: { 'Product Category': 'MOTOR' }, text, routeBusinessUnit: 'MOTOR' });
+    assert.equal(decision.serviceCoverageIntent, true, text);
+    assert.equal(decision.productUnit, 'MOTOR', text);
+    assert.match(decision.text, new RegExp(area, 'i'), text);
+    assert.doesNotMatch(decision.text, /motor atau telefon|nama anda/i, text);
+  }
+
+  const unconfirmed = buildInstantSalesDecision({ state: { 'Product Category': 'HANDPHONE' }, text: 'johor ada buat tak', routeBusinessUnit: 'HANDPHONE' });
+  assert.equal(unconfirmed.serviceCoverageIntent, true);
+  assert.equal(unconfirmed.productUnit, 'HANDPHONE');
+  assert.match(unconfirmed.text, /Johor.*semak.*permohonan.*penghantaran.*telefon/i);
+  assert.doesNotMatch(unconfirmed.text, /motor atau telefon|nama anda/i);
 });
 
 test('a polluted customer-name field is quarantined and can never enter the greeting', () => {

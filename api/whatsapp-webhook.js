@@ -589,6 +589,14 @@ const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
 };
 
 const INVALID_CUSTOMER_NAME_WORDS = /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|bagaimana|macam mana|model|motor|moto|motorcycle|motosikal|telefon|phone|handphone|iphone|harga|price|ansuran|monthly|loan|pinjaman|kedai|dokumen|document|promosi|promotion|cash|tunai|deposit|depo|tinggal|bandar|negeri|lokasi|location|cari|mahu|nak|boleh|ada|yamaha|honda|sym|moda|nmax|xmax|y16|y16zr)\b/i;
+const KNOWN_LOCATION_ONLY_NAMES = new Set([
+  'sarawak', 'kuching', 'kch', 'batu kawa', 'satok', 'samarahan', 'kota samarahan', 'bintulu', 'miri', 'sibu', 'serian', 'sri aman',
+  'sabah', 'kota kinabalu', 'kk', 'sandakan', 'tawau', 'lahad datu', 'labuan',
+  'selangor', 'petaling jaya', 'pj', 'shah alam', 'klang', 'klang valley', 'kuala lumpur', 'kl',
+  'negeri sembilan', 'seremban', 'nilai', 'penang', 'pulau pinang', 'johor', 'johor bahru', 'jb',
+  'perak', 'ipoh', 'melaka', 'malacca', 'kedah', 'alor setar', 'pahang', 'kuantan', 'kelantan',
+  'kota bharu', 'terengganu', 'kuala terengganu', 'perlis', 'putrajaya'
+]);
 
 export function extractCustomerName(value = '') {
   let candidate = clean(value)
@@ -597,6 +605,7 @@ export function extractCustomerName(value = '') {
   const normalized = normalizedWords(candidate);
   if (!candidate || candidate.length < 2 || candidate.length > 60) return '';
   if (/\d/.test(candidate) || candidate.split(/\s+/).length > 5) return '';
+  if (KNOWN_LOCATION_ONLY_NAMES.has(normalized)) return '';
   if (/^(hi|hello|hey|hai|morning|afternoon|evening|yes|no|ok|okay|motor|moto|phone|iphone|handphone|yamaha|honda)$/i.test(normalized)) return '';
   if (INVALID_CUSTOMER_NAME_WORDS.test(normalized)) return '';
   if (!/^[\p{L}][\p{L}'’ -]*$/u.test(candidate)) return '';
@@ -622,6 +631,43 @@ const stateAliases = [
   ['WEST_MALAYSIA', 'Putrajaya', ['putrajaya']]
 ];
 const includesTerm = (text, term) => (` ${text} `).includes(` ${normalizedWords(term)} `);
+const SERVICE_AREA_ALIASES = Object.freeze({
+  'Kuala Lumpur': ['kuala lumpur', 'kl'],
+  Selangor: ['selangor'],
+  'Klang Valley': ['klang valley'],
+  Seremban: ['seremban'],
+  Nilai: ['nilai'],
+  Penang: ['penang', 'pulau pinang'],
+  Kuching: ['kuching', 'kch'],
+  Serian: ['serian'],
+  'Sri Aman': ['sri aman'],
+  Sibu: ['sibu'],
+  Bintulu: ['bintulu'],
+  Miri: ['miri']
+});
+
+const confirmedServiceAreaFromText = value => {
+  const text = normalizedWords(value);
+  if (!text) return '';
+  const approvedAreas = Array.isArray(JOMKAKI_KNOWLEDGE.serviceAreas) ? JOMKAKI_KNOWLEDGE.serviceAreas : [];
+  const match = approvedAreas
+    .flatMap(area => (SERVICE_AREA_ALIASES[area] || [area]).map(alias => ({ area, alias, score: normalizedWords(alias).length })))
+    .filter(item => includesTerm(text, item.alias))
+    .sort((left, right) => right.score - left.score)[0];
+  return clean(match?.area);
+};
+
+const knownLocationFromText = value => {
+  const text = normalizedWords(value);
+  if (!text) return null;
+  const match = stateAliases
+    .flatMap(([region, state, aliases]) => aliases.map(alias => ({ region, state, alias, score: normalizedWords(alias).length })))
+    .filter(item => includesTerm(text, item.alias))
+    .sort((left, right) => right.score - left.score)[0];
+  if (!match) return null;
+  const area = ({ kch: 'kuching', kk: 'kota kinabalu', kl: 'kuala lumpur', pj: 'petaling jaya', jb: 'johor bahru' })[normalizedWords(match.alias)] || match.alias;
+  return { ...match, area: area.replace(/\b\w/g, letter => letter.toUpperCase()) };
+};
 
 const DEFAULT_BRANCH_DIRECTORY = Object.freeze([
   Object.freeze({ 'Branch ID': 'BR-SWK-STK', 'Branch Name': 'Kuching Satok branch', Region: 'EAST_MALAYSIA', State: 'Sarawak', City: 'Kuching', 'Direct Coverage Areas': 'Satok|Jalan Kulas|Kampung Bandarshah', 'Branch Address': 'LOT 442, Ground Floor Section 11, KTLD, Jln Kulas, Kampung Bandarshah, 93400 Kuching, Sarawak', Active: 'TRUE' }),
@@ -882,6 +928,8 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_ADDRESS: `Sure. Here is the address for ${branch}:\n${address}${googleMapsUrl ? `\nGoogle Maps: ${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze: ${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `Our recorded branches or service coverage include ${branches}. Which city or state are you in so I can identify the nearest one?`,
       BRANCH_LOCATION_NEEDED: 'We provide service in East and West Malaysia, but the nearest branch depends on your area. Which city or state are you in?',
+      SERVICE_AREA_AVAILABLE: `Yes, ${area} is within JomKaki Rider's service coverage for ${category} applications. Choose a model from the list above and I will check the monthly plan for you.`,
+      SERVICE_AREA_CHECK: `I can check whether a ${category} application and delivery can be arranged for ${area}. Send me your exact area or postcode and I will verify the coverage without making you repeat the product type.`,
       FOLLOW_UP_TIME: 'The branch price check is still in progress. While waiting, I can help you check the approved shop-loan deposit and monthly instalment. Would you like to proceed with the shop-loan check?',
       LOAN_PROCESSING_TIME: 'Shop-loan processing normally takes 1–3 working days after complete documents are received, subject to eligibility checks and verification. To start, send your MyKad front and back plus your latest payslip or EPF statement; everything together or whatever you have first is fine.',
       HANDPHONE_CASH_POLICY: 'For phones, I can only share the approved monthly instalment. The cash or selling price is not quoted to customers.',
@@ -949,6 +997,8 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_ADDRESS: `Boleh. Ini alamat ${branch}:\n${address}${googleMapsUrl ? `\nGoogle Maps: ${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze: ${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `Cawangan atau liputan servis yang direkodkan termasuk ${branches}. Anda berada di bandar atau negeri mana supaya saya boleh tentukan yang paling dekat?`,
       BRANCH_LOCATION_NEEDED: 'Kami ada liputan di Malaysia Timur dan Barat, tetapi cawangan terdekat bergantung pada kawasan anda. Anda berada di bandar atau negeri mana?',
+      SERVICE_AREA_AVAILABLE: `Ya, ${area} memang dalam kawasan servis JomKaki Rider untuk permohonan ${category}. Pilih saja model daripada senarai tadi, saya terus semak ansuran untuk anda.`,
+      SERVICE_AREA_CHECK: `Untuk ${area}, saya boleh semak sama ada permohonan dan penghantaran ${category} boleh diurus. Hantar kawasan penuh atau poskod anda, saya sahkan liputan tanpa tanya semula jenis produk.`,
       FOLLOW_UP_TIME: 'Semakan harga oleh cawangan masih berjalan. Sementara menunggu, saya boleh terus bantu semak deposit dan ansuran bulanan loan kedai yang diluluskan. Mahu teruskan semakan loan kedai?',
       LOAN_PROCESSING_TIME: 'Proses Loan Kedai biasanya 1–3 hari bekerja selepas dokumen lengkap diterima, bergantung pada semakan kelayakan dan pengesahan. Untuk mula, hantar IC depan, IC belakang dan slip gaji terkini atau penyata EPF; semua sekali atau yang ada dahulu pun boleh.',
       HANDPHONE_CASH_POLICY: 'Untuk telefon, saya hanya boleh berikan ansuran bulanan yang diluluskan. Harga tunai atau harga jualan tidak diberikan kepada pelanggan.',
@@ -1006,6 +1056,8 @@ const instantCopy = (language, key, values = {}) => {
       BRANCH_ADDRESS: `可以，这是${branch}的地址：\n${address}${googleMapsUrl ? `\nGoogle Maps：${googleMapsUrl}` : ''}${wazeUrl ? `\nWaze：${wazeUrl}` : ''}`,
       BRANCH_OPTIONS: `目前记录的分行或服务范围包括 ${branches}。请问你在哪个城市或州属？我才能确认最近的地点。`,
       BRANCH_LOCATION_NEEDED: '我们在东马和西马都有服务范围，最近的分行需要根据你的地区确认。请问你在哪个城市或州属？',
+      SERVICE_AREA_AVAILABLE: `有，JomKaki Rider 在 ${area} 提供${category}申请服务。你从刚才的清单选一个型号，我直接帮你查询月供。`,
+      SERVICE_AREA_CHECK: `关于 ${area}，我可以查询是否能安排${category}申请与送货。请发具体地区或邮编，我会直接确认服务范围，不会再问产品类别。`,
       INTEREST_RATE: 'JomKaki Rider 店内贷款采用 Hire Purchase，每年利率为 10%。实际月供以获批型号、首付及年期为准。要开始审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录。',
       DRIVING_LICENCE_ELIGIBILITY: '还没有驾照也可以先申请，最终资格仍需审核。要开始审核，请发送 MyKad 正反面，以及最新薪水单或 EPF 记录；可以一次发送全部，或先发送目前有的文件。',
       COLOUR_OPTIONS: `${brand} ${model} 已获批目录中的颜色有：${colours}。`,
@@ -1055,28 +1107,33 @@ const profileContinuation = ({ language = 'MS', state = {}, lead = {}, baseText 
 export function customerAskedQuestion(value = '') {
   const text = normalizedWords(value);
   if (!text) return false;
-  return /[?？]/.test(clean(value)) || /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|macam mana|bagaimana|adakah|boleh tak|boleh ke|what|which|when|where|why|how|can i|can you|do you|is there|are there)\b/i.test(text);
+  return /[?？]/.test(clean(value))
+    || /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|macam mana|bagaimana|adakah|boleh tak|boleh ke|what|which|when|where|why|how|can i|can you|do you|is there|are there)\b/i.test(text)
+    || /\b(?:ada|boleh|can)\b.{0,35}\b(?:tak|ke|ka|kah)\b/i.test(text);
 }
 
 const explicitCustomerName = ({ text = '', aiIntent = null, currentStep = '' } = {}) => {
-  const aiName = usableCustomerName(aiIntent?.customerName);
-  if (aiName) return aiName;
   const message = clean(text);
   const explicitMatch = message.match(/(?:nama saya|name is|call me|panggil saya|我叫|我是)\s*[:：-]?\s*([\p{L}][\p{L} .'-]{1,48})/iu);
   if (explicitMatch) return usableCustomerName(explicitMatch[1].replace(/[?？].*$/, ''));
+  // Questions and recognised locations are typed before AI-provided profile
+  // fields. Only an explicit self-introduction above may override this guard.
+  if (customerAskedQuestion(message) || knownLocationFromText(message)) return '';
+  const aiName = usableCustomerName(aiIntent?.customerName);
+  if (aiName) return aiName;
   if (['STEP_01_WELCOME', 'STEP_01_NAME'].includes(clean(currentStep).toUpperCase()) && !customerAskedQuestion(message)) return extractCustomerName(message);
   return '';
 };
 
 export function buildProgressiveProfileChanges({ text = '', aiIntent = null, state = {}, lead = {}, application = {}, currentStep = '', routeBusinessUnit = '', branches = [], suppressPlainName = false } = {}) {
-  const unit = canonicalBusinessUnit(aiIntent?.businessUnit || state['Product Category'] || routeBusinessUnit || lead['Business Unit']) || 'MOTOR';
+  const unit = productUnitFromText(text, '') || canonicalBusinessUnit(state['Product Category'] || routeBusinessUnit || lead['Business Unit'] || aiIntent?.businessUnit) || 'MOTOR';
   // A short model/variant clarification such as "SE", "Pro" or "Street" can
   // look like a person's name while the lead is still in onboarding. Product
   // routing gets first priority; only an explicitly introduced name should be
   // captured on those turns.
   const profileIntent = suppressPlainName && aiIntent ? { ...aiIntent, customerName: '' } : aiIntent;
   const customerName = explicitCustomerName({ text, aiIntent: profileIntent, currentStep: suppressPlainName ? 'STEP_03_PRODUCT' : currentStep });
-  const locationQuery = clean(aiIntent?.locationQuery);
+  const locationQuery = clean(aiIntent?.locationQuery) || (asksForServiceCoverage(text) ? clean(text) : '');
   const location = locationQuery
     ? resolveCustomerLocation(locationQuery, unit, branches)
     : ['STEP_02_LOCATION'].includes(clean(currentStep).toUpperCase()) && !customerAskedQuestion(text)
@@ -1290,7 +1347,7 @@ export function detectCustomerQuestionIntents(value = '') {
   const text = clean(value), intents = [];
   const add = intent => { if (AI_INTENTS.includes(intent) && !intents.includes(intent)) intents.push(intent); };
   if (!text) return intents;
-  if (asksForBranchLocation(text)) add('BRANCH_LOCATION');
+  if (asksForBranchLocation(text) || asksForServiceCoverage(text)) add('BRANCH_LOCATION');
   if (asksForPromotion(text)) add('PROMOTION');
   if (asksForAvailableModels(text)) add('AVAILABLE_MODELS');
   if (asksForOtherModels(text)) add('OTHER_MODELS');
@@ -1493,7 +1550,7 @@ export function buildAiIntentRequest({ text = '', state = {}, lead = {}, applica
     'INTEREST_RATE means the customer asks the Loan Kedai rate or percentage. PRODUCT_COLOUR and PRODUCT_STORAGE mean colour or capacity questions for the current or explicitly named phone model.',
     'DRIVING_LICENCE_ELIGIBILITY means the customer asks whether an application or purchase can start without a driving licence. The approved answer is yes: the application may start, while final eligibility remains subject to checking.',
     'PROCESSING_TIME means the normal Loan Kedai/application processing duration or when a loan result is normally known. FOLLOW_UP_TIME is only for a specific branch price or deposit check that was already queued. Never turn process loan berapa lama into a cash-price confirmation reply.',
-    'BRANCH_LOCATION means the customer asks where a branch, shop, showroom or nearest service point is. It must never be classified as PROVIDE_LOCATION or MODEL_SELECTION, even when a product was discussed in the previous turn.',
+    'BRANCH_LOCATION means the customer asks where a branch, shop or showroom is, or whether JomKaki Rider serves a named city. A phrase such as miri ada buat tak, sibu cover tak or penang boleh apply ka is a service-coverage question: preserve the current product category, set locationQuery to that place, never set customerName, and never ask motorcycle or phone again.',
     'Loan Kedai is the primary sales path. Do not proactively promote cash purchase. Answer an explicit cash-price question only when requested and then guide the customer back toward Loan Kedai.',
     'For sales guidance, use Answer → Understand → Recommend → Prove → Advance. A quotation, deposit, eligibility, processing-time, colour, storage, document or repeated-model question is a buying signal. After answering, move the customer toward the suitable approved Loan Kedai plan and the document-start step.',
     'When a buying signal is present and a model or Loan Kedai interest is clear, suggestedReply should confidently invite the customer to send MyKad front, MyKad back and latest payslip or EPF statement. Explain that the documents start eligibility verification and may be sent together or whatever is available first.',
@@ -1636,6 +1693,13 @@ export async function requestAiFallbackReply({ text = '', state = {}, lead = {},
 const productUnitFromText = (text, fallback = '') => /\b(iphone|phone|handphone|telefon|smartphone)\b/i.test(clean(text)) ? 'HANDPHONE' : /\b(motor|moto|motorcycle|yamaha|honda|sym|moda)\b/i.test(clean(text)) ? 'MOTOR' : canonicalBusinessUnit(fallback);
 const asksForCashPrice = text => /(?:\b(?:harga\s*)?(?:cash|tunai)\b|\bcash\s*price\b|\bprice\s*(?:cash|outright)\b|\bbayar\s*(?:cash|tunai)\b|\bfull\s*payment\b)/i.test(clean(text));
 const asksForBranchLocation = text => /(?:\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b.{0,35}\b(?:mana|dekat|terdekat|nearest|alamat|address|where)\b|\b(?:mana|where)\b.{0,25}\b(?:cawangan|branch|kedai|showroom|lokasi|location)\b|\b(?:kedai|cawangan|branch)\s+(?:kat|dekat)\s+mana\b|\b(?:alamat|address)\b.{0,25}\b(?:cawangan|branch|kedai|showroom)\b|\b(?:cawangan|branch|kedai|showroom)\b.{0,25}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|kuching|satok|samarahan|batu\s+kawa|bintulu)\b|\b(?:alamat|address)\b.{0,30}\b(?:kl|kuala\s+lumpur|pj|petaling\s+jaya|satok|samarahan|batu\s+kawa|bintulu)\b)/i.test(clean(text));
+const asksForServiceCoverage = value => {
+  const text = normalizedWords(value);
+  if (!knownLocationFromText(text)) return false;
+  const serviceLanguage = /\b(?:buat|cover|coverage|liputan|service|servis|apply|mohon|loan|hantar|deliver|delivery|operate|operasi)\b/i.test(text);
+  const availabilityLanguage = /\b(?:ada|boleh|can|available|tak|ke|ka|kah)\b/i.test(text);
+  return serviceLanguage && availabilityLanguage;
+};
 const asksForKnownBranchAddress = text => /(?:\b(?:boleh|blh|can)?\s*(?:bagi|beri|share|send|hantar|give)\s*(?:saya|sy|i|me)?\s*(?:alamat|address)\b|\b(?:alamat|address)\s*(?:penuh|full)?\s*(?:apa|mana|please|pls)?\b)/i.test(clean(text));
 const asksForLoanProcessingTime = text => /(?:\b(?:proses|process|processing|permohonan|application|loan\s*(?:kedai|shop)?)\b.{0,40}\b(?:berapa\s*lama|berapa\s*hari|how\s*long|how\s*many\s*days|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b|\b(?:berapa\s*lama|berapa\s*hari|how\s*long|bila\s*(?:boleh\s*)?(?:tau|tahu|dapat))\b.{0,40}\b(?:proses|process|processing|permohonan|application|loan)\b)/i.test(clean(text));
 const asksHowLongForAnswer = text => /(?:\bberapa\s*lama\b|\bbila\s*(?:boleh\s*)?(?:tau|tahu|dapat)\b|\b(?:nak|mahu)\s*tunggu\s*lama\b|\bhow\s*long\b|\bwhen\s*(?:will|can)\b)/i.test(clean(text));
@@ -2295,6 +2359,28 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     ...motorCatalog.map(row => ({ ...row, __businessUnit: 'MOTOR' })),
     ...handphoneCatalog.map(row => ({ ...row, __businessUnit: 'HANDPHONE' }))
   ].filter(approvedCatalogRow);
+  const serviceArea = confirmedServiceAreaFromText(text);
+  const serviceLocationMention = knownLocationFromText(text);
+  const serviceLocation = serviceLocationMention
+    ? resolveCustomerLocation(serviceLocationMention.area, explicitUnit || fallbackUnit || 'MOTOR', branches)
+    : null;
+  if (serviceLocation && asksForServiceCoverage(text)) {
+    const serviceUnit = productUnitFromText(text, '') || fallbackUnit || canonicalBusinessUnit(aiIntent?.businessUnit) || 'MOTOR';
+    const category = language === 'ZH'
+      ? (serviceUnit === 'HANDPHONE' ? '手机' : '摩托车')
+      : language === 'EN'
+        ? (serviceUnit === 'HANDPHONE' ? 'phone' : 'motorcycle')
+        : (serviceUnit === 'HANDPHONE' ? 'telefon' : 'motor');
+    return {
+      handled: true,
+      serviceCoverageIntent: true,
+      answerCustomerQuestionFirst: true,
+      nextStep: 'STEP_03_PRODUCT',
+      productUnit: serviceUnit,
+      location: serviceLocation,
+      text: instantCopy(language, serviceArea ? 'SERVICE_AREA_AVAILABLE' : 'SERVICE_AREA_CHECK', { area: serviceArea || serviceLocation.city || serviceLocation.state, category })
+    };
+  }
   const selectedModel = normalizedWords(state['Selected Product Model']);
   const selectedBrand = normalizedWords(state['Selected Product Brand']);
   const selectedVariant = normalizedWords(state['Selected Product Variant']);
@@ -3039,7 +3125,7 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
   const priorReply = clean(state['Last AI Message']);
   let reply = stripEmoji(decision.text).replace(/[^\S\r\n]{2,}/g, ' ').replace(/\r?\n[ \t]*/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   const groundedIntentReply = [
-    'availableModelsIntent', 'branchLocationIntent', 'cashPriceIntent', 'combinedApplicationIntent',
+    'availableModelsIntent', 'branchLocationIntent', 'serviceCoverageIntent', 'cashPriceIntent', 'combinedApplicationIntent',
     'documentRequirementsIntent', 'documentStatusIntent', 'interestRateIntent', 'loanKedaiIntent',
     'locationClarificationIntent', 'payslipPeriodIntent', 'productCategoryIntent', 'productIntent', 'productOptionsIntent',
     'promotionIntent', 'shopLoanIntent', 'unlistedProductIntent'
@@ -3069,7 +3155,8 @@ export function enforceConversationReplyContract({ state = {}, text = '', decisi
 }
 
 export function buildDecisionAudit({ decision = {}, aiIntent = null } = {}) {
-  const decisionRoute = decision.branchLocationIntent ? 'BRANCH_LOCATION'
+  const decisionRoute = decision.serviceCoverageIntent ? 'SERVICE_COVERAGE'
+    : decision.branchLocationIntent ? 'BRANCH_LOCATION'
     : decision.cashPriceIntent ? 'CASH_PRICE'
     : decision.productOptionsIntent ? 'PRODUCT_OPTIONS'
     : decision.productIntent ? 'PRODUCT'
@@ -3367,7 +3454,7 @@ export default async function handler(req, res) {
           currentStep,
           routeBusinessUnit,
           branches,
-          suppressPlainName: !!instantDecision.productIntent
+          suppressPlainName: !!(instantDecision.productIntent || instantDecision.location || instantDecision.answerCustomerQuestionFirst || customerAskedQuestion(text))
         });
         if (!instantDecision.location && progressiveProfile.location) instantDecision = { ...instantDecision, location: progressiveProfile.location };
         if (progressiveProfile.customerName && ['STEP_01_WELCOME', 'STEP_01_NAME'].includes(clean(instantDecision.nextStep).toUpperCase())) {
