@@ -2680,7 +2680,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         : requestedRate
         ? profileContinuation({ language, state, lead, baseText, completeStep: step || 'STEP_03_PRODUCT' })
         : { nextStep: 'STEP_03_PRODUCT', text: baseText };
-      const approvedImage = cashPriceQuestion ? '' : approvedImageForNewSelection(selectedProduct);
+      const approvedImage = approvedImageForNewSelection(selectedProduct);
       return {
         handled: true,
         productIntent: true,
@@ -2736,6 +2736,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
     }
     let rate = instantRate(product, pricing, unit, pricingRegion);
     if (cashPriceQuestion) {
+      const approvedImage = approvedImageForNewSelection(product);
       return {
         handled: true,
         productIntent: true,
@@ -2743,6 +2744,7 @@ export function buildInstantSalesDecision({ state = {}, lead = {}, documents = [
         nextStep: step || 'STEP_03_PRODUCT',
         productUnit: unit,
         product,
+        ...(approvedImage ? { imageUrl: approvedImage } : {}),
         text: instantCopy(language, unit === 'HANDPHONE'
           ? 'HANDPHONE_CASH_POLICY'
           : rate?.cashPrice ? 'CASH_PRICE_QUOTE' : 'CASH_PRICE_UNAVAILABLE', {
@@ -3291,6 +3293,7 @@ export default async function handler(req, res) {
     if (!hasFreshInbound && !statusEvents.length) return res.status(200).json({ ok: true, duplicate: true });
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
+    await ensureHeaders(token, 'Customer_Inbox', ['Received At', 'Human Handover At', 'AI Processed At']);
     for (const status of statusEvents) {
       const statusError = clean(status.errors?.[0]?.error_data?.details || status.errors?.[0]?.message || status.errors?.[0]?.title);
       await updateOutboxStatus(token, status.id, status.status, statusError);
@@ -3730,7 +3733,8 @@ export default async function handler(req, res) {
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         const media = message.document || message.image;
         const attachmentUrl = media?.id ? buildMediaProxyUrl({ mediaId: media.id, channelId, credentialKey: route['Credential Key'] || channelId }) : '';
-        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human || instantDecision.humanFollowUpRequired ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? (aiIntent ? 'AI_REPLIED_INTENT_GROUNDED' : instantDecision.aiGenerated ? 'AI_REPLIED_KNOWLEDGE_FALLBACK' : 'AI_REPLIED_INSTANTLY') : 'NEW', 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
+        const inboxProcessStatus = !routeUsable || routeRegion === 'UNASSIGNED' ? 'HUMAN_HANDOVER_REQUIRED' : human || instantDecision.humanFollowUpRequired ? 'HUMAN_HANDOVER_REQUIRED' : mediaInbound ? 'AI_DOCUMENT_QUEUED' : instantResult.sent ? (aiIntent ? 'AI_REPLIED_INTENT_GROUNDED' : instantDecision.aiGenerated ? 'AI_REPLIED_KNOWLEDGE_FALLBACK' : 'AI_REPLIED_INSTANTLY') : 'NEW';
+        await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': inboxProcessStatus, 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Human Handover At': inboxProcessStatus === 'HUMAN_HANDOVER_REQUIRED' ? receivedAt : '', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
           const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';

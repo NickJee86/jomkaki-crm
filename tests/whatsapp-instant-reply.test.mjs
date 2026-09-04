@@ -1301,7 +1301,7 @@ test('instant motor reply sends approved deposit, image and only one monthly ins
   assert.doesNotMatch(decision.text, /satu per satu|one by one/i);
 });
 
-test('cash berapa answers the selected motor cash price without resending its image or loan script', () => {
+test('cash berapa answers the selected motor cash price and recovers a product image that was never sent', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_04_DOCUMENTS', 'Customer Name': 'Amin', 'Product Category': 'MOTOR', 'Selected Product Brand': 'Yamaha', 'Selected Product Model': 'Y15 SE' },
     lead: { 'Customer Name': 'Amin', Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' }, text: 'cash berapa', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
@@ -1309,12 +1309,12 @@ test('cash berapa answers the selected motor cash price without resending its im
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15SE', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Deposit (RM)': '500', 'Product Price (RM)': '9500' }]
   });
   assert.equal(decision.cashPriceIntent, true);
-  assert.equal(decision.imageUrl, undefined);
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15se.jpg');
   assert.match(decision.text, /harga tunai.*RM9500/i);
   assert.doesNotMatch(decision.text, /RM340|deposit|IC|slip gaji|satu per satu/i);
 });
 
-test('a direct motor cash-price question answers once and never attaches the product image', () => {
+test('a direct motor cash-price question answers once and attaches the approved product image', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' }, lead: { Region: 'EAST_MALAYSIA' },
     text: 'Y15 SE cash berapa?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
@@ -1322,7 +1322,7 @@ test('a direct motor cash-price question answers once and never attaches the pro
     motorPricing: [{ 'Catalog ID': 'MTR-YAM-Y15SE', 'Price Zone': 'EAST_MALAYSIA', Active: 'TRUE', 'Quote Approval Status': 'APPROVED', 'Monthly 5 Years (RM)': '340', 'Selling Price (RM)': '9300' }]
   });
   assert.equal(decision.cashPriceIntent, true);
-  assert.equal(decision.imageUrl, undefined);
+  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15se.jpg');
   assert.match(decision.text, /harga tunai.*RM9300/i);
 });
 
