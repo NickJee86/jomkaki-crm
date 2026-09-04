@@ -528,6 +528,17 @@ const whatsappPhone = value => {
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
   return digits;
 };
+export const inboxConversationKey = (row = {}, index = 0) => {
+  const phone = whatsappPhone(row['Phone Number'] || row.phone || row.recipient);
+  if (phone) return `PHONE:${phone}`;
+  const customerId = clean(row['Customer ID'] || row.customerId);
+  if (customerId) return `CUSTOMER:${customerId}`;
+  const leadId = clean(row['Lead ID'] || row.leadId);
+  if (leadId) return `LEAD:${leadId}`;
+  const applicationId = clean(row['Application ID'] || row.applicationId);
+  return applicationId ? `APPLICATION:${applicationId}` : `ROW:${index}`;
+};
+export const uniqueInboxConversationCount = (rows = []) => new Set(rows.map(inboxConversationKey)).size;
 
 const channelRange = 'WhatsApp_Number_Master!A1:AC1000';
 const channelIdPattern = /^JKM-WA-(EAST|WEST)-0([1-5])$/;
@@ -1867,7 +1878,8 @@ export default async function handler(req, res) {
           const resolved = resolveCustomerChannel({ leadId, applicationId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           const route = resolved.channel;
           const targetApplication = applications.find(row => clean(row['Application ID']) === applicationId), targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
-          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Business Unit': rowBusinessUnit(targetApplication || targetLead || {}), 'Customer ID': clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']), 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
+          await ensureSheetHeaders(req, 'Customer_Inbox', ['Received At', 'Human Handover At', 'AI Processed At']);
+          await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'Human Handover At': status === 'HUMAN_HANDOVER_REQUIRED' ? timestamp : '', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Business Unit': rowBusinessUnit(targetApplication || targetLead || {}), 'Customer ID': clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']), 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
           await writeActivity(req, session, { leadId, applicationId, type: status === 'HUMAN_HANDOVER_REQUIRED' ? 'CRM_HUMAN_HANDOVER_REQUESTED' : 'CRM_CUSTOMER_REPLY_RECORDED', description: message.slice(0, 240) });
           return res.status(201).json({ live: true, messageId, status });
         }
@@ -1882,35 +1894,50 @@ export default async function handler(req, res) {
         }
 
         const messageId = clean(body.messageId), inboxRecord = inboxRecords.find(row => clean(row['Message ID']) === messageId);
-        if (!inboxRecord || !((inboxRecord['Lead ID'] && scope.leadIds.has(inboxRecord['Lead ID'])) || (inboxRecord['Application ID'] && scope.applicationIds.has(inboxRecord['Application ID'])))) return res.status(403).json({ live: false, error: 'This handover is outside your access.' });
+        const inboxRecordPermitted = row => Boolean((row['Lead ID'] && scope.leadIds.has(row['Lead ID'])) || (row['Application ID'] && scope.applicationIds.has(row['Application ID'])));
+        if (!inboxRecord || !inboxRecordPermitted(inboxRecord)) return res.status(403).json({ live: false, error: 'This handover is outside your access.' });
+        const suppliedMessageIds = Array.isArray(body.messageIds) ? body.messageIds.map(clean).filter(Boolean) : [];
+        if (suppliedMessageIds.length > 200) throw new Error('Too many handover messages were selected');
+        const requestedMessageIds = [...new Set([messageId, ...suppliedMessageIds])], requestedMessageIdSet = new Set(requestedMessageIds);
+        const conversationKey = inboxConversationKey(inboxRecord);
+        const requestedHandoverRecords = inboxRecords.filter(row => requestedMessageIdSet.has(clean(row['Message ID'])));
+        if (requestedHandoverRecords.length !== requestedMessageIds.length || requestedHandoverRecords.some(row => !inboxRecordPermitted(row) || inboxConversationKey(row) !== conversationKey)) return res.status(403).json({ live: false, error: 'The selected handovers do not belong to the same permitted customer.' });
+        const handoverRecords = requestedHandoverRecords.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()));
+        if (!handoverRecords.length) throw new Error('This customer has no open human handover');
+        const handoverMessageIds = handoverRecords.map(row => clean(row['Message ID']));
         if (action === 'assignHandover') {
           if (!managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to assign a human handover.' });
           const saId = clean(body.saId), advisor = advisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
           if (!advisor) throw new Error('Select an active sales advisor');
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('This sales advisor is outside your branch');
           if (session.role === 'REGION_MANAGER' && canonicalRegion(advisor.Region) !== session.region) throw new Error('This sales advisor is outside your region');
-          const handoverApplication = applications.find(row => clean(row['Application ID']) === clean(inboxRecord['Application ID']));
-          const handoverLead = leads.find(row => clean(row['Lead ID']) === clean(inboxRecord['Lead ID']));
-          const handoverBusiness = rowBusinessUnit(handoverApplication || handoverLead || {});
-          if (!businessAllows(advisor['Business Access'] || 'BOTH', handoverBusiness)) throw new Error(`This sales advisor cannot receive ${handoverBusiness.toLowerCase()} handovers`);
+          const handoverBusinesses = new Set(handoverRecords.map(record => {
+            const handoverApplication = applications.find(row => clean(row['Application ID']) === clean(record['Application ID']));
+            const handoverLead = leads.find(row => clean(row['Lead ID']) === clean(record['Lead ID']));
+            return rowBusinessUnit(handoverApplication || handoverLead || {});
+          }));
+          const unsupportedBusiness = [...handoverBusinesses].find(unit => !businessAllows(advisor['Business Access'] || 'BOTH', unit));
+          if (unsupportedBusiness) throw new Error(`This sales advisor cannot receive ${unsupportedBusiness.toLowerCase()} handovers`);
           const assignedBranchId = clean(advisor['Branch ID']);
-          if (inboxRecord['Lead ID']) {
+          const handoverLeadIds = [...new Set(handoverRecords.map(row => clean(row['Lead ID'])).filter(Boolean))];
+          const handoverApplicationIds = [...new Set(handoverRecords.map(row => clean(row['Application ID'])).filter(Boolean))];
+          if (handoverLeadIds.length) {
             await ensureSheetHeaders(req, 'Leads', leadRecordHeaders);
-            await updateObject(req, 'Leads', 'Lead ID', inboxRecord['Lead ID'], { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now(), 'Updated By': session.username }, 'AP');
+            for (const targetLeadId of handoverLeadIds) await updateObject(req, 'Leads', 'Lead ID', targetLeadId, { 'Assigned SA ID': saId, 'Selected Branch ID': assignedBranchId, 'Updated At': now(), 'Updated By': session.username }, 'AP');
           }
-          if (inboxRecord['Application ID']) await updateObject(req, 'Applications', 'Application ID', inboxRecord['Application ID'], { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BK');
-          await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': 'ASSIGNED_TO_STAFF', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
-          await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: 'CRM_HANDOVER_ASSIGNED', description: `Human handover assigned to ${saId}` });
-          return res.status(200).json({ live: true, messageId, saId });
+          for (const targetApplicationId of handoverApplicationIds) await updateObject(req, 'Applications', 'Application ID', targetApplicationId, { 'Assigned SA ID': saId, 'Assigned Branch ID': assignedBranchId, 'Assigned Supervisor ID': session.username, 'Supervisor Assignment Status': 'ASSIGNED', 'Updated At': now() }, 'BK');
+          for (const targetMessageId of handoverMessageIds) await updateObject(req, 'Customer_Inbox', 'Message ID', targetMessageId, { 'Process Status': 'ASSIGNED_TO_STAFF', 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
+          await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: 'CRM_HANDOVER_ASSIGNED', description: `${handoverMessageIds.length} open human handover message(s) assigned to ${saId}` });
+          return res.status(200).json({ live: true, messageId, messageIds: handoverMessageIds, updated: handoverMessageIds.length, saId });
         }
 
         const status = clean(body.status).toUpperCase();
         if (!['MANAGER_IN_PROGRESS', 'RESOLVED'].includes(status)) throw new Error('A valid handover status is required');
         if (status === 'MANAGER_IN_PROGRESS' && !managerRoles.has(session.role)) return res.status(403).json({ live: false, error: 'Manager access is required to take over this conversation.' });
-        if (session.role === 'STAFF' && clean(inboxRecord['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF') return res.status(403).json({ live: false, error: 'This handover has not been assigned to you.' });
-        await updateObject(req, 'Customer_Inbox', 'Message ID', messageId, { 'Process Status': status, 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
-        await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: status === 'RESOLVED' ? 'CRM_HANDOVER_RESOLVED' : 'CRM_MANAGER_TAKEOVER', description: `${session.username} updated human handover to ${status}` });
-        return res.status(200).json({ live: true, messageId, status });
+        if (session.role === 'STAFF' && handoverRecords.some(row => clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF')) return res.status(403).json({ live: false, error: 'One or more handovers have not been assigned to you.' });
+        for (const targetMessageId of handoverMessageIds) await updateObject(req, 'Customer_Inbox', 'Message ID', targetMessageId, { 'Process Status': status, 'AI Processed': 'TRUE', 'AI Processed At': now() }, 'Z');
+        await writeActivity(req, session, { leadId: inboxRecord['Lead ID'], applicationId: inboxRecord['Application ID'], type: status === 'RESOLVED' ? 'CRM_HANDOVER_RESOLVED' : 'CRM_MANAGER_TAKEOVER', description: `${session.username} updated ${handoverMessageIds.length} human handover message(s) to ${status}` });
+        return res.status(200).json({ live: true, messageId, messageIds: handoverMessageIds, updated: handoverMessageIds.length, status });
       }
       return res.status(400).json({ live: false, error: 'Unsupported CRM action.' });
     } catch (error) {
@@ -2103,7 +2130,7 @@ export default async function handler(req, res) {
       const records = visible.map(row => resource === 'inbox' ? ({
         id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'],
         assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'],
-        status: row['Process Status'], time: row['Received At'], attachmentType: row['Attachment Type'], messageType: row['Message Type'], channel: row.Channel,
+        status: row['Process Status'], time: row['Received At'] || row['Human Handover At'] || row['AI Processed At'], attachmentType: row['Attachment Type'], messageType: row['Message Type'], channel: row.Channel,
         channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], displayNumber: row['WhatsApp Display Number'], wabaId: row['WABA ID'], conversationKey: row['Conversation Key'], routingStatus: row['Number Routing Status'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'] || row['WhatsApp Display Number'],
         source: row.Source || row['Webhook Source'], aiProcessed: truth(row['AI Processed']), aiProcessedAt: row['AI Processed At'],
         humanHandoverAt: row['Human Handover At'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase())
@@ -2129,10 +2156,11 @@ export default async function handler(req, res) {
       return clean(row['Application Status']).toUpperCase() === 'MANUAL_REVIEW' || clean(row['SA Review Required']).toUpperCase() === 'TRUE' || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL'].includes(mode);
     }).length;
     const lmsReady = businessApplications.filter(row => ['READY_FOR_LMS', 'READY', 'QUEUED'].includes(clean(row['LMS Submission Status']).toUpperCase()) || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' || documentSummary(documentsByApplication.get(row['Application ID']) || []).aiComplete).length;
-    const humanHandovers = inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())).length;
+    const humanHandovers = uniqueInboxConversationCount(inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())));
+    const unreadInbox = uniqueInboxConversationCount(inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())));
     const needsAttention = aiExceptions + count(businessApplications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
     const { JOMKAKI_KNOWLEDGE } = await import('./_jomkaki-knowledge.js');
-    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), knowledge: { id: JOMKAKI_KNOWLEDGE.id, version: JOMKAKI_KNOWLEDGE.version, status: JOMKAKI_KNOWLEDGE.status, sourceType: JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, approvedPageCount: JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, compiledAt: JOMKAKI_KNOWLEDGE.runtimeSnapshot.compiledAt, warnings: JOMKAKI_KNOWLEDGE.runtimeSnapshot.syncWarnings }, summary: { leads: businessLeads.length, applications: businessApplications.length, conversion: businessLeads.length ? businessApplications.length / businessLeads.length : 0, syntheticRecords: scope.leads.length - businessLeads.length + scope.applications.length - businessApplications.length, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox: inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())).length } });
+    return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), knowledge: { id: JOMKAKI_KNOWLEDGE.id, version: JOMKAKI_KNOWLEDGE.version, status: JOMKAKI_KNOWLEDGE.status, sourceType: JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, approvedPageCount: JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, compiledAt: JOMKAKI_KNOWLEDGE.runtimeSnapshot.compiledAt, warnings: JOMKAKI_KNOWLEDGE.runtimeSnapshot.syncWarnings }, summary: { leads: businessLeads.length, applications: businessApplications.length, conversion: businessLeads.length ? businessApplications.length / businessLeads.length : 0, syntheticRecords: scope.leads.length - businessLeads.length + scope.applications.length - businessApplications.length, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox } });
   } catch (error) {
     console.error(error);
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
