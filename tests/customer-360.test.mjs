@@ -43,7 +43,7 @@ test('Customer 360 joins every operational record without changing the Sheet mod
   assert.match(app,/class="customer-360-turn"/);
   assert.match(app,/data-360-resolve-reply>Mark reply handled/);
   assert.match(app,/updateHandover\(pendingReply,'RESOLVED'\)/);
-  assert.match(app,/Mark \$\{customer\} reply as handled\?/);
+  assert.match(app,/Mark every open handover for \$\{customer\} as handled\?/);
 });
 
 test('API returns the full permitted history and the UI protects sensitive data',()=>{
