@@ -60,3 +60,4 @@ test('Catalog keeps approved, pending and rejected records in separate workflow 
   assert.match(css, /product-photo-preview/);
   assert.match(html, /catalog-workflow2/);
 });
+
