@@ -230,13 +230,13 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
     if (dryRun) { results.push({ ...resultIdentity, dueAt: evaluation.dueAt, ruleId: evaluation.ruleId, attempt: evaluation.nextAttempt, message, templateRequired, ready: true }); continue; }
     let providerMessageId = '', sendStatus = 'MANUAL_PENDING', sendError = '';
     try {
-      if (cloudMode) { providerMessageId = await sendCloudMessage(route, phone, message, templateName, evaluation.rule.language); sendStatus = 'QUEUED'; }
+      if (cloudMode) { providerMessageId = await sendCloudMessage(route, phone, message, templateName, evaluation.rule.language); sendStatus = 'SENT'; }
     } catch (error) { sendStatus = 'FAILED'; sendError = clean(error?.message) || 'Follow-up delivery failed'; }
     const sentAt = now.toISOString(), outboxId = `FUP-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     await appendRow(token, 'Message_Outbox', outboxHeaders, {
       'Outbox ID': outboxId, 'Created At': sentAt, 'Lead ID': lead['Lead ID'], 'Application ID': leadOnly ? '' : id, 'Phone Number': phone,
       'Message Type': templateName ? 'TEMPLATE' : 'TEXT', 'Message Text': message, 'Template Name': templateName, Language: evaluation.rule.language,
-      'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': sendStatus === 'QUEUED' ? sentAt : '', 'Provider Message ID': providerMessageId,
+      'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': sendStatus === 'SENT' ? sentAt : '', 'Provider Message ID': providerMessageId,
       'Error Message': sendError, 'WhatsApp Number ID': route['Phone Number ID'], 'WABA ID': route['WABA ID'], 'Internal Channel ID': route['Internal Channel ID'],
       'Make Connection Alias': route['Make Connection Alias'], 'Send Routing Status': `${cloudMode ? 'CLOUD_API' : 'WHATSAPP_BUSINESS_MANUAL'}:FOLLOW_UP_AUTOMATION`,
       'Business Unit': application['Business Unit'] || lead['Business Unit'], 'Customer ID': application['Customer ID'] || lead['Customer ID'], 'Team ID': application['Team ID'] || lead['Team ID'] || route['Team ID'],

@@ -592,7 +592,7 @@ const editDistanceWithin = (leftValue, rightValue, limit = 1) => {
   return previous[right.length] <= limit;
 };
 
-const INVALID_CUSTOMER_NAME_WORDS = /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|bagaimana|macam mana|model|motor|moto|motorcycle|motosikal|telefon|phone|handphone|iphone|harga|price|ansuran|monthly|loan|pinjaman|kedai|dokumen|document|promosi|promotion|cash|tunai|deposit|depo|tinggal|bandar|negeri|lokasi|location|cari|mahu|nak|boleh|ada|yamaha|honda|sym|moda|nmax|xmax|y16|y16zr)\b/i;
+const INVALID_CUSTOMER_NAME_WORDS = /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|bagaimana|macam mana|semak|check|tengok|list|listout|model|motor|moto|motorcycle|motosikal|telefon|phone|handphone|iphone|harga|price|ansuran|monthly|loan|pinjaman|kedai|dokumen|document|promosi|promotion|cash|tunai|deposit|depo|tinggal|bandar|negeri|lokasi|location|cari|mahu|nak|boleh|ada|yamaha|honda|sym|moda|nmax|xmax|y16|y16zr)\b/i;
 const KNOWN_LOCATION_ONLY_NAMES = new Set([
   'sarawak', 'kuching', 'kch', 'batu kawa', 'satok', 'samarahan', 'kota samarahan', 'bintulu', 'miri', 'sibu', 'serian', 'sri aman',
   'sabah', 'kota kinabalu', 'kk', 'sandakan', 'tawau', 'lahad datu', 'labuan',
@@ -2015,9 +2015,10 @@ export function matchInstantProduct(text, catalogs = []) {
 
 const approvedCatalogRow = row => {
   const approvalStatus = clean(row['Approval Status']).toUpperCase();
-  // Approval is the customer-facing stock authority. Older rows that predate
-  // the approval workflow still fall back to Active for backwards compatibility.
-  return approvalStatus ? approvalStatus === 'APPROVED' : truth(row.Active);
+  // Approval is required for customer visibility, while Active remains the
+  // operational kill switch. A disabled record must never be recommended or
+  // sent to a customer even if its historical approval is still APPROVED.
+  return truth(row.Active) && (!approvalStatus || approvalStatus === 'APPROVED');
 };
 
 const splitPhoneVariant = row => {
@@ -3221,6 +3222,21 @@ async function sendInstantSalesMessage({ route, phone, decision }) {
   };
 }
 
+export function selectReusableApplication(applications = [], lead = {}, businessUnit = '') {
+  const leadId = clean(lead['Lead ID']), customerId = clean(lead['Customer ID']), phone = digits(lead['Phone Number']);
+  const unit = canonicalBusinessUnit(businessUnit || lead['Business Unit']) || 'MOTOR';
+  const terminal = new Set(['COMPLETED', 'CANCELLED', 'REJECTED', 'CLOSED', 'WITHDRAWN']);
+  const active = applications.filter(row => {
+    const status = clean(row['Application Status'] || row['Current Stage']).toUpperCase();
+    const rowUnit = canonicalBusinessUnit(row['Business Unit']) || (clean(row['Product Category']).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR');
+    return !terminal.has(status) && rowUnit === unit;
+  });
+  return active.filter(row => leadId && clean(row['Lead ID']) === leadId).at(-1)
+    || active.filter(row => customerId && clean(row['Customer ID']) === customerId).at(-1)
+    || active.filter(row => phone && digits(row['Phone Number']) === phone).at(-1)
+    || {};
+}
+
 async function sendImmediateAcknowledgement(token, { route, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
   if (clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'CLOUD_MODE_DISABLED' };
   const acknowledgement = buildImmediateAcknowledgement(text, messageType);
@@ -3248,12 +3264,15 @@ async function sendImmediateAcknowledgement(token, { route, phone, text, message
   return { sent: response.ok, outboxId, providerMessageId, error: errorMessage, receivedAt };
 }
 
-async function updateOutboxStatus(token, providerId, status, errorMessage = '') {
+async function updateOutboxStatus(token, providerId, status, errorMessage = '', eventTimestamp = '') {
   const rows = await readSheet(token, 'Message_Outbox!A:AJ');
-  const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID');
+  const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID'), sendStatusIndex = headers.indexOf('Send Status');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId));
   if (rowIndex < 1) return;
-  const normalizedStatus = clean(status).toUpperCase(), timestamp = new Date().toISOString();
+  const normalizedStatus = clean(status).toUpperCase(), currentStatus = clean(rows[rowIndex]?.[sendStatusIndex]).toUpperCase();
+  const deliveryRank = { SENT: 1, DELIVERED: 2, READ: 3 };
+  if (deliveryRank[currentStatus] && deliveryRank[normalizedStatus] && deliveryRank[normalizedStatus] < deliveryRank[currentStatus]) return;
+  const eventMs = Number(eventTimestamp) * 1000, timestamp = Number.isFinite(eventMs) && eventMs > 0 ? new Date(eventMs).toISOString() : new Date().toISOString();
   const changes = { 'Send Status': normalizedStatus, 'Error Message': errorMessage };
   if (normalizedStatus === 'SENT') changes['Sent At'] = timestamp;
   if (normalizedStatus === 'DELIVERED') changes['Delivered At'] = timestamp;
@@ -3294,9 +3313,10 @@ export default async function handler(req, res) {
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
     await ensureHeaders(token, 'Customer_Inbox', ['Received At', 'Human Handover At', 'AI Processed At']);
+    await ensureHeaders(token, 'Message_Outbox', ['Delivered At', 'Read At', 'Customer Replied At']);
     for (const status of statusEvents) {
       const statusError = clean(status.errors?.[0]?.error_data?.details || status.errors?.[0]?.message || status.errors?.[0]?.title);
-      await updateOutboxStatus(token, status.id, status.status, statusError);
+      await updateOutboxStatus(token, status.id, status.status, statusError, status.timestamp);
     }
     if (!hasFreshInbound) return res.status(200).json({ ok: true, statusOnly: true, updated: statusEvents.length });
     const [leadRows, routeRows, branchRows, stateRows, inboxRows, outboxRows] = await Promise.all([
@@ -3305,7 +3325,7 @@ export default async function handler(req, res) {
       readSheet(token, 'Branch_Master!A1:S1000'),
       readSheet(token, 'Conversation_State!A:CZ'),
       readSheet(token, 'Customer_Inbox!A:AC'),
-      readSheet(token, 'Message_Outbox!A:AC')
+      readSheet(token, 'Message_Outbox!A:AJ')
     ]);
     const leads = objects(leadRows);
     const routes = objects(routeRows);
@@ -3350,7 +3370,7 @@ export default async function handler(req, res) {
         // the latest successful reply.
         const latestDeliveredReply = outboxObjects
           .filter(row => {
-            if (clean(row['Send Status']).toUpperCase() !== 'SENT' || !clean(row['Message Text'])) return false;
+            if (!['SENT', 'DELIVERED', 'READ'].includes(clean(row['Send Status']).toUpperCase()) || !clean(row['Message Text'])) return false;
             const sameLead = clean(lead?.['Lead ID']) && clean(row['Lead ID']) === clean(lead['Lead ID']);
             const samePhone = digits(row['Phone Number']) === phone;
             const sameChannel = !channelId || !clean(row['Internal Channel ID']) || clean(row['Internal Channel ID']) === channelId;
@@ -3358,6 +3378,10 @@ export default async function handler(req, res) {
           })
           .sort((left, right) => Date.parse(clean(right['Sent At'] || right['Created At'])) - Date.parse(clean(left['Sent At'] || left['Created At'])))[0];
         const deliveredReplyAt = clean(latestDeliveredReply?.['Sent At'] || latestDeliveredReply?.['Created At']);
+        if (latestDeliveredReply && !clean(latestDeliveredReply['Customer Replied At']) && Number.isFinite(Date.parse(deliveredReplyAt)) && Date.parse(deliveredReplyAt) <= Date.parse(receivedAt)) {
+          await updateObject(token, 'Message_Outbox', 'Outbox ID', latestDeliveredReply['Outbox ID'], { 'Customer Replied At': receivedAt }, 'AJ');
+          latestDeliveredReply['Customer Replied At'] = receivedAt;
+        }
         if (conversationState && latestDeliveredReply && (!Number.isFinite(Date.parse(conversationState['Last AI Message At'])) || Date.parse(deliveredReplyAt) > Date.parse(conversationState['Last AI Message At']))) {
           conversationState = { ...conversationState, 'Last AI Message': clean(latestDeliveredReply['Message Text']), 'Last AI Message At': deliveredReplyAt };
         }
@@ -3520,12 +3544,18 @@ export default async function handler(req, res) {
         const shouldEnsureApplication = mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || clean(instantDecision.nextStep).toUpperCase() === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text);
         const shouldLoadApplication = shouldEnsureApplication || !!clean(conversationState?.['Application ID']);
         const applications = shouldLoadApplication ? await loadApplications() : preloadedApplications;
-        let application = applications.filter(row => row['Lead ID'] && row['Lead ID'] === lead['Lead ID']).at(-1) || {};
+        let application = selectReusableApplication(applications, lead, routeBusinessUnit);
         if (!clean(application['Application ID']) && shouldEnsureApplication) {
-          application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
-          await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
-          await appendObject(token, 'Applications', application);
-          applications.push(application);
+          // Re-read immediately before creating. This narrows the race window
+          // when several WhatsApp messages arrive together for the same customer.
+          const currentApplications = objects(await readSheet(token, 'Applications!A:CZ'));
+          application = selectReusableApplication(currentApplications, lead, routeBusinessUnit);
+          if (!clean(application['Application ID'])) {
+            application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
+            await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
+            await appendObject(token, 'Applications', application);
+            applications.push(application);
+          }
           await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
         }
         if (clean(application['Application ID'])) {
