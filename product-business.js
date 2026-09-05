@@ -420,3 +420,4 @@
     selected === 'HANDPHONE' ? bindHandphonePricing(rows) : bindProductPricing();
   };
 })();
+
