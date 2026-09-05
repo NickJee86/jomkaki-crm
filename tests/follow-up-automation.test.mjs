@@ -270,6 +270,8 @@ test('scheduler heartbeat and automatic-message fields support live health and h
   assert.match(api, /followUpRule: row\['Follow Up Rule'\]/);
   assert.match(api, /row\['Actor Username'\]/);
   assert.match(api, /row\['Occurred At'\]/);
+  assert.match(dispatcher, /sendStatus = 'SENT'/);
+  assert.match(dispatcher, /'Sent At': sendStatus === 'SENT' \? sentAt : ''/);
 });
 
 test('go-live readiness treats the follow-up scheduler as a production dependency', () => {

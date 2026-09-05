@@ -63,7 +63,7 @@ test('Product UI exposes Regional Manager submit and Admin approval workflows', 
   assert.match(ui, /\['ADMIN', 'REGION_MANAGER'\]\.includes\(role\) \? 'BOTH'/);
   assert.match(ui, /Admin-controlled Motor pricing/);
   assert.match(ui, /current approved price stays live/i);
-  assert.match(ui, /Nothing becomes customer-visible or available to AI until Admin approval/);
+  assert.match(ui, /customer-visible only after Admin approval and while it remains active/);
 });
 
 test('Product approvals use the CRM review dialog instead of unsupported browser prompts', () => {

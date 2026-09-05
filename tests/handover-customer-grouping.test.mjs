@@ -30,6 +30,7 @@ test('handover actions update every open message for the same permitted customer
   assert.match(api, /for \(const targetMessageId of handoverMessageIds\) await updateObject/);
   assert.match(api, /uniqueInboxConversationCount\(inbox\.filter\(row => humanStatuses\.has/);
   assert.match(api, /const unreadInbox = uniqueInboxConversationCount/);
+  assert.match(api, /'MANUAL_RECORDED'.*'HUMAN_HANDOVER_REQUIRED'/);
 });
 
 test('new handovers always record a usable received time', () => {

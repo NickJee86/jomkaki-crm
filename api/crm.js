@@ -136,6 +136,17 @@ const businessPermitted = (session, row) => {
 };
 const isSyntheticLeadRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Customer Name'])) || /^(SYNTHETIC|TEST|QA|UAT)$/i.test(clean(row['Lead Source'] || row.Source)) || /\bSYNTHETIC\b/i.test(clean(row.Notes));
 const isSyntheticApplicationRow = row => /^(CODEX|QA|UAT)\s+TEST\b/i.test(clean(row['Applicant Name'])) || /^TEST\s+BRAND$/i.test(clean(row['Product Brand'])) || /\bSYNTHETIC\b/i.test(clean(row['Internal Notes']));
+const locationOnlyCustomerNames = new Set(['sarawak','kuching','kch','batu kawa','satok','samarahan','kota samarahan','bintulu','miri','sibu','serian','sri aman','sabah','kota kinabalu','kk','sandakan','tawau','lahad datu','labuan','selangor','petaling jaya','pj','shah alam','klang','klang valley','kuala lumpur','kl','negeri sembilan','seremban','nilai','penang','pulau pinang','johor','johor bahru','jb','perak','ipoh','melaka','malacca','kedah','alor setar','pahang','kuantan','kelantan','kota bharu','terengganu','kuala terengganu','perlis','putrajaya']);
+const messageLikeCustomerName = /\b(?:apa|apakah|berapa|bila|mana|kenapa|mengapa|bagaimana|semak|check|tengok|list|listout|model|motor|moto|telefon|phone|handphone|iphone|harga|price|ansuran|monthly|loan|pinjaman|kedai|dokumen|document|promosi|promotion|cash|tunai|deposit|depo|tinggal|bandar|negeri|lokasi|location|cari|mahu|nak|boleh|ada|yamaha|honda|sym|moda|nmax|xmax|y16|y16zr)\b/i;
+export const customerDisplayName = (value, phone = '') => {
+  const name = clean(value).replace(/\s+/g, ' '), normalized = name.toLowerCase(), suffix = clean(phone).replace(/\D/g, '').slice(-4);
+  const fallback = `WhatsApp Customer${suffix ? ` ${suffix}` : ''}`;
+  if (!name) return fallback;
+  if (/^WhatsApp Customer\b/i.test(name)) return name;
+  if (locationOnlyCustomerNames.has(normalized) || messageLikeCustomerName.test(normalized)) return fallback;
+  return name;
+};
+export const customerVisibleOutboxStatus = row => clean(row?.['Send Status']).toUpperCase() === 'QUEUED' && clean(row?.['Provider Message ID']) ? 'SENT' : clean(row?.['Send Status']);
 
 async function getAccessToken(req) {
   const oidcToken = req.headers['x-vercel-oidc-token'] || process.env.VERCEL_OIDC_TOKEN;
@@ -1398,7 +1409,7 @@ export default async function handler(req, res) {
         if (motorType === 'SECOND_HAND' && !secondHandInventoryId) throw new Error('Select an approved and available 2nd-hand motor');
         if (motorType !== 'SECOND_HAND' && !catalogId) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
         const [catalogRows, existingLeadRows, existingApplicationRows, secondHandRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`, 'Leads!A1:AP1000', 'Applications!A1:CZ1000', secondHandRange]);
-        const catalogRecord = motorType === 'SECOND_HAND' ? null : rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+        const catalogRecord = motorType === 'SECOND_HAND' ? null : rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active) && productApprovalStatus(row) === 'APPROVED');
         const secondHandRecord = motorType === 'SECOND_HAND' ? rowsToObjects(secondHandRows).find(row => clean(row['Inventory ID']) === secondHandInventoryId) : null;
         if (motorType !== 'SECOND_HAND' && !catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
         if (motorType === 'SECOND_HAND') {
@@ -1735,7 +1746,7 @@ export default async function handler(req, res) {
         if (!secondHandApplication) {
           const productConfig = businessSheets(businessUnit);
           const [catalogRows] = await readRanges(req, [`${productConfig.catalog}!A1:${productConfig.catalogMax}1000`]);
-          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active));
+          const catalogRecord = rowsToObjects(catalogRows).find(row => clean(row['Catalog ID']) === catalogId && truth(row.Active) && productApprovalStatus(row) === 'APPROVED');
           if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
           brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
         }
@@ -1849,6 +1860,7 @@ export default async function handler(req, res) {
           if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
           const currentStatus = clean(record['Send Status']).toUpperCase();
           if (!['FAILED', 'PENDING', 'QUEUED'].includes(currentStatus)) throw new Error('Only failed or queued messages can be sent from this action');
+          if (currentStatus === 'QUEUED' && clean(record['Provider Message ID'])) throw new Error('This message was already accepted by Meta and cannot be sent again');
           const route = channels.find(row => clean(row['Internal Channel ID']) === clean(record['Internal Channel ID']));
           if (!route || !truth(route.Active) || !truth(route['Outbound Enabled'])) throw new Error('The original WhatsApp channel is not available for retry');
           const credentials = channelCredentials(route);
@@ -2001,7 +2013,7 @@ export default async function handler(req, res) {
       const latestConversation = new Map(); rowsToObjects(conversationRows).forEach(row => { if (row['Lead ID']) latestConversation.set(row['Lead ID'], row); });
       const records = [...businessLeads].reverse().map(row => {
         const app = latest.get(row['Lead ID']) || {}, conversation = latestConversation.get(row['Lead ID']) || {}, selectedProduct = [conversation['Selected Product Brand'], conversation['Selected Product Model'], conversation['Selected Product Variant']].filter(Boolean).join(' ');
-        return { id: row['Lead ID'], name: row['Customer Name'] || app['Applicant Name'] || 'Unknown customer', phone: row['Phone Number'], region: row.Region, businessUnit: rowBusinessUnit(Object.keys(app).length ? app : row), motorType: app['Motor Type'] || app['Product Condition'] || row['Motor Type'] || row['Product Condition'], inventoryId: app['Second Hand Inventory ID'] || app['Inventory ID'] || row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
+        return { id: row['Lead ID'], name: customerDisplayName(row['Customer Name'] || app['Applicant Name'], row['Phone Number']), phone: row['Phone Number'], region: row.Region, businessUnit: rowBusinessUnit(Object.keys(app).length ? app : row), motorType: app['Motor Type'] || app['Product Condition'] || row['Motor Type'] || row['Product Condition'], inventoryId: app['Second Hand Inventory ID'] || app['Inventory ID'] || row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticLeadRow(row) || isSyntheticApplicationRow(app),
           source: row['Lead Source'] || row['Acquisition Source'] || row.Source || row['Enquiry Source'] || 'Not recorded',
           model: [app['Product Brand'], app['Product Model'], app['Product Variant'] || app.Variant].filter(Boolean).join(' ') || selectedProduct || row['Enquiry Type'] || `${rowBusinessUnit(row) === 'HANDPHONE' ? 'Handphone' : 'Motor'} enquiry`,
           productBrand: app['Product Brand'] || conversation['Selected Product Brand'], productModel: app['Product Model'] || conversation['Selected Product Model'], productVariant: app['Product Variant'] || app.Variant || conversation['Selected Product Variant'],
@@ -2028,7 +2040,7 @@ export default async function handler(req, res) {
         const tenure = clean(businessUnit === 'HANDPHONE' ? row['Loan Tenure Months'] : row['Loan Tenure Years']);
         const monthly = businessUnit === 'HANDPHONE' ? (tenure === '12' ? quote['Monthly 12 Months (RM)'] : tenure === '24' ? quote['Monthly 24 Months (RM)'] : tenure === '36' ? quote['Monthly 36 Months (RM)'] : tenure === '48' ? quote['Monthly 48 Months (RM)'] : tenure === '60' ? quote['Monthly 60 Months (RM)'] : '') : (tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '');
         const ic = clean(row['Applicant IC Number']);
-        return { id: row['Application ID'], leadId: row['Lead ID'], customer: row['Applicant Name'] || row['Lead ID'] || 'Unknown customer', region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), motorType: row['Motor Type'] || row['Product Condition'], inventoryId: row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticApplicationRow(row),
+        return { id: row['Application ID'], leadId: row['Lead ID'], customer: customerDisplayName(row['Applicant Name'], row['Phone Number']), region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), motorType: row['Motor Type'] || row['Product Condition'], inventoryId: row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticApplicationRow(row),
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
           product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, tenureUnit: businessUnit === 'HANDPHONE' ? 'MONTHS' : 'YEARS', deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)'] || effectiveDeposit(quote)) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)'] || quote['Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '', customerId: row['Customer ID'], teamId: row['Team ID'], originChannelId: row['Origin WhatsApp Channel ID'],
@@ -2124,7 +2136,7 @@ export default async function handler(req, res) {
       const channels = rowsToObjects(channelRows);
       const globalActivityTypes = new Set(['FOLLOW_UP_RUN_COMPLETED', 'CRM_FOLLOW_UP_SAFE_SCAN', 'CRM_FOLLOW_UP_SETTINGS_UPDATED']);
       const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']) || (resource === 'activity' && session.role === 'ADMIN' && globalActivityTypes.has(clean(row['Activity Type']).toUpperCase()))).reverse();
-      const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Customer Name']]));
+      const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], customerDisplayName(row['Customer Name'], row['Phone Number'])]));
       const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
       const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
       const records = visible.map(row => resource === 'inbox' ? ({
@@ -2136,7 +2148,7 @@ export default async function handler(req, res) {
         humanHandoverAt: row['Human Handover At'], humanRequired: humanStatuses.has(clean(row['Process Status']).toUpperCase())
       }) : resource === 'outbox' ? ({
         id: row['Outbox ID'], recipient: row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'], message: row['Message Text'] || row['Template Name'],
-        status: row['Send Status'], time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'], channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], wabaId: row['WABA ID'], replyToMessageId: row['Reply To Message ID'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'], displayNumber: channelForMessage(row, channels)?.['Display Number'] || '',
+        status: customerVisibleOutboxStatus(row), time: row['Sent At'] || row['Created At'], providerMessageId: row['Provider Message ID'], routingStatus: row['Send Routing Status'], channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], wabaId: row['WABA ID'], replyToMessageId: row['Reply To Message ID'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'], displayNumber: channelForMessage(row, channels)?.['Display Number'] || '',
         messageType: row['Message Type'], templateName: row['Template Name'], language: row.Language, automationKey: row['Automation Key'], followUpRule: row['Follow Up Rule'], followUpAttempt: Number(row['Follow Up Attempt'] || 0),
         attemptCount: Number(row['Attempt Count'] || 0), errorMessage: row['Error Message'], attachmentName: row['Media File Name'], attachmentMime: row['Media MIME Type'], mediaId: row['Media ID'], deliveredAt: row['Delivered At'], readAt: row['Read At'], customerRepliedAt: row['Customer Replied At'],
         manual: clean(row['Send Routing Status']).toUpperCase() === 'WHATSAPP_BUSINESS_MANUAL' || clean(row['Send Status']).toUpperCase() === 'MANUAL_PENDING'
@@ -2157,7 +2169,7 @@ export default async function handler(req, res) {
     }).length;
     const lmsReady = businessApplications.filter(row => ['READY_FOR_LMS', 'READY', 'QUEUED'].includes(clean(row['LMS Submission Status']).toUpperCase()) || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' || documentSummary(documentsByApplication.get(row['Application ID']) || []).aiComplete).length;
     const humanHandovers = uniqueInboxConversationCount(inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())));
-    const unreadInbox = uniqueInboxConversationCount(inbox.filter(row => ['NEW', 'ERROR', 'HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())));
+    const unreadInbox = uniqueInboxConversationCount(inbox.filter(row => ['NEW', 'UNREAD', 'RECEIVED', 'ERROR', 'MANUAL_RECORDED', 'HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())));
     const needsAttention = aiExceptions + count(businessApplications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;
     const { JOMKAKI_KNOWLEDGE } = await import('./_jomkaki-knowledge.js');
     return res.status(200).json({ live: true, updatedAt: new Date().toISOString(), knowledge: { id: JOMKAKI_KNOWLEDGE.id, version: JOMKAKI_KNOWLEDGE.version, status: JOMKAKI_KNOWLEDGE.status, sourceType: JOMKAKI_KNOWLEDGE.runtimeSnapshot.sourceType, approvedPageCount: JOMKAKI_KNOWLEDGE.runtimeSnapshot.approvedPageCount, compiledAt: JOMKAKI_KNOWLEDGE.runtimeSnapshot.compiledAt, warnings: JOMKAKI_KNOWLEDGE.runtimeSnapshot.syncWarnings }, summary: { leads: businessLeads.length, applications: businessApplications.length, conversion: businessLeads.length ? businessApplications.length / businessLeads.length : 0, syntheticRecords: scope.leads.length - businessLeads.length + scope.applications.length - businessApplications.length, needsAttention, completed, humanHandovers, aiExceptions, lmsReady, unreadInbox } });

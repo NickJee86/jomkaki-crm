@@ -46,6 +46,7 @@ import {
   reserveInboundMessage,
   resolveCustomerLocation,
   sanitizeAiFallbackReply,
+  selectReusableApplication,
   shouldDispatchEarlyConsent,
   shouldSendImmediateAcknowledgement,
   shouldStartApplicationDetails,
@@ -539,6 +540,10 @@ test('instant channel credentials remain strict even though webhook acknowledgem
   assert.match(source, /WHATSAPP_SEND_MODE/);
   assert.match(source, /WEBHOOK_IMMEDIATE_ACK/);
   assert.match(source, /'Send Status': response\.ok \? 'SENT' : 'FAILED'/);
+  assert.match(source, /\['SENT', 'DELIVERED', 'READ'\]\.includes\(clean\(row\['Send Status'\]\)\.toUpperCase\(\)\)/);
+  assert.match(source, /'Customer Replied At': receivedAt/);
+  assert.match(source, /deliveryRank\[normalizedStatus\] < deliveryRank\[currentStatus\]/);
+  assert.match(source, /status\.timestamp/);
   assert.doesNotMatch(source, /await sendImmediateAcknowledgement\(token/);
 });
 
@@ -576,6 +581,17 @@ test('sales onboarding safely captures the customer name', () => {
     assert.equal(extractCustomerName(location), '', location);
   }
   assert.equal(extractCustomerName('hi'), '');
+});
+
+test('automatic document collection reuses one active application per customer and business', () => {
+  const applications = [
+    { 'Application ID': 'APP-OLD', 'Lead ID': 'LEAD-OLD', 'Customer ID': 'CUS-1', 'Business Unit': 'MOTOR', 'Application Status': 'DRAFT', 'Phone Number': '60123456789' },
+    { 'Application ID': 'APP-DONE', 'Lead ID': 'LEAD-1', 'Customer ID': 'CUS-1', 'Business Unit': 'MOTOR', 'Application Status': 'COMPLETED', 'Phone Number': '60123456789' }
+  ];
+  const selected = selectReusableApplication(applications, { 'Lead ID': 'LEAD-1', 'Customer ID': 'CUS-1', 'Business Unit': 'MOTOR', 'Phone Number': '60123456789' }, 'MOTOR');
+  assert.equal(selected['Application ID'], 'APP-OLD');
+  assert.equal(selectReusableApplication(applications, { 'Lead ID': 'LEAD-1', 'Customer ID': 'CUS-1', 'Phone Number': '60123456789' }, 'HANDPHONE')['Application ID'], undefined);
+  assert.match(source, /Re-read immediately before creating/);
 });
 
 test('one versioned Sales Champion prompt governs both understanding and customer replies', () => {
@@ -981,7 +997,7 @@ test('a casual available-motor question returns real options instead of repeatin
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
 
-test('a full model-list request returns every approved catalogue model even when legacy Active is false or prices are not filled', () => {
+test('a full model-list request returns every active approved model even when prices are not filled', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Customer Name': 'Nick', 'Product Category': 'MOTOR' },
     lead: { 'Customer Name': 'Nick', Region: 'WEST_MALAYSIA', 'City or Area': 'Kuala Lumpur' },
@@ -998,10 +1014,10 @@ test('a full model-list request returns every approved catalogue model even when
     ]
   });
   assert.equal(decision.availableModelsIntent, true);
-  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160', 'Honda Wave Alpha']);
+  assert.deepEqual(decision.suggestedModels, ['Yamaha Y15ZR Standard', 'Yamaha NMAX', 'Honda ADV160']);
   assert.match(decision.text, /\*Yamaha\*\n• Y15ZR Standard\n• NMAX/);
-  assert.match(decision.text, /\*Honda\*\n• ADV160\n• Wave Alpha/);
-  assert.doesNotMatch(decision.text, /Honda RS150R|bukan semua|popular|pengesahan cawangan/i);
+  assert.match(decision.text, /\*Honda\*\n• ADV160/);
+  assert.doesNotMatch(decision.text, /Honda RS150R|Wave Alpha|bukan semua|popular|pengesahan cawangan/i);
   assert.doesNotMatch(decision.text, /Y15ZR Standard, Yamaha NMAX/);
   assert.equal((decision.text.match(/\?/g) || []).length, 1);
 });
@@ -1526,7 +1542,7 @@ test('an older selected-model state without a successful image record recovers b
     text: 'nmax', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{
       'Catalog ID': 'MTR-YAM-NMAX', Brand: 'Yamaha', Model: 'NMAX', Variant: 'Standard',
-      'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax.jpg'
+      Active: 'TRUE', 'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/nmax.jpg'
     }],
     motorPricing: []
   });
@@ -1768,18 +1784,16 @@ test('an approved catalogue stock question is answered directly without exposing
   assert.doesNotMatch(decision.text, /sistem|system|catalog|katalog|senarai|cawangan sahkan|branch confirmation/i);
 });
 
-test('approval status is the stock authority even when a legacy Active flag is false', () => {
+test('an inactive model stays hidden even when its historical approval remains approved', () => {
   const decision = buildInstantSalesDecision({
     state: { 'Current Step': 'STEP_03_PRODUCT', 'Product Category': 'MOTOR' },
     lead: { Region: 'EAST_MALAYSIA', 'City or Area': 'Kuching' },
     text: 'Y15ZR ada stock tak?', messageType: 'text', routeBusinessUnit: 'MOTOR', routeRegion: 'EAST_MALAYSIA',
     motorCatalog: [{ 'Catalog ID': 'MTR-YAM-Y15ZR', Brand: 'Yamaha', Model: 'Y15ZR', Variant: 'Standard', Active: 'FALSE', 'Approval Status': 'APPROVED', 'Image Approved': 'TRUE', 'Image URL': 'https://cdn.example.test/y15zr.jpg' }]
   });
-  assert.equal(decision.stockIntent, true);
-  assert.equal(decision.product.Model, 'Y15ZR');
-  assert.equal(decision.imageUrl, 'https://cdn.example.test/y15zr.jpg');
-  assert.match(decision.text, /Yamaha Y15ZR Standard ada/i);
-  assert.doesNotMatch(decision.text, /nama penuh|gambar supaya|sistem|system|catalog|katalog|senarai/i);
+  assert.equal(decision.product, undefined);
+  assert.equal(decision.imageUrl, undefined);
+  assert.doesNotMatch(decision.text, /Yamaha Y15ZR Standard ada|sistem|system|catalog|katalog/i);
 });
 
 test('numeric model codes are never typo-corrected to a different product number', () => {
@@ -1967,7 +1981,7 @@ test('AI intent understanding uses every approved product, a strict grounded sch
   assert.equal(request.text.format.strict, true);
   assert.equal(request.input.includes('60123456789'), false);
   assert.match(request.input, /MTR-YAM-NMAX/);
-  assert.match(request.input, /MTR-YAM-Y15ZR/);
+  assert.doesNotMatch(request.input, /MTR-YAM-Y15ZR/);
   assert.match(JSON.stringify(request), /BRANCH_LOCATION/);
   assert.match(request.instructions, /Answer → Understand → Recommend → Prove → Advance/);
   assert.match(request.input, /documentConversion/);

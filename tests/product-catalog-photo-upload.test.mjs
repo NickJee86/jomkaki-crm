@@ -35,6 +35,10 @@ test('Product photos are stored in the dedicated SharePoint catalog folder and r
 test('Public product image route only resolves a catalog-linked SharePoint file', () => {
   assert.match(imageApi, /catalogRecord\(req, businessUnit, catalogId\)/);
   assert.match(imageApi, /record\?\.\['Image File ID'\]/);
+  assert.match(imageApi, /approvalStatus !== 'APPROVED'/);
+  assert.match(imageApi, /!truth\(record\.Active\)/);
+  assert.match(imageApi, /!truth\(record\['Image Approved'\]\)/);
+  assert.match(imageApi, /\['image\/jpeg', 'image\/png', 'image\/webp'\]/);
   assert.match(imageApi, /items\/\$\{encodeURIComponent\(fileId\)\}\/content/);
   assert.match(imageApi, /Cache-Control.*public/);
   assert.doesNotMatch(imageApi, /req\.query\?\.fileId/);
@@ -44,6 +48,9 @@ test('Catalog keeps approved, pending and rejected records in separate workflow 
   assert.match(ui, /data-catalog-status="APPROVED"/);
   assert.match(ui, /data-catalog-status="PENDING_APPROVAL"/);
   assert.match(ui, /data-catalog-status="REJECTED"/);
+  assert.match(ui, /data-catalog-status="INACTIVE"/);
+  assert.match(ui, /workflowStatus\(item\) === selectedStatus/);
+  assert.match(ui, /hidden from customers and AI/);
   assert.match(ui, /Rejected submissions stay here.*never mix with the live catalog/);
   assert.match(ui, /let selectedStatus = approvedCount/);
   assert.doesNotMatch(ui, /id="catalogApprovalFilter"/);

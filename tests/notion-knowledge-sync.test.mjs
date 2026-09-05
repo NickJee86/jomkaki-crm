@@ -10,6 +10,9 @@ import {
   normalizeNotionPage,
   propertyText
 } from '../tools/sync-notion-knowledge.mjs';
+import fs from 'node:fs';
+
+const runtimeSource = fs.readFileSync(new URL('../api/_jomkaki-knowledge.js', import.meta.url), 'utf8');
 
 const rich = content => [{ type: 'text', plain_text: content, text: { content } }];
 const property = (type, value) => type === 'title'
@@ -59,6 +62,11 @@ test('knowledge audit detects the current Consent-policy contradiction', () => {
     { pageId: 'b', knowledgeId: 'KB-TEST-001', status: 'Approved', content: 'Consent form sends only after pre-consent requirements are complete. This is the older test wording.' }
   ]);
   assert.ok(warnings.includes('CONFLICT:CONSENT_TRIGGER_POLICY'));
+});
+
+test('runtime excludes test-case knowledge even when an older fallback snapshot contains it', () => {
+  assert.match(runtimeSource, /NOTION_SYNCED_KNOWLEDGE\.chunks\.filter\(chunk => !\/\^Test Case\$\/i/);
+  assert.match(runtimeSource, /!\/\^KB-TEST-\/i/);
 });
 
 test('build sync queries only Approved pages, retrieves content and excludes test cases from runtime chunks', async () => {

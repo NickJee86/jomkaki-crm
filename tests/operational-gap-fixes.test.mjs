@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { buildMetaPayload } from '../api/whatsapp-outbox-send.js';
+import { customerVisibleOutboxStatus } from '../api/crm.js';
 
 const app = fs.readFileSync(new URL('../app-v2.js', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../api/crm.js', import.meta.url), 'utf8');
@@ -52,10 +53,16 @@ test('outbound messages are recorded and locked before Meta delivery', () => {
   assert.match(api, /retryOutboxMessage/);
   assert.match(app, /data-dispatch-outbox/);
   assert.match(api, /\['FAILED', 'PENDING', 'QUEUED'\]\.includes\(currentStatus\)/);
+  assert.match(api, /already accepted by Meta and cannot be sent again/);
   assert.match(app, /Send this queued WhatsApp message now from its original official number/);
   assert.match(app, /Scheduler delayed · send now available/);
   assert.match(app, /<option value="DELIVERED">Delivered<\/option><option value="READ">Read<\/option>/);
   assert.match(app, /Sending · do not resend/);
+});
+
+test('Meta-accepted follow-ups are never shown or retried as waiting messages', () => {
+  assert.equal(customerVisibleOutboxStatus({ 'Send Status': 'QUEUED', 'Provider Message ID': 'wamid.123' }), 'SENT');
+  assert.equal(customerVisibleOutboxStatus({ 'Send Status': 'QUEUED', 'Provider Message ID': '' }), 'QUEUED');
 });
 
 test('outbox dispatcher supports uploaded document and image media IDs', () => {

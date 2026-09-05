@@ -1,6 +1,7 @@
 import { getAccessToken } from './_auth.js';
 
 const clean = value => String(value ?? '').trim();
+const truth = value => ['TRUE', 'YES', '1', 'Y'].includes(clean(value).toUpperCase());
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 
 async function sharePointToken() {
@@ -39,7 +40,8 @@ export default async function handler(req, res) {
   try {
     const record = await catalogRecord(req, businessUnit, catalogId);
     const fileId = clean(record?.['Image File ID']);
-    if (!record || !fileId) return res.status(404).send('Product image not found');
+    const approvalStatus = clean(record?.['Approval Status']).toUpperCase() || (clean(record?.['Submitted By']) ? 'PENDING_APPROVAL' : 'APPROVED');
+    if (!record || approvalStatus !== 'APPROVED' || !truth(record.Active) || !truth(record['Image Approved']) || !fileId) return res.status(404).send('Product image not found');
     const token = await sharePointToken();
     const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
     const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
@@ -51,7 +53,9 @@ export default async function handler(req, res) {
     const fileResponse = await graph(token, `/drives/${drive.id}/items/${encodeURIComponent(fileId)}/content`);
     const bytes = Buffer.from(await fileResponse.arrayBuffer());
     if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Product image is invalid');
-    res.setHeader('Content-Type', clean(record['Image MIME Type']) || clean(fileResponse.headers.get('content-type')) || 'image/jpeg');
+    const contentType = clean(record['Image MIME Type']) || clean(fileResponse.headers.get('content-type'));
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType.toLowerCase())) throw new Error('Product image type is invalid');
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Length', String(bytes.length));
     res.setHeader('Content-Disposition', `inline; filename="${catalogId.replace(/[^A-Za-z0-9_-]/g, '')}-product-photo"`);
     res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
