@@ -1,4 +1,5 @@
 import { getAccessToken } from './_auth.js';
+import { selectSharePointDocumentLibrary } from './_sharepoint.js';
 
 const clean = value => String(value ?? '').trim();
 const truth = value => ['TRUE', 'YES', '1', 'Y'].includes(clean(value).toUpperCase());
@@ -54,11 +55,9 @@ export default async function handler(req, res) {
     const token = await sharePointToken();
     const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
     const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
-    const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
     const siteResponse = await graph(token, `/sites/${host}:${sitePath}?$select=id`), site = await siteResponse.json();
     const drivesResponse = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`), drives = await drivesResponse.json();
-    const drive = (drives.value || []).find(item => clean(item.name).toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
-    if (!drive) throw new Error('Product image library was not found');
+    const drive = selectSharePointDocumentLibrary(drives.value || [], process.env.SHAREPOINT_LIBRARY_NAME);
     const fileResponse = await graph(token, `/drives/${drive.id}/items/${encodeURIComponent(fileId)}/content`);
     const declaredLength = Number(fileResponse.headers.get('content-length') || 0);
     if (declaredLength > MAX_PRODUCT_IMAGE_BYTES) throw new Error('Product image is too large');

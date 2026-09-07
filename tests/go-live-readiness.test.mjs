@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const app=fs.readFileSync(new URL('../app-v2.js',import.meta.url),'utf8');
 const api=fs.readFileSync(new URL('../api/crm.js',import.meta.url),'utf8');
@@ -10,13 +11,13 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
-  assert.match(html,/app-v2\.js\?v=20260907-record-identity2/);
+  assert.match(html,/app-v2\.js\?v=20260907-quote-storage/);
   assert.match(html,/v2\.css\?v=20260827-operating-layer1/);
   [
     'Go-live readiness',
     'Branch Manager coverage',
     'Active catalog images',
-    'Approved pricing completeness',
+    'Existing approved quote completeness',
     'Active catalog pricing coverage',
     'Active models without approved pricing',
     'Account password readiness',
@@ -53,6 +54,54 @@ test('Administrator settings organize only actionable go-live gaps',()=>{
   assert.match(app,/const pendingIntegrationNames=pendingIntegrations\.map/);
   assert.ok(app.includes('remain safely gated until the required activation checks pass'));
   assert.ok(!app.includes('Meta/LMS remain safely disabled until approved credentials exist'));
+});
+
+function pricingReadiness(catalog, pricing) {
+  const helpers=app.slice(app.indexOf('const pricingAmountReady='),app.indexOf('function settingsLegacy('));
+  const checks=app.slice(app.indexOf('  const approvedPricingGaps='),app.indexOf('  const passwordSetupGaps='));
+  const quoteCard=app.split(/\r?\n/).find(line=>line.includes("['Existing approved quote completeness',")).trim().replace(/,$/,'');
+  assert.ok(helpers&&checks&&quoteCard,'Pricing readiness implementation must be available');
+  return vm.runInNewContext(`${helpers}\n${checks}\n({missingQuotes:catalogPricingCoverageGaps, incompleteQuotes:approvedPricingGaps, quoteCard:${quoteCard}})`,{state:{data:{catalog,pricing}}});
+}
+
+test('Catalog coverage trims IDs without changing source records or sharing sibling variant prices',()=>{
+  const catalog=[
+    {id:'  HP-256-BLACK  ',active:true,approvalStatus:'APPROVED',model:'Example phone',variant:'256GB · Black'},
+    {id:'HP-256-BLUE',active:true,approvalStatus:'APPROVED',model:'Example phone',variant:'256GB · Blue'},
+    {id:'HP-512-BLACK',active:true,approvalStatus:'APPROVED',model:'Example phone',variant:'512GB · Black'},
+    {id:'MOTOR-1',active:true,approvalStatus:'APPROVED'},
+    {id:'   ',active:true,approvalStatus:'APPROVED'}
+  ];
+  const pricing=[
+    {catalogId:'HP-256-BLACK',active:true,status:'APPROVED',approvalStatus:'APPROVED',businessUnit:'HANDPHONE',month12:'100'},
+    {catalogId:'  MOTOR-1  ',active:true,status:'APPROVED',approvalStatus:'APPROVED',baseDeposit:'0',year3:'100'},
+    {catalogId:'   ',active:true,status:'APPROVED',approvalStatus:'APPROVED',businessUnit:'HANDPHONE',month12:'100'}
+  ];
+  const original=JSON.stringify({catalog,pricing});
+  const readiness=pricingReadiness(catalog,pricing);
+  assert.deepEqual(Array.from(readiness.missingQuotes,item=>item.id),['HP-256-BLUE','HP-512-BLACK','   ']);
+  assert.equal(JSON.stringify({catalog,pricing}),original,'Readiness must not rewrite customer catalog or pricing data');
+});
+
+test('Existing quote completeness is separate from catalog coverage',()=>{
+  const catalog=[{id:'PRICED',active:true},{id:'UNPRICED',active:true}];
+  const pricing=[{catalogId:'PRICED',active:true,status:'APPROVED',businessUnit:'HANDPHONE',month24:'125'}];
+  const readiness=pricingReadiness(catalog,pricing);
+  assert.equal(readiness.incompleteQuotes.length,0);
+  assert.equal(readiness.missingQuotes.length,1);
+  assert.equal(readiness.quoteCard[0],'Existing approved quote completeness');
+  assert.equal(readiness.quoteCard[1],'Complete');
+  assert.match(readiness.quoteCard[2],/catalog coverage is checked separately/);
+});
+
+test('Coverage still rejects inactive, unapproved, and incomplete quote rows',()=>{
+  const catalog=['INACTIVE','DRAFT','PENDING','INCOMPLETE'].map(id=>({id,active:true,approvalStatus:'APPROVED'}));
+  const pricing=catalog.map(item=>({catalogId:` ${item.id} `,active:true,status:'APPROVED',approvalStatus:'APPROVED',businessUnit:'HANDPHONE',month12:'100'}));
+  pricing[0].active=false;
+  pricing[1].status='DRAFT';
+  pricing[2].approvalStatus='PENDING_APPROVAL';
+  pricing[3].month12='';
+  assert.equal(pricingReadiness(catalog,pricing).missingQuotes.length,4);
 });
 
 test('Synthetic QA records stay traceable but do not distort production metrics',()=>{

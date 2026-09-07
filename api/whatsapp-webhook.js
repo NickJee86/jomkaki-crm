@@ -136,6 +136,7 @@ const APPLICATION_DETAIL_FIELDS = [
 const applicationDetailHeader = (field, unit) => field.header === 'LOAN_TENURE' ? (unit === 'HANDPHONE' ? 'Loan Tenure Months' : 'Loan Tenure Years') : field.header;
 const APPLICATION_DETAIL_APPLICATION_HEADERS = [...new Set([
   ...APPLICATION_DETAIL_FIELDS.filter(field => field.header !== 'LOAN_TENURE').map(field => field.header),
+  'Catalog ID',
   'Loan Tenure Years',
   'Loan Tenure Months',
   'Document Status',
@@ -475,11 +476,12 @@ async function ensureSheetColumnCapacity(token, sheet, requiredColumnCount) {
 export async function ensureHeaders(token, sheet, requiredHeaders) {
   const [rawHeaders = []] = await readSheet(token, `${sheet}!1:1`), headers = normalizedSheetHeaders(rawHeaders);
   const missing = [...new Set(normalizedSheetHeaders(requiredHeaders).filter(Boolean))].filter(header => !headers.includes(header));
-  if (!missing.length) return;
+  if (!missing.length) return headers;
   await ensureSheetColumnCapacity(token, sheet, headers.length + missing.length);
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=RAW`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
   invalidateSheetDataCache(sheet, true);
+  return [...headers, ...missing];
 }
 
 export async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
@@ -880,6 +882,7 @@ export function buildAutomaticApplication({ lead = {}, state = {}, route = {}, d
     'Team ID': clean(teamId || lead['Team ID']),
     'Origin WhatsApp Channel ID': clean(channelId || route['Internal Channel ID']),
     'Product Category': unit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
+    'Catalog ID': clean(product['Catalog ID']),
     'Product Brand': clean(product.Brand || state['Selected Product Brand']),
     'Product Model': clean(product.Model || state['Selected Product Model']),
     'Product Variant': clean(product.Variant || state['Selected Product Variant']) || 'Standard',
@@ -3661,7 +3664,7 @@ export default async function handler(req, res) {
           application = selectReusableApplication(currentApplications, lead, routeBusinessUnit);
           if (!clean(application['Application ID'])) {
             application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
-            await ensureHeaders(token, 'Applications', ['Application ID', 'Lead ID', 'Created At', 'Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
+            await ensureHeaders(token, 'Applications', ['Application ID', 'Lead ID', 'Created At', 'Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Catalog ID', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
             await appendObject(token, 'Applications', application);
             applications.push(application);
           }
@@ -3671,6 +3674,7 @@ export default async function handler(req, res) {
           const productChanges = instantDecision.product ? {
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit),
             'Product Category': clean(instantDecision.productUnit || routeBusinessUnit) === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
+            'Catalog ID': clean(instantDecision.product['Catalog ID']),
             'Product Brand': clean(instantDecision.product.Brand),
             'Product Model': clean(instantDecision.product.Model),
             'Product Variant': clean(instantDecision.product.Variant) || 'Standard'
@@ -3679,8 +3683,8 @@ export default async function handler(req, res) {
           if (Object.keys(applicationTurnChanges).length) {
             applicationTurnChanges['Updated At'] = receivedAt;
             applicationTurnChanges['Updated By'] = 'META_WEBHOOK_PROGRESSIVE_PROFILE';
-            await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
-            await updateObject(token, 'Applications', 'Application ID', application['Application ID'], applicationTurnChanges, 'CZ');
+            const applicationHeaders = await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);
+            await updateObject(token, 'Applications', 'Application ID', application['Application ID'], applicationTurnChanges, columnName(applicationHeaders.length - 1));
             Object.assign(application, applicationTurnChanges);
           }
         }

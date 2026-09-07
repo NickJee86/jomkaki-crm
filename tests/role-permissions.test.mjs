@@ -23,6 +23,10 @@ const prepareLmsSubmission = () => ({ ready: false });
 source = source.replace("import { validatePublicImageLink } from './_media-validation.js';", `
 const validatePublicImageLink = async () => ({ ok: true });
 `);
+source = source.replace("import { assertSharePointCustomerStorageReady, selectSharePointDocumentLibrary } from './_sharepoint.js';", `
+const assertSharePointCustomerStorageReady = () => ({ writeVerified: true });
+const selectSharePointDocumentLibrary = drives => drives[0] || { id: 'test-drive', name: 'Documents' };
+`);
 const { default: handler, scopeData, deriveDocumentReadiness, rowsToObjects, scopedRecordPermitted, scopedCustomerTarget, customerPhoneForTarget, recordMatchesCustomerTarget, sheetSafeValue, validateUploadFile } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 
 function response() {

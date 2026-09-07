@@ -3,6 +3,7 @@ import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmen
 import { FUTURE_REPORTING_FIELDS, integrationReadiness, publicIntegrationRecords } from './_integrations.js';
 import { prepareLmsSubmission } from './_lmspro.js';
 import { validatePublicImageLink } from './_media-validation.js';
+import { assertSharePointCustomerStorageReady, selectSharePointDocumentLibrary } from './_sharepoint.js';
 
 
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
@@ -415,13 +416,11 @@ async function ensureFolder(token, driveId, parentId, name) {
 async function resolveSharePointTarget(token) {
   const hostname = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
-  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
   const site = await graph(token, `/sites/${hostname}:${sitePath}?$select=id,webUrl`);
   const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType,webUrl`);
-  const drive = (drives.value || []).find(item => clean(item.name).toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
-  if (!drive) throw new Error('SharePoint document library was not found');
+  const drive = selectSharePointDocumentLibrary(drives.value || [], process.env.SHAREPOINT_LIBRARY_NAME);
   const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
-  return { hostname, sitePath, libraryName: drive.name || libraryName, site, drive, root };
+  return { hostname, sitePath, libraryName: drive.name || 'Documents', site, drive, root };
 }
 
 export async function runControlledSharePointWriteTest(req, session) {
@@ -460,6 +459,7 @@ export async function runControlledSharePointWriteTest(req, session) {
 
 async function uploadDocument(req, file, caseId) {
   const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'Document' });
+  assertSharePointCustomerStorageReady(process.env);
   const token = await getSharePointToken();
   const target = await resolveSharePointTarget(token);
   const crmFolder = await ensureFolder(token, target.drive.id, target.root.id, 'CRM Customer Documents');
@@ -474,11 +474,9 @@ async function uploadSecondHandMotorPhoto(file, inventoryId) {
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
-  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
   const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
   const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
-  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
-  if (!drive) throw new Error('SharePoint document library was not found');
+  const drive = selectSharePointDocumentLibrary(drives.value || [], process.env.SHAREPOINT_LIBRARY_NAME);
   const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
   const inventoryFolder = await ensureFolder(token, drive.id, root.id, 'CRM Second Hand Motor Photos');
   const motorFolder = await ensureFolder(token, drive.id, inventoryFolder.id, inventoryId);
@@ -494,11 +492,9 @@ async function uploadProductCatalogImage(file, catalogId, businessUnit) {
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
-  const libraryName = clean(process.env.SHAREPOINT_LIBRARY_NAME) || 'Documents';
   const site = await graph(token, `/sites/${host}:${sitePath}?$select=id`);
   const drives = await graph(token, `/sites/${site.id}/drives?$select=id,name,driveType`);
-  const drive = (drives.value || []).find(item => item.name.toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
-  if (!drive) throw new Error('SharePoint document library was not found');
+  const drive = selectSharePointDocumentLibrary(drives.value || [], process.env.SHAREPOINT_LIBRARY_NAME);
   const root = await graph(token, `/drives/${drive.id}/root?$select=id`);
   const catalogFolder = await ensureFolder(token, drive.id, root.id, 'CRM Product Catalog Photos');
   const unitFolder = await ensureFolder(token, drive.id, catalogFolder.id, canonicalBusinessUnit(businessUnit));
@@ -535,6 +531,27 @@ const validUrl = (value, label) => {
   return url;
 };
 const storageFromVariant = value => clean(value).split(/\s*(?:Â·|·)\s*/)[0] || 'Standard';
+const canonicalQuoteIdentity = value => clean(value).normalize('NFKC').replace(/\s+/g, ' ').toUpperCase();
+export function selectApplicationQuote(application = {}, pricingRows = [], region = '') {
+  if (clean(application['Motor Type']).toUpperCase() === 'SECOND_HAND') return null;
+  const catalogId = canonicalQuoteIdentity(application['Catalog ID']);
+  const brand = canonicalQuoteIdentity(application['Product Brand']);
+  const model = canonicalQuoteIdentity(application['Product Model']);
+  const variant = canonicalQuoteIdentity(application['Product Variant'] || application.Variant);
+  if (!catalogId && (!brand || !model || !variant)) return null;
+  const matches = pricingRows.filter(row => {
+    if (catalogId && canonicalQuoteIdentity(row['Catalog ID']) !== catalogId) return false;
+    if (brand && canonicalQuoteIdentity(row.Brand) !== brand) return false;
+    if (model && canonicalQuoteIdentity(row.Model) !== model) return false;
+    if (variant && canonicalQuoteIdentity(row.Variant) !== variant) return false;
+    return true;
+  });
+  const requestedRegion = canonicalRegion(region);
+  const regional = requestedRegion ? matches.filter(row => canonicalRegion(row['Price Zone']) === requestedRegion) : [];
+  if (regional.length) return regional.length === 1 ? regional[0] : null;
+  const allBranches = matches.filter(row => canonicalQuoteIdentity(row['Price Zone']) === 'ALL_BRANCHES');
+  return allBranches.length === 1 ? allBranches[0] : null;
+}
 const promotionApplies = row => {
   const today = now().slice(0, 10), start = clean(row['Promotion Start']), end = clean(row['Promotion End']);
   return truth(row['Promotion Active']) && clean(row['Promotion Approval Status']).toUpperCase() === 'APPROVED' && clean(row['Promotion Deposit (RM)']) !== '' && (!start || start <= today) && (!end || end >= today);
@@ -614,7 +631,7 @@ const CREDIT_CONSENT_TEMPLATE_PATH = '/assets/ctos-ccris-consent-bph-v4.pdf';
 const creditConsentHeaders = ['Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Consent Signed At', 'Credit Consent Verified At', 'Credit Consent Verified By', 'Credit Consent Document ID', 'Credit Check Status', 'Credit Check Requested At', 'Credit Check Requested By'];
 const outboundMediaHeaders = ['Media ID', 'Media MIME Type', 'Media File Name', 'Image Caption', 'Document URL', 'Image URL'];
 const leadRecordHeaders = ['Lead Source', 'Created By', 'Updated By'];
-const applicationRecordHeaders = ['Product Variant', 'Motor Type', 'Second Hand Inventory ID', 'Created By', 'Updated By'];
+const applicationRecordHeaders = ['Catalog ID', 'Product Variant', 'Motor Type', 'Second Hand Inventory ID', 'Created By', 'Updated By'];
 const documentReviewHeaders = ['Uploaded By', 'Reviewed By', 'Reviewed At'];
 export const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
@@ -1609,7 +1626,7 @@ export default async function handler(req, res) {
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
           'Reference 1 Name': clean(body.reference1Name), 'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone), 'Reference 2 Relationship': clean(body.reference2Relationship),
-          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': motorType, 'Second Hand Inventory ID': secondHandInventoryId, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? '' : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Selling Price (RM)']) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? '' : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Deposit (RM)']) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': requestedHandphoneTenure,
+          'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, 'Catalog ID': motorType === 'SECOND_HAND' ? '' : catalogId, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE', 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': motorType, 'Second Hand Inventory ID': secondHandInventoryId, 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? '' : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Selling Price (RM)']) : '', 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? '' : motorType === 'SECOND_HAND' ? customerAmount(secondHandRecord?.['Deposit (RM)']) : '', 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.tenure) : '', 'Loan Tenure Months': requestedHandphoneTenure,
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Application Status': 'DRAFT', 'Current Stage': 'DOCUMENT_COLLECTION', 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED', 'Assigned Branch ID': assignedBranchId, 'Assigned SA ID': assignedSaId,
@@ -1920,7 +1937,7 @@ export default async function handler(req, res) {
           'Reference 1 Phone': clean(body.reference1Phone), 'Reference 1 Relationship': clean(body.reference1Relationship),
           'Reference 2 Name': clean(body.reference2Name), 'Reference 2 Phone': clean(body.reference2Phone),
           'Reference 2 Relationship': clean(body.reference2Relationship), 'Business Unit': businessUnit, 'Product Category': businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE',
-          'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': secondHandApplication ? 'SECOND_HAND' : businessUnit === 'MOTOR' ? 'NEW' : '', 'Second Hand Inventory ID': secondHandApplication ? clean(record['Second Hand Inventory ID']) : '', 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? '' : clean(record['Requested Product Price (RM)']), 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? '' : clean(record['Requested Deposit (RM)']), 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.loanTenureYears) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.loanTenureMonths) : '',
+          'Catalog ID': secondHandApplication ? '' : catalogId, 'Product Brand': brand, 'Product Model': model, 'Product Variant': variant, 'Motor Type': secondHandApplication ? 'SECOND_HAND' : businessUnit === 'MOTOR' ? 'NEW' : '', 'Second Hand Inventory ID': secondHandApplication ? clean(record['Second Hand Inventory ID']) : '', 'Requested Product Price (RM)': businessUnit === 'HANDPHONE' ? '' : clean(record['Requested Product Price (RM)']), 'Requested Deposit (RM)': businessUnit === 'HANDPHONE' ? '' : clean(record['Requested Deposit (RM)']), 'Loan Tenure Years': businessUnit === 'MOTOR' ? clean(body.loanTenureYears) : '', 'Loan Tenure Months': businessUnit === 'HANDPHONE' ? clean(body.loanTenureMonths) : '',
           'Bank Account Available': clean(body.bankAccountAvailable).toUpperCase(), 'Direct Debit Status': clean(body.directDebitStatus).toUpperCase(),
           'Agreement Status': clean(body.agreementStatus).toUpperCase(), 'Missing Application Fields': clean(body.missingApplicationFields),
           'Updated By': session.username
@@ -1930,8 +1947,8 @@ export default async function handler(req, res) {
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
         if (changes['Loan Tenure Months'] && !['12', '24', '36', '48', '60'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be between 1 and 5 years');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
-        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BX');
+        const applicationHeaders = await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
+        await updateObject(req, 'Applications', 'Application ID', applicationId, changes, columnName(applicationHeaders.length - 1));
         if (linkedLead) {
           await ensureSheetHeaders(req, 'Leads', ['Customer Name', 'Phone Number', 'Normalized Phone', 'Updated At', 'Updated By']);
           await updateObject(req, 'Leads', 'Lead ID', linkedLead['Lead ID'], { 'Customer Name': applicantName, 'Phone Number': normalizedPhone, 'Normalized Phone': normalizedPhone, 'Updated At': now(), 'Updated By': session.username }, 'AP');
@@ -2212,13 +2229,13 @@ export default async function handler(req, res) {
         const zone = leadRegion[row['Lead ID']];
         const businessUnit = rowBusinessUnit(row);
         const pricing = businessUnit === 'HANDPHONE' ? handphonePricing : motorPricing;
-        const quote = pricing.find(p => clean(p.Brand).toUpperCase() === clean(row['Product Brand']).toUpperCase() && clean(p.Model).toUpperCase() === clean(row['Product Model']).toUpperCase() && (clean(p['Price Zone']).toUpperCase() === 'ALL_BRANCHES' || canonicalRegion(p['Price Zone']) === zone)) || {};
+        const quote = selectApplicationQuote(row, pricing, zone) || {};
         const tenure = clean(businessUnit === 'HANDPHONE' ? row['Loan Tenure Months'] : row['Loan Tenure Years']);
         const monthly = businessUnit === 'HANDPHONE' ? (tenure === '12' ? quote['Monthly 12 Months (RM)'] : tenure === '24' ? quote['Monthly 24 Months (RM)'] : tenure === '36' ? quote['Monthly 36 Months (RM)'] : tenure === '48' ? quote['Monthly 48 Months (RM)'] : tenure === '60' ? quote['Monthly 60 Months (RM)'] : '') : (tenure === '3' ? quote['Monthly 3 Years (RM)'] : tenure === '4' ? quote['Monthly 4 Years (RM)'] : tenure === '5' ? quote['Monthly 5 Years (RM)'] : '');
         const ic = clean(row['Applicant IC Number']);
         return { id: row['Application ID'], leadId: row['Lead ID'], customer: customerDisplayName(row['Applicant Name'], row['Phone Number']), region: zone, businessUnit, productCategory: row['Product Category'] || (businessUnit === 'HANDPHONE' ? 'HANDPHONE' : 'MOTORCYCLE'), motorType: row['Motor Type'] || row['Product Condition'], inventoryId: row['Second Hand Inventory ID'] || row['Inventory ID'], synthetic: isSyntheticApplicationRow(row),
           stage: row['Current Stage'] || row['Application Status'], status: row['Application Status'], sa: row['Assigned SA ID'] || 'Unassigned', phone: row['Phone Number'],
-          product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
+          product: [row['Product Brand'], row['Product Model'], row['Product Variant'] || row.Variant].filter(Boolean).join(' '), catalogId: row['Catalog ID'], brand: row['Product Brand'], model: row['Product Model'], variant: row['Product Variant'] || row.Variant,
           tenure, tenureUnit: businessUnit === 'HANDPHONE' ? 'MONTHS' : 'YEARS', deposit: businessUnit === 'HANDPHONE' ? customerAmount(row['Requested Deposit (RM)'] || effectiveDeposit(quote)) : effectiveDeposit(quote), requestedPrice: customerAmount(row['Requested Product Price (RM)'] || quote['Product Price (RM)']), monthly: customerAmount(monthly), priceZone: quote['Price Zone'] || zone, promotion: promotionApplies(quote) ? quote['Promotion Name'] : '', customerId: row['Customer ID'], teamId: row['Team ID'], originChannelId: row['Origin WhatsApp Channel ID'],
           branch: row['Assigned Branch ID'], reviewRequired: row['SA Review Required'], nextFollowUp: row['Next Follow Up At'], followUpStatus: row['Follow Up Status'] || 'ACTIVE', followUpRule: row['Follow Up Rule'], followUpAttempts: Number(row['Follow Up Attempts'] || 0), lastFollowUpAt: row['Last Follow Up At'], lastCustomerReplyAt: row['Last Customer Reply At'], followUpPauseReason: row['Follow Up Pause Reason'], documentStatus: docs.count ? docs.documentStatus : (row['Document Status'] || 'AI_COLLECTION_IN_PROGRESS'), minimumDocumentsComplete: docs.aiComplete ? 'TRUE' : 'FALSE',
           missingDocuments: docs.count ? (docs.classificationPending ? '' : docs.receivedMissing.join(', ')) : (row['Missing Documents'] || ''), verificationPendingDocuments: docs.pendingTypes.join(', '), verifiedMissingDocuments: docs.missing.join(', '), documentClassificationPending: docs.classificationPending, documentsReceived: docs.count, documentTypes: docs.types, documentNeedsReview: docs.needsReview, aiDocumentsComplete: docs.aiComplete, documentUpdated: docs.latest,

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { appendObject, bindDocumentsToApplication, ensureHeaders, objects, updateObject, updateOutboxStatus } from '../api/whatsapp-webhook.js';
+import { appendObject, bindDocumentsToApplication, buildAutomaticApplication, ensureHeaders, objects, updateObject, updateOutboxStatus } from '../api/whatsapp-webhook.js';
 
 const response = (body = {}) => ({ ok: true, status: 200, json: async () => body });
-function mockSheet(t, rows, { sheet = 'Applications' } = {}) {
+function mockSheet(t, rows, { sheet = 'Applications', columnCount = 100 } = {}) {
   globalThis.__JOMKAKI_SHEET_READ_CACHE__?.clear();
   const calls = [], writes = [];
   t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
@@ -15,10 +15,12 @@ function mockSheet(t, rows, { sheet = 'Applications' } = {}) {
       if (options.method === 'PUT') rows[0].push(...body.values[0]);
       return response({ updates: { updatedRange: `${sheet}!A2:Z2` } });
     }
-    if (url.includes('?fields=sheets.properties')) return response({ sheets: [{ properties: { sheetId: 7, title: sheet, gridProperties: { columnCount: 100 } } }] });
+    if (url.includes('?fields=sheets.properties')) return response({ sheets: [{ properties: { sheetId: 7, title: sheet, gridProperties: { columnCount } } }] });
     const range = decodeURIComponent(new URL(url).pathname.split('/values/')[1] || '');
     assert.ok(range.startsWith(`${sheet}!`), `Unexpected mocked range: ${range}`);
-    return response({ values: range.endsWith('!1:1') ? [rows[0]] : rows });
+    const lastColumn = range.match(/!A:([A-Z]+)$/)?.[1];
+    const width = lastColumn ? [...lastColumn].reduce((count, char) => count * 26 + char.charCodeAt(0) - 64, 0) : Infinity;
+    return response({ values: range.endsWith('!1:1') ? [rows[0]] : rows.map(row => row.slice(0, width)) });
   });
   return { calls, writes };
 }
@@ -123,6 +125,62 @@ test('valid updates target the unique physical row through normalized headers', 
 test('automatic application creation explicitly ensures its identity and linkage headers', () => {
   const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
   assert.match(source, /ensureHeaders\(token, 'Applications', \['Application ID', 'Lead ID', 'Created At'/);
+});
+
+test('automatic application creation persists only the selected catalog row identity', async t => {
+  const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
+  const headerList = source.match(/ensureHeaders\(token, 'Applications', (\['Application ID', 'Lead ID', 'Created At'[^\n]+\])\);/);
+  assert.ok(headerList);
+  const headers = new Function(`return ${headerList[1]};`)();
+  assert.ok(headers.includes('Catalog ID'));
+  const product = { 'Catalog ID': ' HP-SYNTHETIC-256 ', Brand: 'Synthetic', Model: 'Phone', Variant: '256GB' };
+  const application = buildAutomaticApplication({ applicationId: 'APP-SYNTHETIC', lead: { 'Lead ID': 'LEAD-SYNTHETIC' }, decision: { productUnit: 'HANDPHONE', product } });
+  assert.equal(application['Catalog ID'], 'HP-SYNTHETIC-256');
+  assert.equal(buildAutomaticApplication({ state: { 'Catalog ID': 'UNVERIFIED-OLD-ID', 'Selected Product Model': 'Phone' } })['Catalog ID'], '');
+  const { writes } = mockSheet(t, [headers]);
+  await appendObject('mock-token', 'Applications', application);
+  assert.equal(writes[0].body.values[0][headers.indexOf('Catalog ID')], 'HP-SYNTHETIC-256');
+});
+
+test('selected-product updates persist its exact catalog identity without backfilling unrelated turns', async t => {
+  const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
+  const start = source.indexOf('const productChanges = instantDecision.product ? {');
+  const end = source.indexOf('const applicationTurnChanges', start);
+  assert.ok(start >= 0 && end > start);
+  const changesFor = new Function('instantDecision', 'routeBusinessUnit', 'clean', `${source.slice(start, end)} return productChanges;`);
+  const clean = value => String(value ?? '').trim();
+  assert.deepEqual(changesFor({}, 'HANDPHONE', clean), {});
+  const changes = changesFor({ product: { 'Catalog ID': ' HP-SYNTHETIC-512 ', Brand: 'Synthetic', Model: 'Phone', Variant: '512GB' } }, 'HANDPHONE', clean);
+  assert.equal(changes['Catalog ID'], 'HP-SYNTHETIC-512');
+  assert.equal(changes['Product Variant'], '512GB');
+  const detailHeaders = source.slice(source.indexOf('const APPLICATION_DETAIL_APPLICATION_HEADERS'), source.indexOf('const APPLICATION_DETAIL_APPLICATION_HEADERS') + 1800);
+  assert.match(detailHeaders, /'Catalog ID'/);
+  const { writes } = mockSheet(t, [['Application ID', 'Catalog ID', 'Product Variant'], ['APP-SYNTHETIC', 'HP-SYNTHETIC-256', '256GB']]);
+  await updateObject('mock-token', 'Applications', 'Application ID', 'APP-SYNTHETIC', changes);
+  assert.deepEqual(writes[0].body.data, [
+    { range: 'Applications!B2', values: [['HP-SYNTHETIC-512']] },
+    { range: 'Applications!C2', values: [['512GB']] }
+  ]);
+});
+
+for (const catalogHeaderExists of [false, true]) test(`selected-product updates reach ${catalogHeaderExists ? 'existing' : 'newly added'} Catalog ID beyond CZ`, async t => {
+  const source = fs.readFileSync(new URL('../api/whatsapp-webhook.js', import.meta.url), 'utf8');
+  const start = source.indexOf("const applicationHeaders = await ensureHeaders(token, 'Applications', APPLICATION_DETAIL_APPLICATION_HEADERS);");
+  const end = source.indexOf('Object.assign(application, applicationTurnChanges)', start);
+  assert.ok(start >= 0 && end > start);
+  const columnStart = source.indexOf('const columnName = index => {');
+  const columnEnd = source.indexOf('};', columnStart) + 2;
+  const columnName = new Function(`${source.slice(columnStart, columnEnd)} return columnName;`)();
+  const applyChanges = new Function('ensureHeaders', 'updateObject', 'columnName', `return async (token, application, applicationTurnChanges) => { const APPLICATION_DETAIL_APPLICATION_HEADERS = ['Catalog ID']; ${source.slice(start, end)} };`)(ensureHeaders, updateObject, columnName);
+  const headers = ['Application ID', ...Array.from({ length: 103 }, (_, index) => `Existing ${index + 1}`)];
+  if (catalogHeaderExists) headers.push('Catalog ID');
+  const row = ['APP-SYNTHETIC', ...Array(103).fill('')];
+  if (catalogHeaderExists) row.push('OLD-SKU');
+  const { calls, writes } = mockSheet(t, [headers, row], { columnCount: 200 });
+  await applyChanges('mock-token', { 'Application ID': 'APP-SYNTHETIC' }, { 'Catalog ID': 'EXACT-SKU' });
+  assert.ok(calls.some(call => decodeURIComponent(call.url).endsWith('/Applications!A:DA')));
+  assert.deepEqual(writes.filter(write => write.body.data).map(write => write.body.data), [[{ range: 'Applications!DA2', values: [['EXACT-SKU']] }]]);
+  assert.equal(writes.filter(write => write.options.method === 'PUT').length, catalogHeaderExists ? 0 : 1);
 });
 
 test('document binding locates a unique document ID instead of trusting a stale physical row number', async t => {
