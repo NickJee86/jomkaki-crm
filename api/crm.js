@@ -184,11 +184,20 @@ async function getAccessToken(req) {
   return (await tokenResponse.json()).accessToken;
 }
 
+const completeCrmOperationalSheets = new Set([
+  'Leads', 'Applications', 'Conversation_State', 'Customer_Inbox', 'Message_Outbox', 'Document_Log', 'Activity_Log',
+  'Second_Hand_Motor_Inventory', 'Motor_Model_Catalog', 'Handphone_Model_Catalog', 'Motor_Loan_Pricing', 'Handphone_Loan_Pricing'
+]);
+export const completeCrmOperationalRange = range => {
+  const match = clean(range).match(/^([^!]+)!A(?:1)?:[A-Z]+(?:\d+)?$/);
+  return match && completeCrmOperationalSheets.has(match[1]) ? `'${match[1]}'` : range;
+};
+
 async function readRanges(req, ranges) {
   if (!SHEET_ID) throw new Error('Spreadsheet is not configured');
   const token = await getAccessToken(req);
   const params = new URLSearchParams({ majorDimension: 'ROWS' });
-  ranges.forEach(range => params.append('ranges', range));
+  ranges.forEach(range => params.append('ranges', completeCrmOperationalRange(range)));
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${params}`, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`Google Sheets request failed (${response.status})`);
   return (await response.json()).valueRanges.map(item => {
@@ -532,6 +541,18 @@ const validUrl = (value, label) => {
 };
 const storageFromVariant = value => clean(value).split(/\s*(?:Â·|·)\s*/)[0] || 'Standard';
 const canonicalQuoteIdentity = value => clean(value).normalize('NFKC').replace(/\s+/g, ' ').toUpperCase();
+export function applicationQuoteEligible(row = {}, today = now().slice(0, 10)) {
+  const currentDate = clean(today).slice(0, 10), effectiveFrom = clean(row['Effective From']), effectiveTo = clean(row['Effective To']);
+  const validEffectiveDate = value => !value || /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(currentDate)
+    && truth(row.Active)
+    && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED'
+    && productApprovalStatus(row) === 'APPROVED'
+    && validEffectiveDate(effectiveFrom)
+    && validEffectiveDate(effectiveTo)
+    && (!effectiveFrom || effectiveFrom <= currentDate)
+    && (!effectiveTo || effectiveTo >= currentDate);
+}
 export function selectApplicationQuote(application = {}, pricingRows = [], region = '') {
   if (clean(application['Motor Type']).toUpperCase() === 'SECOND_HAND') return null;
   const catalogId = canonicalQuoteIdentity(application['Catalog ID']);
@@ -2220,8 +2241,8 @@ export default async function handler(req, res) {
     if (resource === 'applications') {
       const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AD1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
       const documents = rowsToObjects(documentRows).filter(row => scopedRecordPermitted(businessScope, row));
-      const motorPricing = rowsToObjects(motorPricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
-      const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
+      const motorPricing = rowsToObjects(motorPricingRows).filter(row => applicationQuoteEligible(row));
+      const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => applicationQuoteEligible(row));
       const docsByApplication = new Map(); documents.forEach(row => { const key = row['Application ID']; if (key) docsByApplication.set(key, [...(docsByApplication.get(key) || []), row]); });
       const leadRegion = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], canonicalRegion(row.Region)]));
       const records = [...businessApplications].reverse().map(row => {

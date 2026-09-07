@@ -3325,6 +3325,37 @@ export function selectReusableApplication(applications = [], lead = {}, business
     || {};
 }
 
+const sameCustomerIdentity = (left, right) => {
+  const leftId = clean(left['Customer ID']), rightId = clean(right['Customer ID']);
+  if (leftId && rightId) return leftId === rightId;
+  const phone = digits(left['Phone Number']);
+  return !!phone && phone === digits(right['Phone Number']);
+};
+
+export function resolveApplicationLead(application = {}, lead, leads = []) {
+  if (!clean(application['Application ID'])) return lead;
+  if (!clean(lead?.['Lead ID'])) throw new Error('Inbound lead identity is missing; manual review is required');
+  const applicationLeadId = clean(application['Lead ID']);
+  if (!applicationLeadId) throw new Error('Application lead identity is missing; manual review is required');
+  if (applicationLeadId === clean(lead['Lead ID'])) {
+    const applicationCustomerId = clean(application['Customer ID']), leadCustomerId = clean(lead['Customer ID']);
+    if (applicationCustomerId && leadCustomerId && applicationCustomerId !== leadCustomerId) throw new Error('Application customer identity conflicts with its lead; manual review is required');
+    return lead;
+  }
+  const matches = leads.filter(row => clean(row['Lead ID']) === applicationLeadId);
+  if (matches.length !== 1 || !sameCustomerIdentity(lead, application) || !sameCustomerIdentity(lead, matches[0]) || !sameCustomerIdentity(application, matches[0])) {
+    throw new Error('Application customer identity cannot be confirmed; manual review is required');
+  }
+  return matches[0];
+}
+
+export function selectApplicationDocuments(documents = [], lead = {}, application = {}) {
+  const leadId = clean(lead['Lead ID']), applicationId = clean(application['Application ID']);
+  if (!leadId) return [];
+  return documents.filter(row => clean(row['Lead ID']) === leadId
+    && (!clean(row['Application ID']) || (applicationId && clean(row['Application ID']) === applicationId)));
+}
+
 async function sendImmediateAcknowledgement(token, { route, phone, text, messageType, messageId, lead, application, receivedAt, businessUnit, teamId }) {
   if (clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'CLOUD_MODE_DISABLED' };
   const acknowledgement = buildImmediateAcknowledgement(text, messageType);
@@ -3473,8 +3504,12 @@ export default async function handler(req, res) {
         const receivedAt = new Date(Number(message.timestamp || Date.now() / 1000) * 1000).toISOString();
         const routeUsable = !!channelId && routeBusinessUnit !== 'UNASSIGNED' && truth(route.Active) && truth(route['Inbound Enabled']);
         let lead = leads.find(row => digits(row['Phone Number']) === phone && clean(row['Business Unit']).toUpperCase() === routeBusinessUnit);
+        const routedLead = lead;
+        const existingApplications = lead ? await loadApplications() : [];
+        lead = resolveApplicationLead(selectReusableApplication(existingApplications, lead || {}, routeBusinessUnit), lead, leads);
         const previousInboundAt = clean(lead?.['Last Inbound At']);
-        let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1) : null;
+        let conversationState = lead ? conversationStates.filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])).at(-1)
+          || conversationStates.filter(row => clean(row['Lead ID']) === clean(routedLead?.['Lead ID'])).at(-1) : null;
         // The sent-message log is the record of what the customer actually saw.
         // Reconcile it before routing in case a duplicate/stale state row trails
         // the latest successful reply.
@@ -3556,10 +3591,10 @@ export default async function handler(req, res) {
         const needsCatalog = ['STEP_03_PRODUCT', 'STEP_04_DOCUMENTS'].includes(currentStep) || locationConfirmed || (conversationalText && onboardingStep);
         const catalogData = needsCatalog ? await loadCatalogData() : { motorCatalog: [], motorPricing: [], handphoneCatalog: [], handphonePricing: [] };
         const needsDocuments = !!lead && (mediaInbound || currentStep === 'STEP_04_DOCUMENTS' || isDocumentStatusQuestion(text) || conversationalDocumentRequirement(text));
-        const leadDocuments = needsDocuments ? (await loadDocuments()).filter(row => clean(row['Lead ID']) === clean(lead['Lead ID'])) : [];
-        const shouldPreloadApplication = !!lead && (needsDocuments || !!clean(conversationState?.['Application ID']));
-        const preloadedApplications = shouldPreloadApplication ? await loadApplications() : [];
-        const applicationContext = preloadedApplications.filter(row => clean(row['Lead ID']) === clean(lead?.['Lead ID'])).at(-1) || {};
+        const preloadedApplications = existingApplications;
+        const applicationContext = selectReusableApplication(preloadedApplications, lead || {}, routeBusinessUnit);
+        lead = resolveApplicationLead(applicationContext, lead, leads);
+        let leadDocuments = needsDocuments ? selectApplicationDocuments(await loadDocuments(), lead, applicationContext) : [];
         human = human || conversationRequiresHuman({ application: applicationContext });
         const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
@@ -3638,6 +3673,7 @@ export default async function handler(req, res) {
         let willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
         let instantResult = { sent: false }, instantOutboxId = '';
+        const leadTurnChanges = { ...progressiveProfile.leadChanges, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId };
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
@@ -3648,7 +3684,6 @@ export default async function handler(req, res) {
           leads.push(lead);
         } else {
           await ensureHeaders(token, 'Leads', ['Lead Source', 'Created By', 'Updated By']);
-          const leadTurnChanges = { ...progressiveProfile.leadChanges, 'Last Inbound WhatsApp Channel ID': channelId, 'Last Inbound WhatsApp Number ID': numberId, 'Last Inbound At': receivedAt, 'Last Customer Reply At': receivedAt, 'Updated At': receivedAt, 'Updated By': 'META_WEBHOOK', 'Business Unit': routeBusinessUnit, 'Team ID': teamId };
           await updateObject(token, 'Leads', 'Lead ID', lead['Lead ID'], leadTurnChanges, 'AP');
           Object.assign(lead, leadTurnChanges);
         }
@@ -3668,8 +3703,15 @@ export default async function handler(req, res) {
             await appendObject(token, 'Applications', application);
             applications.push(application);
           }
-          await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
         }
+        const canonicalApplicationLead = resolveApplicationLead(application, lead, leads);
+        if (canonicalApplicationLead !== lead) {
+          await updateObject(token, 'Leads', 'Lead ID', canonicalApplicationLead['Lead ID'], leadTurnChanges, 'AP');
+          Object.assign(canonicalApplicationLead, leadTurnChanges);
+          lead = canonicalApplicationLead;
+        }
+        leadDocuments = needsDocuments ? selectApplicationDocuments(await loadDocuments(), lead, application) : [];
+        if (clean(application['Application ID'])) await bindDocumentsToApplication(token, leadDocuments, application['Application ID']);
         if (clean(application['Application ID'])) {
           const productChanges = instantDecision.product ? {
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit),
@@ -3800,6 +3842,7 @@ export default async function handler(req, res) {
           conversationStates.push(conversationState);
         } else {
           const latestInbound = {
+            'Lead ID': clean(lead['Lead ID']),
             'Application ID': clean(application['Application ID'] || conversationState['Application ID']),
             'Last Customer Message': clean(text),
             'Last Message ID': clean(message.id),
