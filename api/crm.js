@@ -2178,5 +2178,3 @@ export default async function handler(req, res) {
     return res.status(503).json({ live: false, error: 'CRM data connection is not configured yet.' });
   }
 }
-
-                                                   
