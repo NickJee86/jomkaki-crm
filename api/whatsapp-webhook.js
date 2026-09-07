@@ -390,14 +390,62 @@ async function readSheet(token, range) {
   return rows.map(row => [...row]);
 }
 
-const objects = rows => {
-  const [headers = [], ...values] = rows;
-  return values.map((row, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, row[column] ?? ''])) })).filter(row => Object.values(row).some(Boolean));
+const sheetHeader = value => clean(value).replace(/^\uFEFF/, '').trim();
+const normalizedSheetHeaders = headers => headers.map(sheetHeader);
+const identifiedSheetHeaders = Object.freeze({
+  Applications: 'Application ID', Leads: 'Lead ID', Conversation_State: 'State ID',
+  Customer_Inbox: 'Message ID', Message_Outbox: 'Outbox ID', Document_Log: 'Document ID'
+});
+const headerPositions = (headers, header) => headers.flatMap((value, index) => value === header ? [index] : []);
+const uniqueHeaderPosition = (headers, header, sheet) => {
+  const positions = headerPositions(headers, header);
+  if (!positions.length) throw new Error(`Missing ${header} header in ${sheet}`);
+  if (positions.length !== 1) throw new Error(`Ambiguous ${header} header in ${sheet}; repair duplicate columns before writing`);
+  return positions[0];
+};
+const uniqueRowIndex = (rows, headers, identifier, id, sheet) => {
+  const targetId = clean(id);
+  if (!identifier || !targetId) throw new Error(`Missing row identifier for ${sheet} update`);
+  const idIndex = uniqueHeaderPosition(headers, identifier, sheet);
+  const matches = rows.flatMap((row, index) => index > 0 && clean(row[idIndex]) === targetId ? [index] : []);
+  if (matches.length !== 1) throw new Error(`${matches.length ? 'Ambiguous' : 'Missing'} ${identifier} ${targetId} in ${sheet}; expected exactly one row`);
+  return matches[0];
+};
+const normalizedWriteEntries = object => {
+  const entries = new Map();
+  for (const [rawHeader, value] of Object.entries(object || {})) {
+    const header = sheetHeader(rawHeader);
+    if (!header) continue;
+    if (entries.has(header)) throw new Error(`Ambiguous ${header} field in write request`);
+    entries.set(header, value);
+  }
+  return entries;
 };
 
-async function appendObject(token, sheet, object) {
-  const [headers = []] = await readSheet(token, `${sheet}!1:1`);
-  const values = headers.map(header => object[header] ?? '');
+export const objects = rows => {
+  const [rawHeaders = [], ...values] = rows, headers = normalizedSheetHeaders(rawHeaders);
+  return values.flatMap((row, index) => {
+    const entries = new Map();
+    headers.forEach((header, column) => {
+      if (!header || header === 'rowNumber') return;
+      const value = row[column] ?? '';
+      if (!entries.has(header) || (!clean(entries.get(header)) && clean(value))) entries.set(header, value);
+    });
+    if (![...entries.values()].some(value => clean(value))) return [];
+    return [{ ...Object.fromEntries(entries), rowNumber: index + 2 }];
+  });
+};
+
+export async function appendObject(token, sheet, object) {
+  const [rawHeaders = []] = await readSheet(token, `${sheet}!1:1`);
+  const headers = normalizedSheetHeaders(rawHeaders), entries = normalizedWriteEntries(object);
+  const identifier = identifiedSheetHeaders[sheet];
+  if (identifier) {
+    uniqueHeaderPosition(headers, identifier, sheet);
+    if (!clean(entries.get(identifier))) throw new Error(`Missing ${identifier} value for ${sheet} append`);
+  }
+  for (const header of entries.keys()) if (headers.includes(header)) uniqueHeaderPosition(headers, header, sheet);
+  const values = headers.map(header => entries.get(header) ?? '');
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) }, `Unable to write ${sheet}`, 1);
   invalidateSheetDataCache(sheet);
 }
@@ -424,9 +472,9 @@ async function ensureSheetColumnCapacity(token, sheet, requiredColumnCount) {
   );
 }
 
-async function ensureHeaders(token, sheet, requiredHeaders) {
-  const [headers = []] = await readSheet(token, `${sheet}!1:1`);
-  const missing = requiredHeaders.filter(header => !headers.includes(header));
+export async function ensureHeaders(token, sheet, requiredHeaders) {
+  const [rawHeaders = []] = await readSheet(token, `${sheet}!1:1`), headers = normalizedSheetHeaders(rawHeaders);
+  const missing = [...new Set(normalizedSheetHeaders(requiredHeaders).filter(Boolean))].filter(header => !headers.includes(header));
   if (!missing.length) return;
   await ensureSheetColumnCapacity(token, sheet, headers.length + missing.length);
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
@@ -434,23 +482,31 @@ async function ensureHeaders(token, sheet, requiredHeaders) {
   invalidateSheetDataCache(sheet, true);
 }
 
-async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
-  const rows = await readSheet(token, `${sheet}!A:${maxColumn}`), headers = rows[0] || [], idIndex = headers.indexOf(idHeader);
-  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(id));
-  if (rowIndex < 1) return;
-  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
+export async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z') {
+  const identifier = sheetHeader(idHeader), targetId = clean(id);
+  if (!identifier || !targetId) throw new Error(`Missing row identifier for ${sheet} update`);
+  const rows = await readSheet(token, `${sheet}!A:${maxColumn}`), headers = normalizedSheetHeaders(rows[0] || []);
+  const rowIndex = uniqueRowIndex(rows, headers, identifier, targetId, sheet), entries = normalizedWriteEntries(changes);
+  if (entries.has(identifier) && clean(entries.get(identifier)) !== targetId) throw new Error(`Cannot change ${identifier} while updating ${sheet}`);
+  const data = [...entries].filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(uniqueHeaderPosition(headers, header, sheet))}${rowIndex + 1}`, values: [[value ?? '']] }));
   if (!data.length) return;
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) }, `Unable to update ${sheet}`);
   invalidateSheetDataCache(sheet);
 }
 
-async function bindDocumentsToApplication(token, documents = [], applicationId = '') {
+export async function bindDocumentsToApplication(token, documents = [], applicationId = '') {
   const pending = documents.filter(row => clean(row['Lead ID']) && !clean(row['Application ID']) && row.rowNumber);
   if (!pending.length || !clean(applicationId)) return;
-  const [headers = []] = await readSheet(token, 'Document_Log!1:1');
-  const applicationColumn = headers.indexOf('Application ID');
-  if (applicationColumn < 0) return;
-  const data = pending.map(row => ({ range: `Document_Log!${columnName(applicationColumn)}${row.rowNumber}`, values: [[applicationId]] }));
+  const rows = await readSheet(token, 'Document_Log!A:AD'), headers = normalizedSheetHeaders(rows[0] || []);
+  const applicationColumn = uniqueHeaderPosition(headers, 'Application ID', 'Document_Log');
+  const leadColumn = uniqueHeaderPosition(headers, 'Lead ID', 'Document_Log');
+  const data = pending.map(document => {
+    const rowIndex = uniqueRowIndex(rows, headers, 'Document ID', document['Document ID'], 'Document_Log');
+    if (clean(rows[rowIndex][leadColumn]) !== clean(document['Lead ID'])) throw new Error('Document lead identity changed; refresh before binding');
+    const existingApplicationId = clean(rows[rowIndex][applicationColumn]);
+    if (existingApplicationId && existingApplicationId !== clean(applicationId)) throw new Error('Document is already linked to another application');
+    return { range: `Document_Log!${columnName(applicationColumn)}${rowIndex + 1}`, values: [[applicationId]] };
+  });
   await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) }, 'Unable to bind customer documents to application');
   invalidateSheetDataCache('Document_Log');
   pending.forEach(row => { row['Application ID'] = applicationId; });
@@ -3308,15 +3364,18 @@ export function buildOutboxStatusChanges(currentStatus = '', status = '', errorM
   return changes;
 }
 
-async function updateOutboxStatus(token, providerId, status, errorMessage = '', eventTimestamp = '') {
+export async function updateOutboxStatus(token, providerId, status, errorMessage = '', eventTimestamp = '') {
   if (!clean(providerId)) return;
   const rows = await readSheet(token, 'Message_Outbox!A:AJ');
-  const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID'), sendStatusIndex = headers.indexOf('Send Status');
-  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId));
-  if (rowIndex < 1) return;
+  const headers = normalizedSheetHeaders(rows[0] || []);
+  const providerIndex = uniqueHeaderPosition(headers, 'Provider Message ID', 'Message_Outbox'), sendStatusIndex = uniqueHeaderPosition(headers, 'Send Status', 'Message_Outbox');
+  const matches = rows.flatMap((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId) ? [index] : []);
+  if (!matches.length) return;
+  if (matches.length !== 1) throw new Error('Ambiguous provider message ID in Message_Outbox; refusing delivery update');
+  const rowIndex = matches[0];
   const changes = buildOutboxStatusChanges(rows[rowIndex]?.[sendStatusIndex], status, errorMessage, eventTimestamp);
   if (!changes) return;
-  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value]] }));
+  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(uniqueHeaderPosition(headers, header, 'Message_Outbox'))}${rowIndex + 1}`, values: [[value]] }));
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) });
   if (!response.ok) throw new Error(`Unable to record WhatsApp delivery status (${response.status})`);
 }
@@ -3602,7 +3661,7 @@ export default async function handler(req, res) {
           application = selectReusableApplication(currentApplications, lead, routeBusinessUnit);
           if (!clean(application['Application ID'])) {
             application = buildAutomaticApplication({ lead, state: { ...(conversationState || {}), ...progressiveProfile.stateChanges }, route, decision: instantDecision, receivedAt, channelId, businessUnit: routeBusinessUnit, teamId });
-            await ensureHeaders(token, 'Applications', ['Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
+            await ensureHeaders(token, 'Applications', ['Application ID', 'Lead ID', 'Created At', 'Region', 'Business Unit', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', 'Product Category', 'Product Brand', 'Product Model', 'Product Variant', 'Motor Type', 'Application Status', 'Current Stage', 'Processing Mode', 'Assigned Branch ID', 'Assigned SA ID', 'Document Status', 'Minimum Documents Complete', 'Missing Documents', 'Credit Consent Status', 'Credit Consent Template Version', 'Credit Consent Sent At', 'Credit Check Status', 'SA Review Required', 'Created By', 'Updated By']);
             await appendObject(token, 'Applications', application);
             applications.push(application);
           }

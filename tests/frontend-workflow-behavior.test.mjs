@@ -65,14 +65,36 @@ test('Customer 360 is chronological even when a delayed reply refers to an older
   assert.match(messages[1].meta, /quote\.pdf/);
 });
 
-test('legacy inverted inbound timestamps remain paired before their direct reply', () => {
+test('inverted source timestamps preserve actual dates and chronological known messages', () => {
   const context = crmContext({
     inbox: [{ id: 'I1', time: '2026-09-07T10:05:00Z', message: 'Question' }],
     outbox: [{ id: 'O1', time: '2026-09-07T10:00:00Z', replyToMessageId: 'I1', message: 'Answer' }]
   });
   const messages = context.customer360Conversation({ matches: () => true });
-  assert.deepEqual(Array.from(messages, item => item.id), ['I1', 'O1']);
-  assert.equal(messages[0].time, messages[1].time);
+  assert.deepEqual(Array.from(messages, item => item.id), ['O1', 'I1']);
+  assert.equal(messages[0].time, '2026-09-07T10:00:00Z');
+  assert.equal(messages[1].time, '2026-09-07T10:05:00Z');
+  assert.equal(messages[0].turnId, messages[1].turnId);
+});
+
+test('undated incoming messages never inherit a lead or direct reply timestamp', () => {
+  const context = crmContext({
+    inbox: [{ id: 'I1', message: 'Undated question' }, { id: 'I2', time: 'invalid', message: 'Another undated question' }],
+    outbox: [{ id: 'O1', time: '2026-09-07T10:00:00Z', replyToMessageId: 'I1', message: 'Dated reply' }]
+  });
+  const messages = context.customer360Conversation({ matches: () => true, lead: { lastInboundAt: '2026-09-08T10:00:00Z', lastCustomerReplyAt: '2026-09-08T11:00:00Z', time: '2026-09-08T12:00:00Z', created: '2026-09-01T10:00:00Z' } });
+  for (const incoming of messages.filter(item => item.direction === 'incoming')) assert.equal(incoming.time, '');
+  const linked = messages.find(item => item.id === 'I1'), reply = messages.find(item => item.id === 'O1');
+  assert.equal(linked.sortTime, Date.parse(reply.time), 'A grouping anchor is separate from the displayed timestamp');
+  assert.equal(reply.time, '2026-09-07T10:00:00Z');
+  context.pretty = String;
+  context.when = String;
+  context.pill = () => '';
+  vm.runInContext(block(app, 'function customer360ConversationSection(', 'function customer360ActivitySection('), context);
+  const html = context.customer360ConversationSection(messages);
+  assert.equal((html.match(/<time>Time unavailable<\/time>/g) || []).length, 2);
+  assert.doesNotMatch(html, /2026-09-08/);
+  assert.equal(context.state.data.inbox[0].time, undefined, 'Do not alter source records');
 });
 
 test('resolved handovers no longer appear as requiring human attention', () => {

@@ -197,12 +197,61 @@ async function readRanges(req, ranges) {
   });
 }
 
-async function appendObject(req, sheet, object) {
+const sheetHeader = value => clean(value).replace(/^\uFEFF/, '');
+const normalizedSheetHeaders = headers => headers.map(sheetHeader);
+const identifiedSheetHeaders = Object.freeze({
+  Applications: 'Application ID',
+  Leads: 'Lead ID',
+  Conversation_State: 'State ID',
+  Customer_Inbox: 'Message ID',
+  Message_Outbox: 'Outbox ID',
+  Document_Log: 'Document ID',
+  Activity_Log: 'Activity ID',
+  CRM_User_Access: 'Account ID',
+  WhatsApp_Number_Master: 'Internal Channel ID',
+  Second_Hand_Motor_Inventory: 'Inventory ID',
+  Motor_Model_Catalog: 'Catalog ID',
+  Handphone_Model_Catalog: 'Catalog ID',
+  Motor_Loan_Pricing: 'Pricing ID',
+  Handphone_Loan_Pricing: 'Pricing ID'
+});
+const normalizedWriteEntries = object => {
+  const entries = new Map();
+  for (const [rawHeader, value] of Object.entries(object || {})) {
+    const header = sheetHeader(rawHeader);
+    if (!header) continue;
+    if (entries.has(header)) throw new Error(`Ambiguous ${header} field in write request`);
+    entries.set(header, value);
+  }
+  return entries;
+};
+
+export function uniqueSheetHeaderPosition(rawHeaders = [], rawHeader = '', sheet = 'worksheet') {
+  const headers = normalizedSheetHeaders(rawHeaders), header = sheetHeader(rawHeader);
+  const positions = headers.flatMap((value, index) => value === header ? [index] : []);
+  if (!positions.length) throw new Error(`Missing ${header || 'identifier'} header in ${sheet}`);
+  if (positions.length !== 1) throw new Error(`Ambiguous ${header} header in ${sheet}; repair duplicate columns before writing`);
+  return positions[0];
+}
+
+export function appendRowValues(rawHeaders = [], sheet = '', object = {}) {
+  const headers = normalizedSheetHeaders(rawHeaders), entries = normalizedWriteEntries(object);
+  if (!headers.length) throw new Error(`${sheet} headers are missing`);
+  const identifier = identifiedSheetHeaders[sheet];
+  if (identifier) {
+    uniqueSheetHeaderPosition(headers, identifier, sheet);
+    if (!clean(entries.get(identifier))) throw new Error(`Missing ${identifier} value for ${sheet} append`);
+  }
+  for (const header of entries.keys()) if (headers.includes(header)) uniqueSheetHeaderPosition(headers, header, sheet);
+  return headers.map(header => sheetSafeValue(entries.get(header) ?? ''));
+}
+
+export async function appendObject(req, sheet, object) {
+  const identifier = identifiedSheetHeaders[sheet], entries = normalizedWriteEntries(object);
+  if (identifier && !clean(entries.get(identifier))) throw new Error(`Missing ${identifier} value for ${sheet} append`);
   const token = await getAccessToken(req);
   const [headerRows] = await readRanges(req, [`${sheet}!1:1`]);
-  const headers = headerRows?.[0] || [];
-  if (!headers.length) throw new Error(`${sheet} headers are missing`);
-  const values = headers.map(header => sheetSafeValue(object[header] ?? ''));
+  const values = appendRowValues(headerRows?.[0] || [], sheet, object);
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] })
   });
@@ -215,18 +264,35 @@ const columnName = index => {
   return name;
 };
 
-async function updateObject(req, sheet, idHeader, id, changes, maxColumn = 'BG') {
+export function resolveUniqueRecordRow(rows = [], idHeader = '', id = '') {
+  const wantedId = clean(id), wantedHeader = clean(idHeader);
+  if (!wantedId) throw new Error(`${wantedHeader || 'Record ID'} is required`);
+  const idIndex = uniqueSheetHeaderPosition(rows?.[0] || [], wantedHeader, 'worksheet');
+  const matchingRows = rows.flatMap((row, index) => index > 0 && clean(row[idIndex]) === wantedId ? [index] : []);
+  if (!matchingRows.length) throw new Error('Record was not found');
+  if (matchingRows.length > 1) throw new Error(`${wantedHeader} ${wantedId} is duplicated`);
+  return matchingRows[0];
+}
+
+export function buildRecordUpdateData(rawHeaders = [], sheet = '', rowIndex = 0, changes = {}) {
+  const headers = normalizedSheetHeaders(rawHeaders), entries = normalizedWriteEntries(changes);
+  return [...entries].filter(([header]) => headers.includes(header)).map(([header, value]) => ({
+    range: `${sheet}!${columnName(uniqueSheetHeaderPosition(headers, header, sheet))}${rowIndex + 1}`,
+    values: [[sheetSafeValue(value ?? '')]]
+  }));
+}
+
+export async function updateObject(req, sheet, idHeader, id, changes, maxColumn = 'BG') {
+  const wantedId = clean(id), wantedHeader = sheetHeader(idHeader), entries = normalizedWriteEntries(changes);
+  if (!wantedHeader || !wantedId) throw new Error(`${wantedHeader || 'Record ID'} is required`);
+  if (entries.has(wantedHeader) && clean(entries.get(wantedHeader)) !== wantedId) throw new Error(`Cannot change ${wantedHeader} while updating ${sheet}`);
   const token = await getAccessToken(req);
   const [rows] = await readRanges(req, [`${sheet}!A1:${maxColumn}2000`]);
   const headers = rows?.[0] || [];
-  const idIndexes = headers.map((header, index) => header === idHeader ? index : -1).filter(index => index >= 0);
-  if (!idIndexes.length) throw new Error(`${sheet} identifier column is missing`);
-  const rowIndex = rows.findIndex((row, index) => index > 0 && idIndexes.some(idIndex => clean(row[idIndex]) === clean(id)));
-  if (rowIndex < 1) throw new Error(`${sheet} record was not found`);
-  const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({
-    range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`,
-    values: [[sheetSafeValue(value ?? '')]]
-  }));
+  let rowIndex;
+  try { rowIndex = resolveUniqueRecordRow(rows, wantedHeader, wantedId); }
+  catch (error) { throw new Error(`${sheet}: ${error.message}`); }
+  const data = buildRecordUpdateData(headers, sheet, rowIndex, Object.fromEntries(entries));
   if (!data.length) throw new Error('No supported fields were supplied');
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -769,32 +835,41 @@ const publicSecondHandMotor = (row, branchNames = {}, session = {}) => ({
 });
 
 export function scopeData(session, leads, applications, branches) {
-  if (session.role === 'ADMIN') return { leads, applications, leadIds: new Set(leads.map(x => x['Lead ID'])), applicationIds: new Set(applications.map(x => x['Application ID'])) };
+  const identitySet = (rows, header) => new Set(rows.map(row => clean(row[header])).filter(Boolean));
+  if (session.role === 'ADMIN') return { leads, applications, leadIds: identitySet(leads, 'Lead ID'), applicationIds: identitySet(applications, 'Application ID') };
   const branchRegion = Object.fromEntries(branches.map(row => [row['Branch ID'], canonicalRegion(row.Region)]));
   const permittedLeads = leads.filter(row => businessPermitted(session, row));
   const permittedApplications = applications.filter(row => businessPermitted(session, row));
   if (session.role === 'STAFF') {
     const scopedLeads = permittedLeads.filter(row => clean(row['Assigned SA ID']) === clean(session.saId));
-    const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned SA ID']) === clean(session.saId) || leadIds.has(row['Lead ID']));
-    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+    const leadIds = identitySet(scopedLeads, 'Lead ID');
+    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned SA ID']) === clean(session.saId) || leadIds.has(clean(row['Lead ID'])));
+    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: identitySet(scopedApplications, 'Application ID') };
   }
   if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role)) {
     const scopedLeads = permittedLeads.filter(row => clean(row['Selected Branch ID']) === clean(session.branchId));
-    const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned Branch ID']) === clean(session.branchId) || leadIds.has(row['Lead ID']));
-    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+    const leadIds = identitySet(scopedLeads, 'Lead ID');
+    const scopedApplications = permittedApplications.filter(row => clean(row['Assigned Branch ID']) === clean(session.branchId) || leadIds.has(clean(row['Lead ID'])));
+    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: identitySet(scopedApplications, 'Application ID') };
   }
   if (session.role === 'BUSINESS_MANAGER') {
     const scopedLeads = permittedLeads.filter(row => session.region === 'ALL' || canonicalRegion(row.Region) === session.region);
-    const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-    const scopedApplications = permittedApplications.filter(row => leadIds.has(row['Lead ID']) || session.region === 'ALL' || branchRegion[row['Assigned Branch ID']] === session.region);
-    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+    const leadIds = identitySet(scopedLeads, 'Lead ID');
+    const scopedApplications = permittedApplications.filter(row => leadIds.has(clean(row['Lead ID'])) || session.region === 'ALL' || branchRegion[row['Assigned Branch ID']] === session.region);
+    return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: identitySet(scopedApplications, 'Application ID') };
   }
   const scopedLeads = permittedLeads.filter(row => canonicalRegion(row.Region) === session.region);
-  const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
-  const scopedApplications = permittedApplications.filter(row => leadIds.has(row['Lead ID']) || branchRegion[row['Assigned Branch ID']] === session.region);
-  return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+  const leadIds = identitySet(scopedLeads, 'Lead ID');
+  const scopedApplications = permittedApplications.filter(row => leadIds.has(clean(row['Lead ID'])) || branchRegion[row['Assigned Branch ID']] === session.region);
+  return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: identitySet(scopedApplications, 'Application ID') };
+}
+
+export function identityLookup(rows = [], idHeader = '', valueSelector = () => '') {
+  const selectValue = typeof valueSelector === 'function' ? valueSelector : row => row[valueSelector];
+  return Object.fromEntries(rows.flatMap(row => {
+    const id = clean(row[idHeader]);
+    return id ? [[id, selectValue(row)]] : [];
+  }));
 }
 
 export const scopedRecordPermitted = (scope = {}, row = {}) => {
@@ -1516,8 +1591,10 @@ export default async function handler(req, res) {
           }
           teamId = teamId || clean(branch?.['Team ID']);
         }
-        await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID', ...leadRecordHeaders]);
-        await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
+        const leadHeaders = await ensureSheetHeaders(req, 'Leads', ['Lead ID', 'Created At', 'Business Unit', 'Customer ID', 'Team ID', ...leadRecordHeaders]);
+        const applicationHeaders = await ensureSheetHeaders(req, 'Applications', ['Application ID', 'Lead ID', 'Created At', 'Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
+        for (const header of ['Lead ID', 'Created At']) uniqueSheetHeaderPosition(leadHeaders, header, 'Leads');
+        for (const header of ['Application ID', 'Lead ID', 'Created At']) uniqueSheetHeaderPosition(applicationHeaders, header, 'Applications');
         await appendObject(req, 'Leads', {
           'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': normalizedPhone,
           'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL', 'Source Channel': 'CRM_MANUAL',
@@ -1548,7 +1625,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AJ1500', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches), application = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         if (clean(application['Credit Consent Status']).toUpperCase() === 'VERIFIED') throw new Error('Credit consent is already verified for this application');
         const phone = clean(application['Phone Number'] || leads.find(row => clean(row['Lead ID']) === clean(application['Lead ID']))?.['Phone Number']);
         const normalizedPhone = whatsappPhone(phone);
@@ -1580,7 +1657,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         await ensureSheetHeaders(req, 'Applications', [...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, { 'Updated At': now(), 'Credit Consent Status': outcome, 'Credit Consent Verified At': '', 'Credit Consent Verified By': '', 'Credit Check Status': `BLOCKED_CONSENT_${outcome}`, 'Updated By': session.username }, 'CC');
         await writeActivity(req, session, { leadId: application['Lead ID'], applicationId, type: `CRM_CREDIT_CONSENT_${outcome}`, description: `Customer credit consent marked ${outcome}` });
@@ -1593,7 +1670,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         const consentDocuments = rowsToObjects(documentRows).filter(row => clean(row['Application ID']) === applicationId && clean(row['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE);
         const document = consentDocuments.find(row => clean(row['Document ID']) === clean(body.documentId || application['Credit Consent Document ID'])) || consentDocuments.at(-1);
         if (!document) throw new Error('Upload the signed CTOS/CCRIS consent before verification');
@@ -1619,7 +1696,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), scope = scopeData(session, leads, applications, rowsToObjects(branchRows));
         const application = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !application || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         if (clean(application['Credit Consent Status']).toUpperCase() !== 'VERIFIED') throw new Error('Verified CTOS/CCRIS consent is required before any credit check');
         if (clean(application['Minimum Documents Complete']).toUpperCase() !== 'TRUE' && clean(application['Missing Documents'])) throw new Error('Complete the minimum customer documents before preparing the credit check');
         const timestamp = now();
@@ -1678,6 +1755,7 @@ export default async function handler(req, res) {
       if (action === 'controlApplicationFollowUp') {
         const { FOLLOW_UP_APPLICATION_HEADERS } = await import('./_follow-up.js');
         const requestedId = clean(body.applicationId || body.leadId || body.recordId), command = clean(body.command).toUpperCase();
+        if (!requestedId) throw new Error('Application or Lead ID is required');
         if (!['PAUSE', 'RESUME', 'SNOOZE', 'SCHEDULE', 'SEND_NOW', 'STOP'].includes(command)) throw new Error('A valid follow-up action is required');
         const [leadRows, applicationRows, branchRows] = await readRanges(req, ['Leads!A1:BG1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000']);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), scope = scopeData(session, leads, applications, branches);
@@ -1716,7 +1794,7 @@ export default async function handler(req, res) {
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), salesAdvisors = rowsToObjects(saRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         const stage = session.role === 'STAFF' ? clean(record['Current Stage']).toUpperCase() : clean(body.stage).toUpperCase();
         const status = session.role === 'STAFF' ? clean(record['Application Status']).toUpperCase() : clean(body.status).toUpperCase();
         const saId = session.role === 'STAFF' ? session.saId : clean(body.saId);
@@ -1815,7 +1893,7 @@ export default async function handler(req, res) {
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows);
         const scope = scopeData(session, leads, applications, branches);
         const record = applications.find(row => clean(row['Application ID']) === applicationId);
-        if (!record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
+        if (!applicationId || !record || !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This application is outside your access.' });
         const businessUnit = rowBusinessUnit(record);
         const secondHandApplication = businessUnit === 'MOTOR' && clean(record['Motor Type']).toUpperCase() === 'SECOND_HAND' && clean(record['Second Hand Inventory ID']);
         let brand = clean(record['Product Brand']), model = clean(record['Product Model']), variant = clean(record['Product Variant']) || 'Standard';
@@ -2092,8 +2170,8 @@ export default async function handler(req, res) {
     const scope = scopeData(session, allLeads, allApplications, branches);
     const businessLeads = scope.leads.filter(row => !isSyntheticLeadRow(row));
     const businessApplications = scope.applications.filter(row => !isSyntheticApplicationRow(row));
-    const businessLeadIds = new Set(businessLeads.map(row => row['Lead ID']));
-    const businessApplicationIds = new Set(businessApplications.map(row => row['Application ID']));
+    const businessLeadIds = new Set(businessLeads.map(row => clean(row['Lead ID'])).filter(Boolean));
+    const businessApplicationIds = new Set(businessApplications.map(row => clean(row['Application ID'])).filter(Boolean));
     const businessScope = { ...scope, leads: businessLeads, applications: businessApplications, leadIds: businessLeadIds, applicationIds: businessApplicationIds };
 
     if (resource === 'qa') {
@@ -2234,12 +2312,12 @@ export default async function handler(req, res) {
       const channels = rowsToObjects(channelRows);
       const globalActivityTypes = new Set(['FOLLOW_UP_RUN_COMPLETED', 'CRM_FOLLOW_UP_SAFE_SCAN', 'CRM_FOLLOW_UP_SETTINGS_UPDATED']);
       const visible = rowsToObjects(rows).filter(row => scopedRecordPermitted(businessScope, row) || (resource === 'activity' && session.role === 'ADMIN' && globalActivityTypes.has(clean(row['Activity Type']).toUpperCase()))).reverse();
-      const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], customerDisplayName(row['Customer Name'], row['Phone Number'])]));
-      const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
-      const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
+      const leadNames = identityLookup(scope.leads, 'Lead ID', row => customerDisplayName(row['Customer Name'], row['Phone Number']));
+      const leadOwners = identityLookup(scope.leads, 'Lead ID', 'Assigned SA ID');
+      const applicationOwners = identityLookup(scope.applications, 'Application ID', 'Assigned SA ID');
       const records = visible.map(row => resource === 'inbox' ? ({
-        id: row['Message ID'], customer: leadNames[row['Lead ID']] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'],
-        assignedSa: applicationOwners[row['Application ID']] || leadOwners[row['Lead ID']] || '', phone: row['Phone Number'], message: row['Customer Message'],
+        id: row['Message ID'], customer: leadNames[clean(row['Lead ID'])] || row['Phone Number'], leadId: row['Lead ID'], applicationId: row['Application ID'],
+        assignedSa: applicationOwners[clean(row['Application ID'])] || leadOwners[clean(row['Lead ID'])] || '', phone: row['Phone Number'], message: row['Customer Message'],
         status: row['Process Status'], time: row['Received At'] || row['Human Handover At'] || row['AI Processed At'], attachmentType: row['Attachment Type'], messageType: row['Message Type'], channel: row.Channel,
         channelId: row['Internal Channel ID'], phoneNumberId: row['WhatsApp Number ID'], displayNumber: row['WhatsApp Display Number'], wabaId: row['WABA ID'], conversationKey: row['Conversation Key'], routingStatus: row['Number Routing Status'], channelName: channelForMessage(row, channels)?.['Channel Name'] || row['Internal Channel ID'] || row['WhatsApp Display Number'],
         source: row.Source || row['Webhook Source'], aiProcessed: truth(row['AI Processed']), aiProcessedAt: row['AI Processed At'],
