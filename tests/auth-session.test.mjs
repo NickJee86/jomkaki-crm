@@ -39,6 +39,10 @@ const cookie = responseHeaders['Set-Cookie'].split(';')[0];
 const request = { headers: { cookie } };
 const signed = auth.getSession(request);
 assert.equal(signed.username, 'staff.one');
+delete process.env.CRM_ACCESS_PASSWORD;
+assert.equal(auth.getSession(request).username, 'staff.one', 'Sheet-backed sessions require the signing secret, not an unrelated legacy shared password');
+process.env.CRM_ACCESS_PASSWORD = 'environment-password';
+assert.equal(auth.getSession({ headers: { cookie: 'jomkaki_crm_session=%E0%A4%A' } }), false, 'Malformed cookie encoding is rejected without crashing the API');
 assert.equal((await auth.validateSession(request, signed)).saId, 'SA-1');
 assert.equal((await auth.validateSession(request, signed)).businessAccess, 'BOTH');
 

@@ -4,7 +4,7 @@
   "scripts": {
     "build": "node tools/sync-notion-knowledge.mjs --allow-fallback",
     "sync:notion": "node tools/sync-notion-knowledge.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --import ./tools/test-network-isolation.mjs --test tests/*.test.mjs"
   }
 }
 

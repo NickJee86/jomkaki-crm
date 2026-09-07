@@ -48,7 +48,8 @@ const CONVERSATION_DECISION_HEADERS = [
   'Answered Questions JSON',
   'Recent Messages JSON',
   'Conversation Summary',
-  'Last Next Action'
+  'Last Next Action',
+  'Last Replied Message ID'
 ];
 const CONVERSATION_MEMORY_HEADERS = CONVERSATION_DECISION_HEADERS.slice(4);
 const MAX_CONVERSATION_MEMORY_ITEMS = 24;
@@ -105,8 +106,9 @@ const normalizeEmploymentDuration = value => {
   if (!number) return '';
   return /(?:tahun|year)/i.test(clean(value)) ? String(number * 12) : String(number);
 };
+const applicationLoanTenureYears = value => Number(clean(value).match(/^([1-5])(?:\s*(?:tahun|years?))?$/i)?.[1] || 0);
 const normalizeLoanTenure = (value, unit) => {
-  const years = Number((clean(value).match(/[1-5]/) || [])[0] || 0);
+  const years = applicationLoanTenureYears(value);
   return unit === 'HANDPHONE' ? String(years * 12) : String(years);
 };
 const APPLICATION_DETAIL_FIELDS = [
@@ -128,7 +130,7 @@ const APPLICATION_DETAIL_FIELDS = [
   { header: 'Reference 2 Relationship', label: 'Hubungan rujukan 2', valid: value => clean(value).length >= 2, normalize: clean },
   { header: 'Product Brand', label: 'Jenama', valid: value => clean(value).length >= 2, normalize: clean },
   { header: 'Product Model', label: 'Model', valid: value => clean(value).length >= 2, normalize: clean },
-  { header: 'LOAN_TENURE', label: 'Tempoh loan', valid: (value, unit) => { const years = Number((clean(value).match(/[1-5]/) || [])[0] || 0); return unit === 'HANDPHONE' ? years >= 1 && years <= 5 : years >= 3 && years <= 5; }, normalize: normalizeLoanTenure }
+  { header: 'LOAN_TENURE', label: 'Tempoh loan', valid: (value, unit) => { const years = applicationLoanTenureYears(value); return unit === 'HANDPHONE' ? years >= 1 && years <= 5 : years >= 3 && years <= 5; }, normalize: normalizeLoanTenure }
 ];
 
 const applicationDetailHeader = (field, unit) => field.header === 'LOAN_TENURE' ? (unit === 'HANDPHONE' ? 'Loan Tenure Months' : 'Loan Tenure Years') : field.header;
@@ -144,7 +146,9 @@ const APPLICATION_DETAIL_APPLICATION_HEADERS = [...new Set([
   'Credit Consent Signed At',
   'Bank Account Available'
 ])];
-const applicationDetailValuePresent = (application, field, unit) => field.valid(application[applicationDetailHeader(field, unit)], unit);
+const applicationDetailValuePresent = (application, field, unit) => field.header === 'LOAN_TENURE' && unit === 'HANDPHONE'
+  ? /^(?:12|24|36|48|60)$/.test(clean(application['Loan Tenure Months']))
+  : field.valid(application[applicationDetailHeader(field, unit)], unit);
 const applicationDetailMissing = (application, unit) => APPLICATION_DETAIL_FIELDS.filter(field => !applicationDetailValuePresent(application, field, unit));
 
 export function isApplicationDetailStep(step = '') {
@@ -394,7 +398,7 @@ const objects = rows => {
 async function appendObject(token, sheet, object) {
   const [headers = []] = await readSheet(token, `${sheet}!1:1`);
   const values = headers.map(header => object[header] ?? '');
-  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) }, `Unable to write ${sheet}`, 1);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) }, `Unable to write ${sheet}`, 1);
   invalidateSheetDataCache(sheet);
 }
 
@@ -426,7 +430,7 @@ async function ensureHeaders(token, sheet, requiredHeaders) {
   if (!missing.length) return;
   await ensureSheetColumnCapacity(token, sheet, headers.length + missing.length);
   const start = columnName(headers.length), end = columnName(headers.length + missing.length - 1);
-  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!${start}1:${end}1`)}?valueInputOption=RAW`, { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [missing] }) }, `Unable to extend ${sheet} headers`);
   invalidateSheetDataCache(sheet, true);
 }
 
@@ -436,7 +440,7 @@ async function updateObject(token, sheet, idHeader, id, changes, maxColumn = 'Z'
   if (rowIndex < 1) return;
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
   if (!data.length) return;
-  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, `Unable to update ${sheet}`);
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) }, `Unable to update ${sheet}`);
   invalidateSheetDataCache(sheet);
 }
 
@@ -447,7 +451,7 @@ async function bindDocumentsToApplication(token, documents = [], applicationId =
   const applicationColumn = headers.indexOf('Application ID');
   if (applicationColumn < 0) return;
   const data = pending.map(row => ({ range: `Document_Log!${columnName(applicationColumn)}${row.rowNumber}`, values: [[applicationId]] }));
-  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) }, 'Unable to bind customer documents to application');
+  await googleRequest(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) }, 'Unable to bind customer documents to application');
   invalidateSheetDataCache('Document_Log');
   pending.forEach(row => { row['Application ID'] = applicationId; });
 }
@@ -880,6 +884,10 @@ export function effectiveConversationStep(state = {}) {
   return storedStep;
 }
 
+export function retryableInboundMessageIds(reservedIds = [], settledIds = new Set(), sentIds = new Set()) {
+  return reservedIds.filter(id => !settledIds.has(id) && !sentIds.has(id));
+}
+
 const instantCopy = (language, key, values = {}) => {
   const name = clean(values.name), location = clean(values.location), brand = clean(values.brand), model = clean(values.model);
   const amount = customerAmount(values.amount), deposit = customerAmount(values.deposit), cashPrice = customerAmount(values.cashPrice), tenure = clean(values.tenure), options = clean(values.options), models = clean(values.models), colours = clean(values.colours), storage = clean(values.storage), requestedStorage = clean(values.requestedStorage), category = clean(values.category), area = clean(values.area), branch = clean(values.branch), address = clean(values.address), googleMapsUrl = clean(values.googleMapsUrl), wazeUrl = clean(values.wazeUrl), branches = clean(values.branches);
@@ -1121,7 +1129,7 @@ export function customerAskedQuestion(value = '') {
 const explicitCustomerName = ({ text = '', aiIntent = null, currentStep = '' } = {}) => {
   const message = clean(text);
   const explicitMatch = message.match(/(?:nama saya|name is|call me|panggil saya|我叫|我是)\s*[:：-]?\s*([\p{L}][\p{L} .'-]{1,48})/iu);
-  if (explicitMatch) return usableCustomerName(explicitMatch[1].replace(/[?？].*$/, ''));
+  if (explicitMatch) return usableCustomerName(explicitMatch[1].replace(/[?？].*$/, '').replace(/\s+(?:dari|from|tinggal(?:\s+di)?|berasal(?:\s+dari)?|live(?:\s+in)?)\s+.*$/i, ''));
   // Questions and recognised locations are typed before AI-provided profile
   // fields. Only an explicit self-introduction above may override this guard.
   if (customerAskedQuestion(message) || knownLocationFromText(message)) return '';
@@ -1139,7 +1147,8 @@ export function buildProgressiveProfileChanges({ text = '', aiIntent = null, sta
   // captured on those turns.
   const profileIntent = suppressPlainName && aiIntent ? { ...aiIntent, customerName: '' } : aiIntent;
   const customerName = explicitCustomerName({ text, aiIntent: profileIntent, currentStep: suppressPlainName ? 'STEP_03_PRODUCT' : currentStep });
-  const locationQuery = clean(aiIntent?.locationQuery) || (asksForServiceCoverage(text) ? clean(text) : '');
+  const selfReportedLocation = /\b(?:dari|from|tinggal(?:\s+di)?|berasal(?:\s+dari)?|live(?:\s+in)?)\s+(.+)$/i.exec(clean(text));
+  const locationQuery = clean(aiIntent?.locationQuery) || (asksForServiceCoverage(text) ? clean(text) : customerName && selfReportedLocation ? clean(selfReportedLocation[1]) : '');
   const location = locationQuery
     ? resolveCustomerLocation(locationQuery, unit, branches)
     : ['STEP_02_LOCATION'].includes(clean(currentStep).toUpperCase()) && !customerAskedQuestion(text)
@@ -3176,8 +3185,16 @@ export function instantChannelCredentials(route = {}, env = process.env) {
 
 export const validateInstantImageLink = validatePublicImageLink;
 
-async function sendInstantSalesMessage({ route, phone, decision }) {
+export function conversationRequiresHuman({ lead = {}, state = {}, application = {} } = {}) {
+  return [lead, state, application].some(record =>
+    ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED', 'MANUAL_ASSIGNED'].includes(clean(record['Processing Mode']).toUpperCase())
+    || clean(record['Follow Up Status']).toUpperCase() === 'HANDED_OVER'
+  );
+}
+
+export async function sendInstantSalesMessage({ route, phone, decision, beforeSend = async () => {} }) {
   if (!decision?.handled || !clean(decision.text) || clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() !== 'CLOUD') return { sent: false, skipped: 'INSTANT_SALES_DISABLED' };
+  if (!truth(route.Active) || !truth(route['Outbound Enabled'])) return { sent: false, skipped: 'CHANNEL_OUTBOUND_DISABLED' };
   const binding = instantChannelCredentials(route);
   const imageUrl = clean(decision.imageUrl);
   const documentUrl = clean(decision.documentUrl);
@@ -3195,22 +3212,34 @@ async function sendInstantSalesMessage({ route, phone, decision }) {
     headers: { authorization: `Bearer ${binding.accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify(body)
   });
-  let response = await sendPayload(payload);
-  let result = await response.json().catch(() => ({}));
-  if (!response.ok && effectiveImageUrl && !documentUrl) {
-    const imageError = clean(result.error?.message) || `Meta API error ${response.status}`;
-    mediaFallbackReason = `META_IMAGE_REJECTED:${imageError}`;
-    effectiveImageUrl = '';
-    response = await sendPayload({ messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: fallbackText } });
+  // A caller must finish its durable reservation before any provider request.
+  // Reservation failures remain retryable because no send has begun yet.
+  await beforeSend(payload);
+  let response, result;
+  try {
+    response = await sendPayload(payload);
     result = await response.json().catch(() => ({}));
+    if (!response.ok && effectiveImageUrl && !documentUrl) {
+      const imageError = clean(result.error?.message) || `Meta API error ${response.status}`;
+      mediaFallbackReason = `META_IMAGE_REJECTED:${imageError}`;
+      effectiveImageUrl = '';
+      response = await sendPayload({ messaging_product: 'whatsapp', recipient_type: 'individual', to: digits(phone), type: 'text', text: { preview_url: false, body: fallbackText } });
+      result = await response.json().catch(() => ({}));
+    }
+  } catch (error) {
+    return { sent: false, deliveryUnknown: true, binding, error: `Verify delivery before retrying: ${clean(error?.message) || 'Provider connection failed'}`, messageType: documentUrl ? 'DOCUMENT' : effectiveImageUrl ? 'PRODUCT_IMAGE' : 'TEXT' };
   }
   if (mediaFallbackReason) console.warn('whatsapp_image_fallback', { reason: mediaFallbackReason, model: clean(decision.product?.Model) });
-  const imageSent = response.ok && !!effectiveImageUrl;
+  const providerMessageId = clean(result.messages?.[0]?.id);
+  const deliveryUnknown = response.ok && !providerMessageId;
+  const sent = response.ok && !!providerMessageId;
+  const imageSent = sent && !!effectiveImageUrl;
   return {
-    sent: response.ok,
+    sent,
+    deliveryUnknown,
     binding,
-    providerMessageId: clean(result.messages?.[0]?.id),
-    error: response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
+    providerMessageId,
+    error: deliveryUnknown ? 'Meta returned no message ID; verify delivery before retrying' : response.ok ? '' : clean(result.error?.message) || `Meta API error ${response.status}`,
     imageSent,
     imageUrl: imageSent ? effectiveImageUrl : '',
     mediaFallbackReason,
@@ -3264,21 +3293,32 @@ async function sendImmediateAcknowledgement(token, { route, phone, text, message
   return { sent: response.ok, outboxId, providerMessageId, error: errorMessage, receivedAt };
 }
 
+export function buildOutboxStatusChanges(currentStatus = '', status = '', errorMessage = '', eventTimestamp = '') {
+  const normalizedStatus = clean(status).toUpperCase(), previousStatus = clean(currentStatus).toUpperCase();
+  const deliveryRank = { SENT: 1, DELIVERED: 2, READ: 3 };
+  if (!['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(normalizedStatus)) return null;
+  if (deliveryRank[previousStatus] && deliveryRank[normalizedStatus] && deliveryRank[normalizedStatus] < deliveryRank[previousStatus]) return null;
+  if (['DELIVERED', 'READ'].includes(previousStatus) && normalizedStatus === 'FAILED') return null;
+  if (previousStatus === 'FAILED' && normalizedStatus === 'SENT') return null;
+  const eventMs = Number(eventTimestamp) * 1000, timestamp = Number.isFinite(eventMs) && eventMs > 0 ? new Date(eventMs).toISOString() : new Date().toISOString();
+  const changes = { 'Send Status': normalizedStatus, 'Error Message': normalizedStatus === 'FAILED' ? errorMessage : '' };
+  if (normalizedStatus === 'SENT') changes['Sent At'] = timestamp;
+  if (normalizedStatus === 'DELIVERED') changes['Delivered At'] = timestamp;
+  if (normalizedStatus === 'READ') changes['Read At'] = timestamp;
+  return changes;
+}
+
 async function updateOutboxStatus(token, providerId, status, errorMessage = '', eventTimestamp = '') {
+  if (!clean(providerId)) return;
   const rows = await readSheet(token, 'Message_Outbox!A:AJ');
   const headers = rows[0] || [], providerIndex = headers.indexOf('Provider Message ID'), sendStatusIndex = headers.indexOf('Send Status');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[providerIndex]) === clean(providerId));
   if (rowIndex < 1) return;
-  const normalizedStatus = clean(status).toUpperCase(), currentStatus = clean(rows[rowIndex]?.[sendStatusIndex]).toUpperCase();
-  const deliveryRank = { SENT: 1, DELIVERED: 2, READ: 3 };
-  if (deliveryRank[currentStatus] && deliveryRank[normalizedStatus] && deliveryRank[normalizedStatus] < deliveryRank[currentStatus]) return;
-  const eventMs = Number(eventTimestamp) * 1000, timestamp = Number.isFinite(eventMs) && eventMs > 0 ? new Date(eventMs).toISOString() : new Date().toISOString();
-  const changes = { 'Send Status': normalizedStatus, 'Error Message': errorMessage };
-  if (normalizedStatus === 'SENT') changes['Sent At'] = timestamp;
-  if (normalizedStatus === 'DELIVERED') changes['Delivered At'] = timestamp;
-  if (normalizedStatus === 'READ') changes['Read At'] = timestamp;
+  const changes = buildOutboxStatusChanges(rows[rowIndex]?.[sendStatusIndex], status, errorMessage, eventTimestamp);
+  if (!changes) return;
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value]] }));
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) });
+  if (!response.ok) throw new Error(`Unable to record WhatsApp delivery status (${response.status})`);
 }
 
 export default async function handler(req, res) {
@@ -3297,6 +3337,7 @@ export default async function handler(req, res) {
   if (supplied.length !== calculated.length || !crypto.timingSafeEqual(supplied, calculated)) return res.status(401).json({ ok: false });
   let outboundSent = false;
   const reservedMessageIds = [];
+  const settledMessageIds = new Set(), sentMessageIds = new Set();
   try {
     const payload = JSON.parse(raw.toString('utf8') || '{}');
     const changes = (payload.entry || []).flatMap(entry => entry.changes || []);
@@ -3313,7 +3354,7 @@ export default async function handler(req, res) {
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
     await ensureHeaders(token, 'Customer_Inbox', ['Received At', 'Human Handover At', 'AI Processed At']);
-    await ensureHeaders(token, 'Message_Outbox', ['Delivered At', 'Read At', 'Customer Replied At']);
+    await ensureHeaders(token, 'Message_Outbox', ['Outbox ID', 'Send Status', 'Provider Message ID', 'Reply To Message ID', 'Delivered At', 'Read At', 'Customer Replied At']);
     for (const status of statusEvents) {
       const statusError = clean(status.errors?.[0]?.error_data?.details || status.errors?.[0]?.message || status.errors?.[0]?.title);
       await updateOutboxStatus(token, status.id, status.status, statusError, status.timestamp);
@@ -3346,11 +3387,18 @@ export default async function handler(req, res) {
       handphoneCatalog: objects(handphoneCatalogRows), handphonePricing: objects(handphonePricingRows)
     }));
     const inboxObjects = objects(inboxRows), outboxObjects = objects(outboxRows);
-    const existingMessageIds = new Set(inboxObjects.map(row => clean(row['Message ID'])).filter(Boolean));
+    const existingMessageIds = new Set([
+      ...inboxObjects.map(row => clean(row['Message ID'])),
+      ...outboxObjects.filter(row => ['SENDING', 'DELIVERY_UNKNOWN', 'SENT', 'DELIVERED', 'READ'].includes(clean(row['Send Status']).toUpperCase())).map(row => clean(row['Reply To Message ID'])),
+      ...conversationStates.map(row => clean(row['Last Replied Message ID']))
+    ].filter(Boolean));
     for (const entry of payload.entry || []) for (const change of entry.changes || []) {
       const value = change.value || {}, numberId = value.metadata?.phone_number_id || '', displayNumber = value.metadata?.display_phone_number || '';
       for (const message of value.messages || []) {
-        if (message.__skipDuplicate || (message.id && existingMessageIds.has(clean(message.id)))) continue;
+        if (message.__skipDuplicate || (message.id && existingMessageIds.has(clean(message.id)))) {
+          if (message.id) settledMessageIds.add(clean(message.id));
+          continue;
+        }
         const phone = digits(message.from), text = message.text?.body || message.button?.text || message.interactive?.button_reply?.title || message.interactive?.list_reply?.title || `[${message.type || 'message'}]`, optOutRequested = isFollowUpOptOut(text);
         const contact = (value.contacts || []).find(item => digits(item.wa_id) === phone) || (value.contacts || [])[0] || {};
         const profileName = extractCustomerName(contact.profile?.name);
@@ -3422,10 +3470,10 @@ export default async function handler(req, res) {
             'Customer ID': clean(lead?.['Customer ID']),
             'Team ID': teamId
           });
-          if (message.id) existingMessageIds.add(clean(message.id));
+          if (message.id) { existingMessageIds.add(clean(message.id)); settledMessageIds.add(clean(message.id)); }
           continue;
         }
-        let human = requiresManager(text);
+        let human = requiresManager(text) || conversationRequiresHuman({ lead, state: conversationState || {} });
         const currentStep = effectiveConversationStep(conversationState || {});
         const mediaInbound = ['image', 'document'].includes(clean(message.type).toLowerCase());
         const inferredInboundDocumentType = inferDocumentTypeFromFileName(message.document?.filename || '');
@@ -3450,6 +3498,7 @@ export default async function handler(req, res) {
         const shouldPreloadApplication = !!lead && (needsDocuments || !!clean(conversationState?.['Application ID']));
         const preloadedApplications = shouldPreloadApplication ? await loadApplications() : [];
         const applicationContext = preloadedApplications.filter(row => clean(row['Lead ID']) === clean(lead?.['Lead ID'])).at(-1) || {};
+        human = human || conversationRequiresHuman({ application: applicationContext });
         const recentMessages = buildRecentConversationMessages({ inbox: inboxObjects, outbox: outboxObjects, phone, state: conversationState || {} });
         const aiTurnStartedAt = Date.now();
         const simpleGreeting = /^(?:hi|hello|hey|hai)[!. ]*$/i.test(clean(text));
@@ -3526,7 +3575,7 @@ export default async function handler(req, res) {
         if (optOutRequested) instantDecision = { handled: true, followUpOptOut: true, nextStep: clean(conversationState?.['Current Step']) || 'STEP_01_DISCOVERY', productUnit: routeBusinessUnit, text: followUpOptOutReply(text) };
         let willReply = routeUsable && !human && instantDecision.handled;
         if (documentAckReserved && !willReply) documentBatchAcknowledgements.delete(documentAckKey);
-        let instantResult = { sent: false };
+        let instantResult = { sent: false }, instantOutboxId = '';
         if (!lead) {
           const timestamp = new Date().toISOString();
           const existingCustomer = leads.find(row => digits(row['Phone Number']) === phone), customerId = clean(existingCustomer?.['Customer ID']) || makeId('CUS');
@@ -3545,6 +3594,7 @@ export default async function handler(req, res) {
         const shouldLoadApplication = shouldEnsureApplication || !!clean(conversationState?.['Application ID']);
         const applications = shouldLoadApplication ? await loadApplications() : preloadedApplications;
         let application = selectReusableApplication(applications, lead, routeBusinessUnit);
+        human = human || conversationRequiresHuman({ application });
         if (!clean(application['Application ID']) && shouldEnsureApplication) {
           // Re-read immediately before creating. This narrows the race window
           // when several WhatsApp messages arrive together for the same customer.
@@ -3712,9 +3762,27 @@ export default async function handler(req, res) {
           Object.assign(conversationState, latestInbound);
         }
         if (willReply) {
-          instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision });
-          if (instantResult.sent) {
+          instantResult = await sendInstantSalesMessage({ route, phone, decision: instantDecision, beforeSend: async payload => {
+            const timestamp = new Date().toISOString();
+            const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
+            instantOutboxId = payload.type === 'image' && message.id ? `${imageOutboxPrefix}-${message.id}` : message.id ? `OUT-INSTANT-${message.id}` : makeId('OUT');
+            await appendObject(token, 'Message_Outbox', {
+              'Outbox ID': instantOutboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
+              'Phone Number': phone, 'Message Type': payload.type.toUpperCase(), 'Message Text': clean(instantDecision.text), 'Image URL': clean(payload.image?.link || payload.document?.link),
+              'Send Status': 'SENDING', 'Attempt Count': '1', 'Reply To Message ID': message.id || '', 'WhatsApp Number ID': numberId,
+              'Internal Channel ID': channelId, 'WABA ID': route['WABA ID'] || entry.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '',
+              'Send Routing Status': `WEBHOOK_INSTANT_SENDING:${channelId}`, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
+            });
+          } });
+          if (instantResult.sent || instantResult.deliveryUnknown) {
             outboundSent = true;
+            if (message.id) sentMessageIds.add(clean(message.id));
+          }
+          if (instantOutboxId) await updateObject(token, 'Message_Outbox', 'Outbox ID', instantOutboxId, {
+            'Send Status': instantResult.sent ? 'SENT' : instantResult.deliveryUnknown ? 'DELIVERY_UNKNOWN' : 'FAILED',
+            'Provider Message ID': instantResult.providerMessageId || '', 'Sent At': instantResult.sent ? new Date().toISOString() : '', 'Error Message': instantResult.error || ''
+          }, 'BG');
+          if (instantResult.sent) {
             if (instantDecision.consentDispatch) {
               const consentSentAt = new Date().toISOString();
               const consentChanges = {
@@ -3730,6 +3798,7 @@ export default async function handler(req, res) {
               Object.assign(application, consentChanges);
             }
             const deliveredState = {
+              'Last Replied Message ID': clean(message.id),
               'Last AI Message': clean(instantDecision.text),
               'Last AI Message At': new Date().toISOString(),
               'Selected Product Brand': clean(instantDecision.product?.Brand || conversationState['Selected Product Brand']),
@@ -3758,8 +3827,8 @@ export default async function handler(req, res) {
             Object.assign(conversationState, deliveredState);
           }
         }
-        if (instantDecision.consentDispatch && !instantResult.sent) releaseEarlyConsentDispatch(application['Application ID']);
-        if (documentAckReserved && !instantResult.sent) documentBatchAcknowledgements.delete(documentAckKey);
+        if (instantDecision.consentDispatch && !instantResult.sent && !instantResult.deliveryUnknown) releaseEarlyConsentDispatch(application['Application ID']);
+        if (documentAckReserved && !instantResult.sent && !instantResult.deliveryUnknown) documentBatchAcknowledgements.delete(documentAckKey);
         const routingStatus = !channelId ? 'UNREGISTERED_CHANNEL' : !routeUsable ? 'CHANNEL_DISABLED_ADMIN_REVIEW' : routeRegion === 'UNASSIGNED' ? 'ADMIN_REVIEW_REQUIRED' : 'MATCHED';
         const media = message.document || message.image;
         const attachmentUrl = media?.id ? buildMediaProxyUrl({ mediaId: media.id, channelId, credentialKey: route['Credential Key'] || channelId }) : '';
@@ -3767,17 +3836,18 @@ export default async function handler(req, res) {
         await appendObject(token, 'Customer_Inbox', { 'Received At': receivedAt, 'Phone Number': phone, 'Customer Message': text, 'Attachment URL': attachmentUrl, 'Attachment Type': mediaInbound ? message.type : '', 'Message ID': message.id || makeId('MSG'), Channel: 'WHATSAPP', Source: 'META_CLOUD', 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '', 'Message Type': message.type || 'text', 'Process Status': inboxProcessStatus, 'AI Processed': mediaInbound ? 'FALSE' : instantResult.sent ? 'TRUE' : 'FALSE', 'Human Handover At': inboxProcessStatus === 'HUMAN_HANDOVER_REQUIRED' ? receivedAt : '', 'Webhook ID': makeId('WEBHOOK'), 'WhatsApp Number ID': numberId, 'WhatsApp Display Number': displayNumber || route['Display Number'], 'WABA ID': route['WABA ID'] || entry.id || '', 'Conversation Key': `${channelId || numberId || 'UNROUTED'}:${phone}`, 'Webhook Source': 'META_CLOUD', 'Number Routing Status': routingStatus, 'Internal Channel ID': channelId, 'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId });
         if (instantResult.sent || instantResult.error) {
           const timestamp = new Date().toISOString();
-          const imageOutboxPrefix = instantDecision.productUnit === 'HANDPHONE' ? 'JKM-HP-IMG' : 'JKM-S03C-IMG';
-          const outboxId = instantResult.imageSent && message.id ? `${imageOutboxPrefix}-${message.id}` : makeId('OUT');
-          await appendObject(token, 'Message_Outbox', {
+          const outboxId = instantOutboxId || makeId('OUT');
+          const outboxRecord = {
             'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': lead['Lead ID'] || '', 'Application ID': application['Application ID'] || '',
             'Phone Number': phone, 'Message Type': instantResult.messageType || 'TEXT', 'Message Text': clean(instantResult.imageSent ? instantDecision.text : instantDecision.mediaFallbackText || instantDecision.text), 'Image URL': clean(instantResult.imageSent ? instantResult.imageUrl : instantDecision.documentUrl),
-            'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
+            'Image Caption': clean(instantDecision.text), 'Send Status': instantResult.sent ? 'SENT' : instantResult.deliveryUnknown ? 'DELIVERY_UNKNOWN' : 'FAILED', 'Attempt Count': '1', 'Sent At': instantResult.sent ? timestamp : '',
             'Provider Message ID': instantResult.providerMessageId || '', 'Error Message': instantResult.error || '', 'WhatsApp Number ID': numberId,
             'WABA ID': route['WABA ID'] || entry.id || '', 'Internal Channel ID': channelId, 'Make Connection Alias': route['Make Connection Alias'] || '',
             'Reply To Message ID': message.id || '', 'Template Name': instantDecision.consentDispatch ? 'JKM_CREDIT_CONSENT_REQUEST' : '', 'Send Routing Status': `${instantResult.sent ? (instantDecision.consentDispatch ? 'WEBHOOK_CONSENT_FIRST' : instantDecision.aiGenerated ? 'WEBHOOK_KNOWLEDGE_AI_FALLBACK' : 'WEBHOOK_INSTANT_SALES') : 'WEBHOOK_INSTANT_SALES_FAILED'}${instantResult.mediaFallbackReason ? ':MEDIA_FALLBACK' : ''}:${channelId}:${decisionAudit.decisionRoute}:KB${decisionAudit.knowledgeVersion}`,
             'Business Unit': clean(instantDecision.productUnit || routeBusinessUnit), 'Customer ID': lead['Customer ID'] || '', 'Team ID': teamId
-          });
+          };
+          if (instantOutboxId) await updateObject(token, 'Message_Outbox', 'Outbox ID', outboxId, outboxRecord, 'BG');
+          else await appendObject(token, 'Message_Outbox', outboxRecord);
         }
         if (channelId) await updateObject(token, 'WhatsApp_Number_Master', 'Internal Channel ID', channelId, { 'Last Inbound At': receivedAt, 'Last Verified At': receivedAt, 'Updated At': receivedAt }, 'AC');
         if (media?.id) {
@@ -3809,14 +3879,15 @@ export default async function handler(req, res) {
             Object.assign(application, applicationDocumentChanges);
           }
         }
-        if (message.id) existingMessageIds.add(clean(message.id));
+        if (message.id) { existingMessageIds.add(clean(message.id)); settledMessageIds.add(clean(message.id)); }
       }
     }
     return res.status(200).json({ ok: true });
   } catch (error) {
     console.error(error);
-    if (outboundSent) return res.status(200).json({ ok: true, warning: 'POST_SEND_LOGGING_FAILED' });
-    for (const messageId of reservedMessageIds) releaseInboundMessage(messageId);
+    const retryableIds = retryableInboundMessageIds(reservedMessageIds, settledMessageIds, sentMessageIds);
+    for (const messageId of retryableIds) releaseInboundMessage(messageId);
+    if (outboundSent && !retryableIds.length) return res.status(200).json({ ok: true, warning: 'POST_SEND_LOGGING_FAILED' });
     return res.status(500).json({ ok: false });
   }
 }

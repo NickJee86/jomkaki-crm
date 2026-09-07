@@ -57,6 +57,7 @@ test('Handphone LMS contract uses monthly tenure and preserves business routing'
     'Requested Product Price (RM)': '3200',
     'Requested Deposit (RM)': '300',
     'Loan Tenure Months': '36',
+    'Credit Consent Status': 'VERIFIED',
     'Origin WhatsApp Channel ID': 'JKM-WA-WEST-02'
   }, [document('DOC-1', 'IC_FRONT'), document('DOC-2', 'IC_BACK'), document('DOC-3', 'PAYSLIP')]);
 
@@ -65,6 +66,8 @@ test('Handphone LMS contract uses monthly tenure and preserves business routing'
   assert.equal(result.payload.team_id, 'TEAM-HP-WEST');
   assert.equal(result.payload.financing.tenure_months, '36');
   assert.equal(result.payload.financing.tenure_years, '');
+  assert.equal(result.payload.financing.product_price_rm, '');
+  assert.equal(result.payload.financing.requested_deposit_rm, '');
 });
 
 test('reply fallback cannot cross Motor and Handphone official numbers', () => {

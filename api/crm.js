@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { authenticate, clearSession, getSession, hashPassword, migrateEnvironmentAccounts, setSession, validateSession } from './_auth.js';
 import { FUTURE_REPORTING_FIELDS, integrationReadiness, publicIntegrationRecords } from './_integrations.js';
+import { prepareLmsSubmission } from './_lmspro.js';
 import { validatePublicImageLink } from './_media-validation.js';
 
 
@@ -10,6 +11,7 @@ const PROJECT_NUMBER = process.env.GOOGLE_PROJECT_NUMBER;
 const POOL_ID = process.env.GOOGLE_WIF_POOL_ID || 'vercel-production';
 const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-production';
 const clean = value => String(value ?? '').trim();
+export const sheetSafeValue = value => typeof value === 'string' && /^[=+\-@]/.test(value.trimStart()) ? `'${value}` : value;
 export const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const uploadMimeExtensions = {
   'application/pdf': ['pdf'],
@@ -27,11 +29,22 @@ export function validateUploadFile(file = {}, options = {}) {
   const embeddedMime = clean(match[1]).toLowerCase(), declaredMime = clean(file.type).toLowerCase();
   if (declaredMime && declaredMime !== embeddedMime) throw new Error(`${label} type does not match its content`);
   const mimeType = declaredMime || embeddedMime;
-  if (!uploadMimeExtensions[mimeType] || (options.imageOnly && !mimeType.startsWith('image/'))) throw new Error(options.imageOnly ? 'Use a JPG, PNG, WebP or HEIC motor photo' : 'Use a PDF, JPG, PNG, WebP or HEIC document');
+  const allowedMimeTypes = options.allowedMimeTypes ? new Set(options.allowedMimeTypes) : null;
+  if (!uploadMimeExtensions[mimeType] || (options.imageOnly && !mimeType.startsWith('image/')) || (allowedMimeTypes && !allowedMimeTypes.has(mimeType))) throw new Error(options.allowedTypeError || (options.imageOnly ? 'Use a JPG, PNG, WebP or HEIC motor photo' : 'Use a PDF, JPG, PNG, WebP or HEIC document'));
   const base64 = match[2].replace(/\s/g, '');
   if (!base64 || base64.length % 4 !== 0) throw new Error(`${label} encoding is invalid`);
   const bytes = Buffer.from(base64, 'base64');
   if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES) throw new Error(`${label} must be between 1 byte and 3 MB`);
+  const validSignature = mimeType === 'application/pdf'
+    ? bytes.subarray(0, 5).toString() === '%PDF-'
+    : mimeType === 'image/jpeg'
+      ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+      : mimeType === 'image/png'
+        ? bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+        : mimeType === 'image/webp'
+          ? bytes.length >= 12 && bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP'
+          : bytes.length >= 12 && bytes.subarray(4, 8).toString() === 'ftyp' && /^(?:hei[cfmsx]|mif1|msf1)$/.test(bytes.subarray(8, 12).toString());
+  if (!validSignature) throw new Error(`${label} content is not a valid ${mimeType.replace('application/', '').replace('image/', '').toUpperCase()} file`);
   const originalName = clean(file.name) || `${options.imageOnly ? 'photo' : 'document'}-${Date.now()}.${uploadMimeExtensions[mimeType][0]}`;
   const extension = originalName.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] || '';
   if (!uploadMimeExtensions[mimeType].includes(extension)) throw new Error(`${label} filename extension does not match its type`);
@@ -177,7 +190,11 @@ async function readRanges(req, ranges) {
   ranges.forEach(range => params.append('ranges', range));
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchGet?${params}`, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`Google Sheets request failed (${response.status})`);
-  return (await response.json()).valueRanges.map(item => item.values || []);
+  return (await response.json()).valueRanges.map(item => {
+    const rows = item.values || [];
+    if (rows[0]) rows[0] = rows[0].map(header => clean(header).replace(/^\uFEFF/, ''));
+    return rows;
+  });
 }
 
 async function appendObject(req, sheet, object) {
@@ -185,7 +202,7 @@ async function appendObject(req, sheet, object) {
   const [headerRows] = await readRanges(req, [`${sheet}!1:1`]);
   const headers = headerRows?.[0] || [];
   if (!headers.length) throw new Error(`${sheet} headers are missing`);
-  const values = headers.map(header => object[header] ?? '');
+  const values = headers.map(header => sheetSafeValue(object[header] ?? ''));
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(sheet + '!A:A')}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
     method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] })
   });
@@ -202,13 +219,13 @@ async function updateObject(req, sheet, idHeader, id, changes, maxColumn = 'BG')
   const token = await getAccessToken(req);
   const [rows] = await readRanges(req, [`${sheet}!A1:${maxColumn}2000`]);
   const headers = rows?.[0] || [];
-  const idIndex = headers.indexOf(idHeader);
-  if (idIndex < 0) throw new Error(`${sheet} identifier column is missing`);
-  const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(id));
+  const idIndexes = headers.map((header, index) => header === idHeader ? index : -1).filter(index => index >= 0);
+  if (!idIndexes.length) throw new Error(`${sheet} identifier column is missing`);
+  const rowIndex = rows.findIndex((row, index) => index > 0 && idIndexes.some(idIndex => clean(row[idIndex]) === clean(id)));
   if (rowIndex < 1) throw new Error(`${sheet} record was not found`);
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({
     range: `${sheet}!${columnName(headers.indexOf(header))}${rowIndex + 1}`,
-    values: [[value ?? '']]
+    values: [[sheetSafeValue(value ?? '')]]
   }));
   if (!data.length) throw new Error('No supported fields were supplied');
   const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, {
@@ -276,7 +293,7 @@ async function replaceWorksheetRows(req, sheet, rows) {
   });
   if (!clearResponse.ok) throw new Error(`Unable to clear ${sheet} settings (${clearResponse.status})`);
   const writeResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A1`)}?valueInputOption=USER_ENTERED`, {
-    method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: rows })
+    method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: rows.map(row => row.map(sheetSafeValue)) })
   });
   if (!writeResponse.ok) throw new Error(`Unable to save ${sheet} settings (${writeResponse.status})`);
 }
@@ -387,7 +404,7 @@ async function uploadDocument(req, file, caseId) {
 }
 
 async function uploadSecondHandMotorPhoto(file, inventoryId) {
-  const { bytes, mimeType } = validateUploadFile(file, { label: 'Motor photo', imageOnly: true });
+  const { bytes, mimeType } = validateUploadFile(file, { label: 'Motor photo', imageOnly: true, allowedMimeTypes: ['image/jpeg', 'image/png'], allowedTypeError: 'Use a JPG or PNG motor photo so WhatsApp can display it' });
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
@@ -407,8 +424,7 @@ async function uploadSecondHandMotorPhoto(file, inventoryId) {
 }
 
 async function uploadProductCatalogImage(file, catalogId, businessUnit) {
-  const { bytes, mimeType } = validateUploadFile(file, { label: 'Product photo', imageOnly: true });
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new Error('Use a JPG, PNG or WebP product photo so WhatsApp can display it');
+  const { bytes, mimeType } = validateUploadFile(file, { label: 'Product photo', imageOnly: true, allowedMimeTypes: ['image/jpeg', 'image/png'], allowedTypeError: 'Use a JPG or PNG product photo so WhatsApp can display it' });
   const token = await getSharePointToken();
   const host = clean(process.env.SHAREPOINT_HOSTNAME) || 'rexmgt.sharepoint.com';
   const sitePath = clean(process.env.SHAREPOINT_SITE_PATH) || '/sites/JomKakiRiderSecureDocuments';
@@ -534,11 +550,12 @@ const outboundMediaHeaders = ['Media ID', 'Media MIME Type', 'Media File Name', 
 const leadRecordHeaders = ['Lead Source', 'Created By', 'Updated By'];
 const applicationRecordHeaders = ['Product Variant', 'Motor Type', 'Second Hand Inventory ID', 'Created By', 'Updated By'];
 const documentReviewHeaders = ['Uploaded By', 'Reviewed By', 'Reviewed At'];
-const whatsappPhone = value => {
+export const whatsappPhone = value => {
   let digits = clean(value).replace(/\D/g, '');
   if (digits.startsWith('0')) digits = `60${digits.slice(1)}`;
   return digits;
 };
+export const validWhatsAppPhone = value => /^\d{8,15}$/.test(whatsappPhone(value));
 export const inboxConversationKey = (row = {}, index = 0) => {
   const phone = whatsappPhone(row['Phone Number'] || row.phone || row.recipient);
   if (phone) return `PHONE:${phone}`;
@@ -587,7 +604,11 @@ const channelForMessage = (message, channels) => {
 };
 
 export function resolveCustomerChannel({ leadId = '', applicationId = '', replyToMessageId = '', preferredChannelId = '', leads = [], applications = [], inbox = [], outbox = [], channels = [], branches = [] } = {}) {
-  const matchesCustomer = row => (leadId && clean(row['Lead ID']) === clean(leadId)) || (applicationId && clean(row['Application ID']) === clean(applicationId));
+  const matchesCustomer = row => {
+    const rowLeadId = clean(row['Lead ID']), rowApplicationId = clean(row['Application ID']);
+    if ((rowLeadId && leadId && rowLeadId !== clean(leadId)) || (rowApplicationId && applicationId && rowApplicationId !== clean(applicationId))) return false;
+    return Boolean((leadId && rowLeadId === clean(leadId)) || (applicationId && rowApplicationId === clean(applicationId)));
+  };
   const application = applications.find(app => clean(app['Application ID']) === clean(applicationId));
   const lead = leads.find(row => clean(row['Lead ID']) === clean(leadId)) || leads.find(row => clean(row['Lead ID']) === clean(application?.['Lead ID']));
   const targetBusiness = rowBusinessUnit(application || lead || {});
@@ -606,10 +627,10 @@ export function resolveCustomerChannel({ leadId = '', applicationId = '', replyT
   if (bound) return { channel: bound, source: 'CUSTOMER_CHANNEL_BINDING' };
   const previousOutbound = outbox.filter(row => matchesCustomer(row)).sort((a, b) => rowTime(b) - rowTime(a)).map(row => channelForMessage(row, channels)).find(Boolean);
   if (previousOutbound) return { channel: previousOutbound, source: 'LATEST_OUTBOUND_CHANNEL' };
-  const preferred = channels.find(row => clean(row['Internal Channel ID']) === clean(preferredChannelId) && channelMatchesBusiness(row));
-  if (preferred) return { channel: preferred, source: 'AUTHORIZED_CHANNEL_SELECTION' };
   const targetBranch = clean(lead?.['Selected Branch ID'] || application?.['Assigned Branch ID']);
   const targetRegion = canonicalRegion(lead?.Region || branches.find(row => clean(row['Branch ID']) === targetBranch)?.Region);
+  const preferred = channels.find(row => clean(row['Internal Channel ID']) === clean(preferredChannelId) && channelMatchesBusiness(row) && channelRegion(row, branches) === targetRegion && (!clean(row['Branch ID']) || !targetBranch || clean(row['Branch ID']) === targetBranch));
+  if (preferred) return { channel: preferred, source: 'AUTHORIZED_CHANNEL_SELECTION' };
   const available = channels.filter(row => truth(row.Active) && truth(row['Outbound Enabled']) && channelMatchesBusiness(row));
   const fallback = available.find(row => targetBranch && clean(row['Branch ID']) === targetBranch) || available.find(row => channelRegion(row, branches) === targetRegion);
   return { channel: fallback || null, source: fallback ? 'REGION_BUSINESS_DEFAULT_CHANNEL' : 'NO_MATCHING_BUSINESS_CHANNEL' };
@@ -642,8 +663,7 @@ async function approvedWhatsAppTemplates(channel) {
 }
 
 async function uploadWhatsAppMedia(file, credentials) {
-  const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'WhatsApp attachment' });
-  if (!['application/pdf', 'image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) throw new Error('WhatsApp replies support PDF, JPG, PNG or WebP files');
+  const { bytes, mimeType, safeName } = validateUploadFile(file, { label: 'WhatsApp attachment', allowedMimeTypes: ['application/pdf', 'image/jpeg', 'image/png'], allowedTypeError: 'WhatsApp replies support PDF, JPG or PNG files' });
   const form = new FormData();
   form.append('messaging_product', 'whatsapp');
   form.append('type', mimeType);
@@ -698,9 +718,18 @@ async function writeActivity(req, session, payload) {
   });
 }
 
-function rowsToObjects(rows) {
+export function rowsToObjects(rows) {
   const [headers = [], ...data] = rows;
-  return data.filter(row => row.some(Boolean)).map(row => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
+  return data.filter(row => row.some(Boolean)).map(row => {
+    const object = {};
+    headers.forEach((header, index) => {
+      const key = clean(header).replace(/^\uFEFF/, '');
+      if (!key) return;
+      const value = row[index] ?? '';
+      if (!(key in object) || (!clean(object[key]) && clean(value))) object[key] = value;
+    });
+    return object;
+  });
 }
 
 const secondHandRegionAllowed = (session, row) => clean(session.region).toUpperCase() === 'ALL' || canonicalRegion(row.Region) === canonicalRegion(session.region);
@@ -766,6 +795,49 @@ export function scopeData(session, leads, applications, branches) {
   const leadIds = new Set(scopedLeads.map(row => row['Lead ID']));
   const scopedApplications = permittedApplications.filter(row => leadIds.has(row['Lead ID']) || branchRegion[row['Assigned Branch ID']] === session.region);
   return { leads: scopedLeads, applications: scopedApplications, leadIds, applicationIds: new Set(scopedApplications.map(row => row['Application ID'])) };
+}
+
+export const scopedRecordPermitted = (scope = {}, row = {}) => {
+  const leadId = clean(row['Lead ID'] || row.leadId), applicationId = clean(row['Application ID'] || row.applicationId);
+  if (!leadId && !applicationId) return false;
+  if ((leadId && !scope.leadIds?.has(leadId)) || (applicationId && !scope.applicationIds?.has(applicationId))) return false;
+  if (leadId && applicationId) {
+    const application = scope.applications?.find(candidate => clean(candidate['Application ID']) === applicationId);
+    if (!application || clean(application['Lead ID']) !== leadId) return false;
+  }
+  return true;
+};
+
+export function scopedCustomerTarget(scope = {}, leads = [], applications = [], requested = {}) {
+  const requestedLeadId = clean(requested.leadId), requestedApplicationId = clean(requested.applicationId);
+  const application = requestedApplicationId ? applications.find(row => clean(row['Application ID']) === requestedApplicationId) : undefined;
+  if (requestedApplicationId && !application) return null;
+  const linkedLeadId = clean(application?.['Lead ID']);
+  if (requestedLeadId && linkedLeadId && requestedLeadId !== linkedLeadId) return null;
+  const leadId = requestedLeadId || linkedLeadId;
+  const lead = leadId ? leads.find(row => clean(row['Lead ID']) === leadId) : undefined;
+  if (leadId && !lead) return null;
+  if (!lead && !application) return null;
+  const applicationId = clean(application?.['Application ID']);
+  if (!scopedRecordPermitted(scope, { 'Lead ID': leadId, 'Application ID': applicationId })) return null;
+  return { lead, application, leadId, applicationId };
+}
+
+export function customerPhoneForTarget(target = {}, supplied = '') {
+  const recordedPhones = [target.application?.['Phone Number'], target.lead?.['Phone Number']].map(whatsappPhone).filter(Boolean);
+  if (!recordedPhones.length || recordedPhones.some(phone => !validWhatsAppPhone(phone)) || new Set(recordedPhones).size !== 1) throw new Error('The customer record has no single valid WhatsApp phone number. Correct the profile before sending.');
+  const phone = recordedPhones[0], requestedPhone = whatsappPhone(supplied);
+  if (supplied && (!validWhatsAppPhone(requestedPhone) || requestedPhone !== phone)) throw new Error('The supplied phone number does not match this customer record.');
+  return phone;
+}
+
+export function recordMatchesCustomerTarget(row = {}, target = {}) {
+  if (!target.lead && !target.application) return false;
+  const rowLeadId = clean(row['Lead ID']), rowApplicationId = clean(row['Application ID']);
+  if ((rowLeadId && target.leadId && rowLeadId !== target.leadId) || (rowApplicationId && target.applicationId && rowApplicationId !== target.applicationId)) return false;
+  const targetPhone = customerPhoneForTarget(target), rowPhone = whatsappPhone(row['Phone Number']);
+  if (rowPhone && rowPhone !== targetPhone) return false;
+  return Boolean((rowLeadId && rowLeadId === target.leadId) || (rowApplicationId && rowApplicationId === target.applicationId) || (rowPhone && rowPhone === targetPhone));
 }
 
 const count = (rows, field, value) => rows.filter(row => clean(row[field]).toUpperCase() === value).length;
@@ -836,6 +908,7 @@ export default async function handler(req, res) {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       const action = clean(body.action);
+      if (session.mustChangePassword && action !== 'changeOwnPassword') return res.status(403).json({ live: false, code: 'PASSWORD_CHANGE_REQUIRED', error: 'You must change your temporary password before using CRM.' });
       if (action === 'verifySharePointWrite') {
         if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
         return res.status(200).json(await runControlledSharePointWriteTest(req, session));
@@ -1402,7 +1475,7 @@ export default async function handler(req, res) {
         const requestedRegion = canonicalRegion(body.region);
         const motorType = businessUnit === 'MOTOR' && ['SECOND_HAND', '2ND_HAND', 'USED'].includes(clean(body.motorType).toUpperCase()) ? 'SECOND_HAND' : businessUnit === 'MOTOR' ? 'NEW' : '';
         const secondHandInventoryId = motorType === 'SECOND_HAND' ? clean(body.secondHandInventoryId || body.inventoryId) : '';
-        if (!customerName || !phone || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, phone, region and application type are required');
+        if (!customerName || !validWhatsAppPhone(phone) || !['EAST_MALAYSIA', 'WEST_MALAYSIA'].includes(requestedRegion)) throw new Error('Customer, a valid phone number, region and application type are required');
         const sessionBusinessAccess = canonicalBusinessAccess(session.businessAccess, session.role);
         if (session.role !== 'ADMIN' && sessionBusinessAccess !== 'BOTH' && sessionBusinessAccess !== businessUnit) return res.status(403).json({ live: false, error: `Your account cannot submit ${businessUnit.toLowerCase()} applications.` });
         if (session.role !== 'ADMIN' && session.region !== 'ALL' && requestedRegion !== session.region) return res.status(403).json({ live: false, error: 'This region is outside your access.' });
@@ -1433,11 +1506,11 @@ export default async function handler(req, res) {
           const [branchRows, saRows] = await readRanges(req, ['Branch_Master!A1:S1000', 'SA_Master!A1:O1000']);
           const branches = rowsToObjects(branchRows), advisors = rowsToObjects(saRows);
           const branch = branches.find(row => clean(row['Branch ID']) === assignedBranchId && clean(row.Active).toUpperCase() === 'TRUE');
-          if (!branch || (session.role !== 'ADMIN' && canonicalRegion(branch.Region) !== requestedRegion)) throw new Error('The selected branch is outside the application region');
+          if (!branch || canonicalRegion(branch.Region) !== requestedRegion) throw new Error('The selected branch is outside the application region');
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && assignedBranchId !== clean(session.branchId)) throw new Error('Branch Supervisor may create cases in their own branch only');
           if (assignedSaId) {
             const advisor = advisors.find(row => clean(row['SA ID']) === assignedSaId && clean(row.Active).toUpperCase() === 'TRUE');
-            if (!advisor || clean(advisor['Branch ID']) !== assignedBranchId || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== requestedRegion)) throw new Error('The selected sales advisor does not belong to this branch and region');
+            if (!advisor || clean(advisor['Branch ID']) !== assignedBranchId || canonicalRegion(advisor.Region) !== requestedRegion) throw new Error('The selected sales advisor does not belong to this branch and region');
             if (!businessAllows(advisor['Business Access'] || 'BOTH', businessUnit)) throw new Error(`The selected sales advisor cannot receive ${businessUnit.toLowerCase()} applications`);
             teamId = clean(advisor['Team ID']) || teamId;
           }
@@ -1446,14 +1519,14 @@ export default async function handler(req, res) {
         await ensureSheetHeaders(req, 'Leads', ['Business Unit', 'Customer ID', 'Team ID', ...leadRecordHeaders]);
         await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
         await appendObject(req, 'Leads', {
-          'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': phone,
+          'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Customer Name': customerName, 'Phone Number': normalizedPhone,
           'Normalized Phone': normalizedPhone, Region: requestedRegion, 'Business Unit': businessUnit, 'Customer ID': customerId, 'Team ID': teamId, State: clean(body.state), 'City or Area': clean(body.city), 'Lead Status': 'NEW', 'Lead Source': 'CRM_MANUAL', 'Source Channel': 'CRM_MANUAL',
           'Assigned SA ID': assignedSaId, 'Selected Branch ID': assignedBranchId, 'Processing Mode': assignedSaId ? (session.role === 'STAFF' ? 'AI_EXCEPTION_STAFF_MANUAL' : 'MANUAL_ASSIGNED') : 'AI_MANAGED',
           'Next Follow Up At': clean(body.nextFollowUp), Notes: clean(body.notes), 'Created By': session.username, 'Updated By': session.username
         });
         await appendObject(req, 'Applications', {
           'Application ID': applicationId, 'Lead ID': leadId, 'Created At': timestamp, 'Updated At': timestamp, 'Applicant Name': customerName,
-          'Applicant IC Number': clean(body.applicantIcNumber), 'Home Address': clean(body.homeAddress), 'Phone Number': phone, Email: clean(body.email),
+          'Applicant IC Number': clean(body.applicantIcNumber), 'Home Address': clean(body.homeAddress), 'Phone Number': normalizedPhone, Email: clean(body.email),
           'Employer Name': clean(body.employerName), 'Employer Address': clean(body.employerAddress), 'Employer Phone': clean(body.employerPhone),
           'Employment Duration Months': clean(body.employmentDurationMonths), 'Job Position': clean(body.jobPosition), 'Basic Salary': clean(body.basicSalary),
           'Salary Payment Method': clean(body.salaryPaymentMethod), 'Occupation Category': clean(body.occupationCategory),
@@ -1556,13 +1629,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ live: true, applicationId, status: 'READY_FOR_API_CONNECTION', externalQueryExecuted: false });
       }
       if (action === 'uploadDocument') {
-        const applicationId = clean(body.applicationId), leadId = clean(body.leadId), documentType = clean(body.documentType);
-        if ((!applicationId && !leadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
+        const requestedApplicationId = clean(body.applicationId), requestedLeadId = clean(body.leadId), documentType = clean(body.documentType);
+        if ((!requestedApplicationId && !requestedLeadId) || !documentType || !body.file?.data) throw new Error('Application or Lead, document type and file are required');
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const leadRecords = rowsToObjects(leadRows), applicationRecords = rowsToObjects(applicationRows);
         const scope = scopeData(session, leadRecords, applicationRecords, rowsToObjects(branchRows));
-        if (session.role !== 'ADMIN' && !scope.leadIds.has(leadId) && !scope.applicationIds.has(applicationId)) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
-        const applicationRecord = applicationRecords.find(row => clean(row['Application ID']) === applicationId), leadRecord = leadRecords.find(row => clean(row['Lead ID']) === (leadId || clean(applicationRecord?.['Lead ID'])));
+        const target = scopedCustomerTarget(scope, leadRecords, applicationRecords, { leadId: requestedLeadId, applicationId: requestedApplicationId });
+        if (!target) return res.status(403).json({ live: false, error: 'This customer is outside your access or the selected records do not belong together.' });
+        const { application: applicationRecord, lead: leadRecord, applicationId, leadId } = target;
         const uploaded = await uploadDocument(req, body.file, applicationId || leadId);
         const documentId = makeId('DOC'), timestamp = now();
         await ensureSheetHeaders(req, 'Document_Log', documentReviewHeaders);
@@ -1661,11 +1735,13 @@ export default async function handler(req, res) {
           if (blockers.length) throw new Error(`This application cannot be marked ${status || stage}: complete ${blockers.join(', ')} first.`);
         }
         const branchRegion = Object.fromEntries(branches.map(row => [clean(row['Branch ID']), canonicalRegion(row.Region)]));
-        if (branchId && (!branchRegion[branchId] || (session.role !== 'ADMIN' && branchRegion[branchId] !== session.region))) throw new Error('The selected branch is outside your access');
+        const linkedLead = leads.find(row => clean(row['Lead ID']) === clean(record['Lead ID']));
+        const applicationRegion = canonicalRegion(linkedLead?.Region || record.Region);
+        if (branchId && (!branchRegion[branchId] || !applicationRegion || branchRegion[branchId] !== applicationRegion)) throw new Error('The selected branch is outside the application region');
         if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && branchId !== clean(session.branchId)) throw new Error('Branch Supervisor may assign cases inside their own branch only');
         if (saId) {
           const advisor = salesAdvisors.find(row => clean(row['SA ID']) === saId && clean(row.Active).toUpperCase() === 'TRUE');
-          if (!advisor || (session.role !== 'ADMIN' && canonicalRegion(advisor.Region) !== session.region)) throw new Error('The selected sales advisor is outside your access');
+          if (!advisor || !applicationRegion || canonicalRegion(advisor.Region) !== applicationRegion) throw new Error('The selected sales advisor is outside the application region');
           if (!businessAllows(advisor['Business Access'] || 'BOTH', rowBusinessUnit(record))) throw new Error('The selected sales advisor does not have access to this business unit');
           if (['BRANCH_SUPERVISOR', 'BRANCH_MANAGER'].includes(session.role) && clean(advisor['Branch ID']) !== clean(session.branchId)) throw new Error('The selected sales advisor is outside your branch');
           if (branchId && clean(advisor['Branch ID']) !== branchId) throw new Error('The selected sales advisor does not belong to the selected branch');
@@ -1691,7 +1767,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
-        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        if (!document || !scopedRecordPermitted(scope, document)) return res.status(403).json({ live: false, error: 'This document is outside your access or has inconsistent customer links.' });
         await ensureSheetHeaders(req, 'Document_Log', documentReviewHeaders);
         await updateObject(req, 'Document_Log', 'Document ID', documentId, {
           'Updated At': now(), 'Quality Status': quality, 'Verification Status': verification,
@@ -1715,7 +1791,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
-        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        if (!document || !scopedRecordPermitted(scope, document)) return res.status(403).json({ live: false, error: 'This document is outside your access or has inconsistent customer links.' });
         const url = clean(document['File URL']);
         if (!/^https:\/\//i.test(url)) throw new Error('This document has no secure preview link. Re-upload it or ask Admin to repair the file record.');
         await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_SECURE_DOCUMENT_OPENED', description: `${session.username} opened ${document['Document Type'] || 'a customer document'} for review` });
@@ -1727,7 +1803,7 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, documentRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Document_Log!A1:AD1500']);
         const scope = scopeData(session, rowsToObjects(leadRows), rowsToObjects(applicationRows), rowsToObjects(branchRows));
         const document = rowsToObjects(documentRows).find(row => clean(row['Document ID']) === documentId);
-        if (!document || (!scope.applicationIds.has(document['Application ID']) && !scope.leadIds.has(document['Lead ID']))) return res.status(403).json({ live: false, error: 'This document is outside your access.' });
+        if (!document || !scopedRecordPermitted(scope, document)) return res.status(403).json({ live: false, error: 'This document is outside your access or has inconsistent customer links.' });
         if (clean(document['Document Type']).toUpperCase() === CREDIT_CONSENT_DOCUMENT_TYPE) throw new Error('Signed consent requires Manager verification, not AI validation');
         await updateObject(req, 'Document_Log', 'Document ID', documentId, { 'Updated At': now(), 'Classification Status': 'AI_QUEUED', 'Quality Status': 'PENDING_AI', 'Verification Status': 'PENDING_AI', 'Manual Review Required': 'FALSE', Remarks: clean(body.remarks) || 'AI validation retried from CRM' }, 'AD');
         await writeActivity(req, session, { leadId: document['Lead ID'], applicationId: document['Application ID'], type: 'CRM_DOCUMENT_AI_RETRY_QUEUED', description: `${document['Document Type'] || 'Document'} was requeued for automatic validation` });
@@ -1750,9 +1826,15 @@ export default async function handler(req, res) {
           if (!catalogRecord) throw new Error(businessUnit === 'MOTOR' ? 'Select an active motorcycle from the Motor Catalog' : 'Select an active handphone from the Handphone Catalog');
           brand = clean(catalogRecord.Brand); model = clean(catalogRecord.Model); variant = clean(catalogRecord.Variant) || 'Standard';
         }
+        const normalizedPhone = whatsappPhone(body.phone), applicantName = clean(body.applicantName);
+        if (!applicantName || !validWhatsAppPhone(normalizedPhone)) throw new Error('Applicant name and a valid phone number are required');
+        const linkedLead = leads.find(row => clean(row['Lead ID']) === clean(record['Lead ID']));
+        const customerId = clean(record['Customer ID'] || linkedLead?.['Customer ID']);
+        const phoneCollision = leads.find(row => clean(row['Lead ID']) !== clean(record['Lead ID']) && whatsappPhone(row['Phone Number']) === normalizedPhone && (!customerId || clean(row['Customer ID']) !== customerId));
+        if (phoneCollision) throw new Error('This phone number is already linked to another customer record');
         const changes = {
-          'Updated At': now(), 'Applicant Name': clean(body.applicantName), 'Home Address': clean(body.homeAddress),
-          'Phone Number': clean(body.phone), Email: clean(body.email), 'Employer Name': clean(body.employerName),
+          'Updated At': now(), 'Applicant Name': applicantName, 'Home Address': clean(body.homeAddress),
+          'Phone Number': normalizedPhone, Email: clean(body.email), 'Employer Name': clean(body.employerName),
           'Employer Address': clean(body.employerAddress), 'Employer Phone': clean(body.employerPhone),
           'Employment Duration Months': clean(body.employmentDurationMonths), 'Job Position': clean(body.jobPosition),
           'Basic Salary': clean(body.basicSalary), 'Salary Payment Method': clean(body.salaryPaymentMethod),
@@ -1766,12 +1848,16 @@ export default async function handler(req, res) {
           'Updated By': session.username
         };
         if (clean(body.applicantIcNumber)) changes['Applicant IC Number'] = clean(body.applicantIcNumber);
-        if (!changes['Applicant Name'] || !changes['Phone Number'] || !changes['Product Brand'] || !changes['Product Model']) throw new Error('Applicant name, phone, product brand and model are required');
+        if (!changes['Product Brand'] || !changes['Product Model']) throw new Error('Product brand and model are required');
         if (changes['Loan Tenure Years'] && !['3', '4', '5'].includes(changes['Loan Tenure Years'])) throw new Error('Motor loan tenure must be 3, 4 or 5 years');
         if (changes['Loan Tenure Months'] && !['12', '24', '36', '48', '60'].includes(changes['Loan Tenure Months'])) throw new Error('Handphone loan tenure must be between 1 and 5 years');
         if (changes['Email'] && !/^\S+@\S+\.\S+$/.test(changes['Email'])) throw new Error('Email format is invalid');
         await ensureSheetHeaders(req, 'Applications', ['Business Unit', 'Requested Product Price (RM)', 'Requested Deposit (RM)', 'Loan Tenure Months', 'Customer ID', 'Team ID', 'Origin WhatsApp Channel ID', ...applicationRecordHeaders, ...creditConsentHeaders]);
         await updateObject(req, 'Applications', 'Application ID', applicationId, changes, 'BX');
+        if (linkedLead) {
+          await ensureSheetHeaders(req, 'Leads', ['Customer Name', 'Phone Number', 'Normalized Phone', 'Updated At', 'Updated By']);
+          await updateObject(req, 'Leads', 'Lead ID', linkedLead['Lead ID'], { 'Customer Name': applicantName, 'Phone Number': normalizedPhone, 'Normalized Phone': normalizedPhone, 'Updated At': now(), 'Updated By': session.username }, 'AP');
+        }
         await writeActivity(req, session, { leadId: record['Lead ID'], applicationId, type: 'CRM_APPLICANT_PROFILE_UPDATED', description: 'Applicant 360 profile updated by authorized staff' });
         return res.status(200).json({ live: true, applicationId });
       }
@@ -1779,12 +1865,18 @@ export default async function handler(req, res) {
         const [leadRows, applicationRows, branchRows, inboxRows, outboxRows, saRows, channelRows] = await readRanges(req, ['Leads!A1:AP1000', 'Applications!A1:CZ1000', 'Branch_Master!A1:S1000', 'Customer_Inbox!A1:AC1200', 'Message_Outbox!A1:AJ1500', 'SA_Master!A1:O1000', channelRange]);
         const leads = rowsToObjects(leadRows), applications = rowsToObjects(applicationRows), branches = rowsToObjects(branchRows), inboxRecords = rowsToObjects(inboxRows), outboxRecords = rowsToObjects(outboxRows), advisors = rowsToObjects(saRows), channels = rowsToObjects(channelRows);
         const scope = scopeData(session, leads, applications, branches);
-        const leadId = clean(body.leadId), applicationId = clean(body.applicationId);
-        const permitted = (leadId && scope.leadIds.has(leadId)) || (applicationId && scope.applicationIds.has(applicationId));
+        const target = scopedCustomerTarget(scope, leads, applications, { leadId: body.leadId, applicationId: body.applicationId });
+        const leadId = target?.leadId || '', applicationId = target?.applicationId || '';
+        const permitted = Boolean(target);
+        const replyToMessageId = clean(body.replyToMessageId);
+        if (permitted && replyToMessageId) {
+          const replyRecord = inboxRecords.find(row => clean(row['Message ID']) === replyToMessageId);
+          if (!replyRecord || !scopedRecordPermitted(scope, replyRecord) || !recordMatchesCustomerTarget(replyRecord, target)) return res.status(403).json({ live: false, error: 'The selected reply does not belong to this customer.' });
+        }
 
         if (action === 'getWhatsAppTemplates') {
           if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
-          const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId: body.replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
+          const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           if (!resolved.channel) throw new Error('Customer is not bound to an official WhatsApp channel');
           const templates = await approvedWhatsAppTemplates(resolved.channel);
           return res.status(200).json({ live: true, channelId: clean(resolved.channel['Internal Channel ID']), templates });
@@ -1794,24 +1886,25 @@ export default async function handler(req, res) {
           if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
           const unassignedHandover = inboxRecords.some(row => humanStatuses.has(clean(row['Process Status']).toUpperCase()) && clean(row['Process Status']).toUpperCase() !== 'ASSIGNED_TO_STAFF' && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId)));
           if (session.role === 'STAFF' && unassignedHandover) return res.status(403).json({ live: false, error: 'This human handover is controlled by a Manager and has not been assigned to Staff.' });
-          const phone = whatsappPhone(body.phone), attachment = body.attachment?.data ? body.attachment : null;
+          const phone = customerPhoneForTarget(target, body.phone), attachment = body.attachment?.data ? body.attachment : null;
           let message = clean(body.message);
           if (!phone || (!message && !attachment && clean(body.messageType).toUpperCase() !== 'TEMPLATE') || message.length > 4000) throw new Error('A valid phone number and message or attachment are required');
           let messageType = clean(body.messageType).toUpperCase() === 'TEMPLATE' ? 'TEMPLATE' : 'TEXT';
-          const templateName = clean(body.templateName), language = clean(body.language) || 'ms';
+          const templateName = clean(body.templateName);
+          let language = clean(body.language) || 'ms';
           if (messageType === 'TEMPLATE' && !templateName) throw new Error('An approved Meta template name is required');
           const outboxId = makeId('OUT'), timestamp = now();
           const cloudMode = clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD';
-          const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId: body.replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
+          const resolved = resolveCustomerChannel({ leadId, applicationId, replyToMessageId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           const route = resolved.channel;
-          const targetApplication = applications.find(row => clean(row['Application ID']) === applicationId);
-          const targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
+          const targetApplication = target.application;
+          const targetLead = target.lead;
           const messageBusinessUnit = rowBusinessUnit(targetApplication || targetLead || {}), customerId = clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']);
           if (cloudMode && resolved.unregisteredNumberId) throw new Error(`The customer's original WhatsApp number (${resolved.unregisteredNumberId}) is not registered in CRM. Admin must map it before replying.`);
           if (cloudMode && !route) throw new Error('Customer is not bound to an official WhatsApp channel. Bind the customer channel before sending.');
           if (cloudMode && route && (!truth(route.Active) || !truth(route['Outbound Enabled']))) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} is disabled. Admin approval is required before transferring the conversation.`);
           if (cloudMode && route && !clean(route['Last Verified At'])) throw new Error(`The customer's bound WhatsApp channel ${route['Internal Channel ID']} has not completed Meta phone verification.`);
-          const latestInbound = inboxRecords.filter(row => (leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId) || whatsappPhone(row['Phone Number']) === phone).sort((a, b) => rowTime(b) - rowTime(a))[0];
+          const latestInbound = inboxRecords.filter(row => scopedRecordPermitted(scope, row) && ((leadId && clean(row['Lead ID']) === leadId) || (applicationId && clean(row['Application ID']) === applicationId) || whatsappPhone(row['Phone Number']) === phone)).sort((a, b) => rowTime(b) - rowTime(a))[0];
           const serviceWindowOpen = Boolean(latestInbound && Date.now() - rowTime(latestInbound) <= 24 * 60 * 60 * 1000);
           if (cloudMode && !serviceWindowOpen && messageType !== 'TEMPLATE') throw new Error('The WhatsApp 24-hour service window is closed. Choose an approved Meta template.');
           if (!cloudMode && attachment) throw new Error('CRM file sending requires WhatsApp Cloud mode. Manual WhatsApp cannot attach a local file safely.');
@@ -1820,6 +1913,7 @@ export default async function handler(req, res) {
             const templates = await approvedWhatsAppTemplates(route);
             selectedApprovedTemplate = templates.find(template => template.name === templateName && template.language === language) || templates.find(template => template.name === templateName);
             if (!selectedApprovedTemplate) throw new Error('The selected template is not approved for this official WhatsApp account');
+            language = selectedApprovedTemplate.language;
             if (['IMAGE', 'DOCUMENT'].includes(selectedApprovedTemplate.headerFormat) && !attachment) throw new Error(`The approved ${selectedApprovedTemplate.headerFormat.toLowerCase()} template requires a matching attachment`);
             message = selectedApprovedTemplate.body || message || templateName;
           }
@@ -1839,7 +1933,7 @@ export default async function handler(req, res) {
             }
           }
           await ensureSheetHeaders(req, 'Message_Outbox', [...outboundMediaHeaders, 'Error Message']);
-          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': cloudMode ? 'PENDING' : sendStatus, 'Attempt Count': '0', 'Sent At': '', 'Provider Message ID': '', 'Error Message': '', 'Media ID': media?.mediaId || '', 'Media MIME Type': media?.mimeType || '', 'Media File Name': media?.fileName || '', 'Image Caption': media?.mimeType?.startsWith('image/') ? message : '', 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': clean(body.replyToMessageId), 'Send Routing Status': `${cloudMode ? 'CLOUD_API_PENDING' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}`, 'Business Unit': messageBusinessUnit, 'Customer ID': customerId, 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
+          await appendObject(req, 'Message_Outbox', { 'Outbox ID': outboxId, 'Created At': timestamp, 'Lead ID': leadId, 'Application ID': applicationId, 'Phone Number': phone, 'Message Type': messageType, 'Message Text': message, 'Template Name': templateName, Language: language, 'Send Status': cloudMode ? 'PENDING' : sendStatus, 'Attempt Count': '0', 'Sent At': '', 'Provider Message ID': '', 'Error Message': '', 'Media ID': media?.mediaId || '', 'Media MIME Type': media?.mimeType || '', 'Media File Name': media?.fileName || '', 'Image Caption': media?.mimeType?.startsWith('image/') ? message : '', 'WhatsApp Number ID': clean(route?.['Phone Number ID']) || clean(process.env.WHATSAPP_PHONE_NUMBER_ID), 'WABA ID': route?.['WABA ID'] || '', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Make Connection Alias': route?.['Make Connection Alias'] || '', 'Reply To Message ID': replyToMessageId, 'Send Routing Status': `${cloudMode ? 'CLOUD_API_PENDING' : 'WHATSAPP_BUSINESS_MANUAL'}:${resolved.source}`, 'Business Unit': messageBusinessUnit, 'Customer ID': customerId, 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
           if (cloudMode) {
             const { accessToken, phoneNumberId, version } = channelCredentials(route);
             await updateObject(req, 'Message_Outbox', 'Outbox ID', outboxId, { 'Send Status': 'SENDING', 'Attempt Count': '1', 'Send Routing Status': `CLOUD_API_SENDING:${resolved.source}` }, 'AJ');
@@ -1848,7 +1942,7 @@ export default async function handler(req, res) {
             const result = await response.json().catch(() => ({}));
             if (response.ok) { sendStatus = 'SENT'; providerMessageId = result.messages?.[0]?.id || ''; } else { sendStatus = 'FAILED'; errorMessage = result.error?.message || `Meta API error ${response.status}`; }
             await updateObject(req, 'Message_Outbox', 'Outbox ID', outboxId, { 'Send Status': sendStatus, 'Sent At': sendStatus === 'SENT' ? now() : '', 'Provider Message ID': providerMessageId, 'Error Message': errorMessage, 'Send Routing Status': `${sendStatus === 'SENT' ? 'CLOUD_API_SENT' : 'CLOUD_API_FAILED'}:${resolved.source}` }, 'AJ');
-            if (sendStatus === 'SENT') await resolveRepliedInbox(req, body.replyToMessageId);
+            if (sendStatus === 'SENT') await resolveRepliedInbox(req, replyToMessageId);
           }
           if (route?.['Internal Channel ID']) await updateObject(req, 'WhatsApp_Number_Master', 'Internal Channel ID', route['Internal Channel ID'], { 'Last Outbound At': timestamp, 'Updated At': timestamp }, 'AC');
           await writeActivity(req, session, { leadId, applicationId, type: cloudMode ? 'CRM_WHATSAPP_MESSAGE_QUEUED' : 'CRM_MANUAL_WHATSAPP_OPENED', description: `${session.username} prepared a customer reply through ${route?.['Channel Name'] || 'the legacy default WhatsApp channel'}` });
@@ -1857,7 +1951,7 @@ export default async function handler(req, res) {
 
         if (action === 'retryOutboxMessage') {
           const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
-          if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
+          if (!record || !scopedRecordPermitted(scope, record)) return res.status(403).json({ live: false, error: 'This message is outside your access or has inconsistent customer links.' });
           const currentStatus = clean(record['Send Status']).toUpperCase();
           if (!['FAILED', 'PENDING', 'QUEUED'].includes(currentStatus)) throw new Error('Only failed or queued messages can be sent from this action');
           if (currentStatus === 'QUEUED' && clean(record['Provider Message ID'])) throw new Error('This message was already accepted by Meta and cannot be sent again');
@@ -1883,13 +1977,14 @@ export default async function handler(req, res) {
 
         if (action === 'recordManualReply' || action === 'requestHumanHandover') {
           if (!permitted) return res.status(403).json({ live: false, error: 'This customer is outside your access.' });
-          const phone = whatsappPhone(body.phone), message = clean(body.message || body.reason);
+          if (action === 'recordManualReply' && clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD') throw new Error('Manual customer replies cannot be recorded while WhatsApp Cloud mode is active');
+          const phone = customerPhoneForTarget(target, body.phone), message = clean(body.message || body.reason);
           if (!phone || !message) throw new Error('Phone number and message are required');
           const status = action === 'requestHumanHandover' || clean(body.requiresManager).toUpperCase() === 'TRUE' ? 'HUMAN_HANDOVER_REQUIRED' : 'MANUAL_RECORDED';
           const messageId = makeId('MSG'), timestamp = now();
           const resolved = resolveCustomerChannel({ leadId, applicationId, preferredChannelId: body.channelId, leads, applications, inbox: inboxRecords, outbox: outboxRecords, channels, branches });
           const route = resolved.channel;
-          const targetApplication = applications.find(row => clean(row['Application ID']) === applicationId), targetLead = leads.find(row => clean(row['Lead ID']) === (leadId || clean(targetApplication?.['Lead ID'])));
+          const targetApplication = target.application, targetLead = target.lead;
           await ensureSheetHeaders(req, 'Customer_Inbox', ['Received At', 'Human Handover At', 'AI Processed At']);
           await appendObject(req, 'Customer_Inbox', { 'Received At': timestamp, 'Phone Number': phone, 'Customer Message': message, 'Message ID': messageId, Channel: 'WHATSAPP_BUSINESS', Source: 'CRM_MANUAL', 'Lead ID': leadId, 'Application ID': applicationId, 'Message Type': action === 'requestHumanHandover' ? 'HANDOVER_REQUEST' : 'TEXT', 'Process Status': status, 'AI Processed': 'FALSE', 'Human Handover At': status === 'HUMAN_HANDOVER_REQUIRED' ? timestamp : '', 'WhatsApp Number ID': route?.['Phone Number ID'] || '', 'WhatsApp Display Number': route?.['Display Number'] || '', 'WABA ID': route?.['WABA ID'] || '', 'Conversation Key': `${route?.['Internal Channel ID'] || 'MANUAL'}:${phone}`, 'Webhook Source': 'CRM', 'Number Routing Status': route ? 'MANUAL_MATCHED' : 'MANUAL_TEST', 'Internal Channel ID': route?.['Internal Channel ID'] || '', 'Business Unit': rowBusinessUnit(targetApplication || targetLead || {}), 'Customer ID': clean(targetApplication?.['Customer ID'] || targetLead?.['Customer ID']), 'Team ID': clean(targetApplication?.['Team ID'] || targetLead?.['Team ID'] || route?.['Team ID']) });
           await writeActivity(req, session, { leadId, applicationId, type: status === 'HUMAN_HANDOVER_REQUIRED' ? 'CRM_HUMAN_HANDOVER_REQUESTED' : 'CRM_CUSTOMER_REPLY_RECORDED', description: message.slice(0, 240) });
@@ -1898,7 +1993,8 @@ export default async function handler(req, res) {
 
         if (action === 'markOutboxSent') {
           const record = outboxRecords.find(row => clean(row['Outbox ID']) === clean(body.outboxId));
-          if (!record || !((record['Lead ID'] && scope.leadIds.has(record['Lead ID'])) || (record['Application ID'] && scope.applicationIds.has(record['Application ID'])))) return res.status(403).json({ live: false, error: 'This message is outside your access.' });
+          if (!record || !scopedRecordPermitted(scope, record)) return res.status(403).json({ live: false, error: 'This message is outside your access or has inconsistent customer links.' });
+          if (clean(record['Send Status']).toUpperCase() !== 'MANUAL_PENDING') throw new Error('Only a pending manual WhatsApp message can be confirmed as sent');
           await updateObject(req, 'Message_Outbox', 'Outbox ID', record['Outbox ID'], { 'Send Status': 'MANUAL_SENT', 'Sent At': now(), 'Attempt Count': String(Number(record['Attempt Count'] || 0) + 1), 'Send Routing Status': 'WHATSAPP_BUSINESS_MANUAL' }, 'Z');
           await resolveRepliedInbox(req, record['Reply To Message ID']);
           await writeActivity(req, session, { leadId: record['Lead ID'], applicationId: record['Application ID'], type: 'CRM_MANUAL_WHATSAPP_SENT', description: `${session.username} confirmed manual WhatsApp delivery` });
@@ -1906,7 +2002,7 @@ export default async function handler(req, res) {
         }
 
         const messageId = clean(body.messageId), inboxRecord = inboxRecords.find(row => clean(row['Message ID']) === messageId);
-        const inboxRecordPermitted = row => Boolean((row['Lead ID'] && scope.leadIds.has(row['Lead ID'])) || (row['Application ID'] && scope.applicationIds.has(row['Application ID'])));
+        const inboxRecordPermitted = row => scopedRecordPermitted(scope, row);
         if (!inboxRecord || !inboxRecordPermitted(inboxRecord)) return res.status(403).json({ live: false, error: 'This handover is outside your access.' });
         const suppliedMessageIds = Array.isArray(body.messageIds) ? body.messageIds.map(clean).filter(Boolean) : [];
         if (suppliedMessageIds.length > 200) throw new Error('Too many handover messages were selected');
@@ -1960,6 +2056,7 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ live: false, error: 'Method not allowed.' });
   const resource = req.query.resource || 'dashboard';
   if (resource === 'session') return res.status(200).json({ live: true, user: { name: session.name, username: session.username, role: canonicalRole(session.role), region: session.region, businessAccess: canonicalBusinessAccess(session.businessAccess, session.role), saId: session.saId || '', branchId: session.branchId || '', mustChangePassword: !!session.mustChangePassword, whatsappMode: clean(process.env.WHATSAPP_SEND_MODE).toUpperCase() === 'CLOUD' ? 'CLOUD' : 'MANUAL' } });
+  if (session.mustChangePassword) return res.status(403).json({ live: false, code: 'PASSWORD_CHANGE_REQUIRED', error: 'You must change your temporary password before using CRM.' });
   if (resource === 'followUpSettings') {
     try {
       const settings = await readFollowUpSettings(req);
@@ -1997,6 +2094,7 @@ export default async function handler(req, res) {
     const businessApplications = scope.applications.filter(row => !isSyntheticApplicationRow(row));
     const businessLeadIds = new Set(businessLeads.map(row => row['Lead ID']));
     const businessApplicationIds = new Set(businessApplications.map(row => row['Application ID']));
+    const businessScope = { ...scope, leads: businessLeads, applications: businessApplications, leadIds: businessLeadIds, applicationIds: businessApplicationIds };
 
     if (resource === 'qa') {
       if (session.role !== 'ADMIN') return res.status(403).json({ live: false, error: 'Administrator access is required.' });
@@ -2026,7 +2124,7 @@ export default async function handler(req, res) {
 
     if (resource === 'applications') {
       const [documentRows, motorPricingRows, handphonePricingRows] = await readRanges(req, ['Document_Log!A1:AD1500', 'Motor_Loan_Pricing!A1:Z1000', 'Handphone_Loan_Pricing!A1:AO1000']);
-      const documents = rowsToObjects(documentRows).filter(row => scope.applicationIds.has(row['Application ID']) || scope.leadIds.has(row['Lead ID']));
+      const documents = rowsToObjects(documentRows).filter(row => scopedRecordPermitted(businessScope, row));
       const motorPricing = rowsToObjects(motorPricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const handphonePricing = rowsToObjects(handphonePricingRows).filter(row => truth(row.Active) && clean(row['Quote Approval Status']).toUpperCase() === 'APPROVED');
       const docsByApplication = new Map(); documents.forEach(row => { const key = row['Application ID']; if (key) docsByApplication.set(key, [...(docsByApplication.get(key) || []), row]); });
@@ -2056,7 +2154,7 @@ export default async function handler(req, res) {
           creditConsentStatus: row['Credit Consent Status'] || 'NOT_SENT', creditConsentTemplateVersion: row['Credit Consent Template Version'] || CREDIT_CONSENT_TEMPLATE_VERSION,
           creditConsentSentAt: row['Credit Consent Sent At'], creditConsentSignedAt: row['Credit Consent Signed At'], creditConsentVerifiedAt: row['Credit Consent Verified At'], creditConsentVerifiedBy: row['Credit Consent Verified By'], creditConsentDocumentId: row['Credit Consent Document ID'],
           creditCheckStatus: row['Credit Check Status'] || 'BLOCKED_CONSENT_REQUIRED', creditCheckRequestedAt: row['Credit Check Requested At'], creditCheckRequestedBy: row['Credit Check Requested By'], creditCheckAllowed: clean(row['Credit Consent Status']).toUpperCase() === 'VERIFIED',
-          lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (docs.aiComplete ? 'READY_FOR_LMS' : 'WAITING_FOR_AI_DOCUMENTS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
+          lmsCaseId: row['LMS Case ID'], lmsSubmissionStatus: row['LMS Submission Status'] || (prepareLmsSubmission(row, docsByApplication.get(row['Application ID']) || []).ready ? 'READY_FOR_LMS' : 'NOT_READY_FOR_LMS'), cadStatus: row['CAD Status'], cadRemarks: row['CAD Remarks'],
           financier: row.Financier || row['Bank Name'] || row.Lender, lmsDecisionAt: row['LMS Decision At'] || row['Decision At'], rejectedAt: row['Rejected At'],
           lmsErrorCode: row['LMS Error Code'], lmsErrorMessage: row['LMS Error Message'],
           missingApplicationFields: row['Missing Application Fields'], handoverReason: row['Handover Reason'], assignedSupervisorId: row['Assigned Supervisor ID'], supervisorAssignmentStatus: row['Supervisor Assignment Status'],
@@ -2069,7 +2167,7 @@ export default async function handler(req, res) {
 
     if (resource === 'documents') {
       const [rows] = await readRanges(req, ['Document_Log!A1:AD1500']);
-      const records = rowsToObjects(rows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID'])).reverse().map(row => ({
+      const records = rowsToObjects(rows).filter(row => scopedRecordPermitted(businessScope, row)).reverse().map(row => ({
         id: row['Document ID'], applicationId: row['Application ID'], leadId: row['Lead ID'], type: row['Document Type'], received: row['Received At'], fileName: row['File Name'], mimeType: row['Mime Type'],
         classification: row['Classification Status'], quality: row['Quality Status'], verification: row['Verification Status'], duplicate: row['Duplicate Status'], reviewRequired: row['Manual Review Required'], remarks: row.Remarks, uploadedBy: row['Uploaded By'], reviewedBy: row['Reviewed By'], reviewedAt: row['Reviewed At'], updated: row['Updated At']
       }));
@@ -2135,7 +2233,7 @@ export default async function handler(req, res) {
       const [rows, channelRows] = await readRanges(req, [cfg[0], channelRange]);
       const channels = rowsToObjects(channelRows);
       const globalActivityTypes = new Set(['FOLLOW_UP_RUN_COMPLETED', 'CRM_FOLLOW_UP_SAFE_SCAN', 'CRM_FOLLOW_UP_SETTINGS_UPDATED']);
-      const visible = rowsToObjects(rows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']) || (resource === 'activity' && session.role === 'ADMIN' && globalActivityTypes.has(clean(row['Activity Type']).toUpperCase()))).reverse();
+      const visible = rowsToObjects(rows).filter(row => scopedRecordPermitted(businessScope, row) || (resource === 'activity' && session.role === 'ADMIN' && globalActivityTypes.has(clean(row['Activity Type']).toUpperCase()))).reverse();
       const leadNames = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], customerDisplayName(row['Customer Name'], row['Phone Number'])]));
       const leadOwners = Object.fromEntries(scope.leads.map(row => [row['Lead ID'], row['Assigned SA ID']]));
       const applicationOwners = Object.fromEntries(scope.applications.map(row => [row['Application ID'], row['Assigned SA ID']]));
@@ -2157,9 +2255,9 @@ export default async function handler(req, res) {
     }
 
     const [inboxRows, outboxRows, dashboardDocumentRows] = await readRanges(req, ['Customer_Inbox!A1:AC1000', 'Message_Outbox!A1:AJ1200', 'Document_Log!A1:AD1500']);
-    const inbox = rowsToObjects(inboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
-    const outbox = rowsToObjects(outboxRows).filter(row => businessLeadIds.has(row['Lead ID']) || businessApplicationIds.has(row['Application ID']));
-    const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => businessApplicationIds.has(row['Application ID']) || businessLeadIds.has(row['Lead ID']));
+    const inbox = rowsToObjects(inboxRows).filter(row => scopedRecordPermitted(businessScope, row));
+    const outbox = rowsToObjects(outboxRows).filter(row => scopedRecordPermitted(businessScope, row));
+    const dashboardDocuments = rowsToObjects(dashboardDocumentRows).filter(row => scopedRecordPermitted(businessScope, row));
     const documentsByApplication = new Map();
     dashboardDocuments.forEach(row => { const key = row['Application ID']; if (key) documentsByApplication.set(key, [...(documentsByApplication.get(key) || []), row]); });
     const completed = count(businessApplications, 'Application Status', 'COMPLETED');
@@ -2167,7 +2265,7 @@ export default async function handler(req, res) {
       const mode = clean(row['Processing Mode']).toUpperCase();
       return clean(row['Application Status']).toUpperCase() === 'MANUAL_REVIEW' || clean(row['SA Review Required']).toUpperCase() === 'TRUE' || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL'].includes(mode);
     }).length;
-    const lmsReady = businessApplications.filter(row => ['READY_FOR_LMS', 'READY', 'QUEUED'].includes(clean(row['LMS Submission Status']).toUpperCase()) || clean(row['Minimum Documents Complete']).toUpperCase() === 'TRUE' || documentSummary(documentsByApplication.get(row['Application ID']) || []).aiComplete).length;
+    const lmsReady = businessApplications.filter(row => prepareLmsSubmission(row, documentsByApplication.get(row['Application ID']) || []).ready).length;
     const humanHandovers = uniqueInboxConversationCount(inbox.filter(row => humanStatuses.has(clean(row['Process Status']).toUpperCase())));
     const unreadInbox = uniqueInboxConversationCount(inbox.filter(row => ['NEW', 'UNREAD', 'RECEIVED', 'ERROR', 'MANUAL_RECORDED', 'HUMAN_HANDOVER_REQUIRED', 'MANAGER_IN_PROGRESS', 'ASSIGNED_TO_STAFF'].includes(clean(row['Process Status']).toUpperCase())));
     const needsAttention = aiExceptions + count(businessApplications, 'Current Stage', 'RECOVERY_PENDING') + count(outbox, 'Send Status', 'FAILED') + humanHandovers;

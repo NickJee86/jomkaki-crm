@@ -5,6 +5,7 @@ const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
 const clean = value => String(value ?? '').trim();
 const truth = value => clean(value).toUpperCase() === 'TRUE';
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
+const activeDispatches = globalThis.__JOMKAKI_OUTBOX_DISPATCHES__ ||= new Set();
 const columnName = index => {
   let name = '';
   for (let value = index + 1; value; value = Math.floor((value - 1) / 26)) name = String.fromCharCode(65 + ((value - 1) % 26)) + name;
@@ -92,22 +93,22 @@ const objects = rows => {
 };
 
 async function updateOutbox(token, rowNumber, changes) {
-  const [headers = []] = await readSheet(token, 'Message_Outbox!A1:AJ1');
+  const [headers = []] = await readSheet(token, 'Message_Outbox!1:1');
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Message_Outbox!${columnName(headers.indexOf(header))}${rowNumber}`, values: [[value ?? '']] }));
   if (!data.length) return;
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) });
   if (!response.ok) throw new Error('Unable to update Message_Outbox');
 }
 
 async function updateApplication(token, applicationId, changes) {
   if (!clean(applicationId)) return;
-  const rows = await readSheet(token, 'Applications!A1:CZ2000');
+  const rows = await readSheet(token, 'Applications!A:CZ');
   const headers = rows[0] || [], idIndex = headers.indexOf('Application ID');
   const rowIndex = rows.findIndex((row, index) => index > 0 && clean(row[idIndex]) === clean(applicationId));
   if (rowIndex < 1) return;
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `Applications!${columnName(headers.indexOf(header))}${rowIndex + 1}`, values: [[value ?? '']] }));
   if (!data.length) return;
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) });
   if (!response.ok) throw new Error('Unable to update consent delivery status');
 }
 
@@ -116,29 +117,50 @@ function readSecret(req) {
   return bearer || clean(req.headers['x-jomkaki-dispatch-secret']);
 }
 
-async function dispatchRecord(token, outbox, channels) {
+export async function dispatchRecord(token, outbox, channels) {
   const outboxId = clean(outbox['Outbox ID']), existingProviderId = clean(outbox['Provider Message ID']), existingStatus = clean(outbox['Send Status']).toUpperCase();
   if (existingProviderId || ['SENT', 'DELIVERED', 'READ'].includes(existingStatus)) return { ok: true, idempotent: true, outboxId, status: existingStatus, providerMessageId: existingProviderId };
-  if (existingStatus === 'SENDING') return { ok: false, outboxId, locked: true, error: 'Message is already being sent. Do not resend it.' };
+  if (['SENDING', 'DELIVERY_UNKNOWN'].includes(existingStatus) || activeDispatches.has(outboxId)) return { ok: false, outboxId, locked: true, error: 'Message delivery is in progress or requires verification. Do not resend it.' };
+  if (!outboxId) return { ok: false, outboxId, error: 'Outbox ID is missing' };
+  activeDispatches.add(outboxId);
   let attemptCount = Number(outbox['Attempt Count'] || 0) + 1, channelId = clean(outbox['Internal Channel ID']);
+  let sendStarted = false, providerAccepted = false, providerRejected = false, providerMessageId = '', sentAt = '';
   try {
     const route = channels.find(row => clean(row['Internal Channel ID']) === channelId) || {};
     const binding = validateRoute(outbox, route);channelId = binding.channelId;
     const accessToken = clean(process.env[`${binding.credentialKey}_ACCESS_TOKEN`]);
     if (!accessToken) throw new Error(`BLOCKED: Protected credential ${binding.credentialKey}_ACCESS_TOKEN is not configured`);
     const version = clean(process.env.WHATSAPP_GRAPH_VERSION || 'v25.0');
+    const payload = buildMetaPayload(outbox);
     await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENDING', 'Attempt Count': String(attemptCount), 'Error Message': '', 'Send Routing Status': `VERCEL_CHANNEL_SENDING:${binding.channelId}` });
-    const response = await fetch(`https://graph.facebook.com/${version}/${binding.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(buildMetaPayload(outbox)) });
+    sendStarted = true;
+    const response = await fetch(`https://graph.facebook.com/${version}/${binding.phoneNumberId}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     const result = await response.json().catch(() => ({}));
+    providerRejected = !response.ok;
     if (!response.ok) throw new Error(clean(result.error?.message) || `Meta API error ${response.status}`);
-    const providerMessageId = clean(result.messages?.[0]?.id), timestamp = new Date().toISOString();
+    providerMessageId = clean(result.messages?.[0]?.id);
+    if (!providerMessageId) throw new Error('Meta returned no message ID; verify delivery before retrying');
+    providerAccepted = true;
+    const timestamp = sentAt = new Date().toISOString();
     await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Attempt Count': String(attemptCount), 'Sent At': timestamp, 'Provider Message ID': providerMessageId, 'Error Message': '', 'WhatsApp Number ID': binding.phoneNumberId, 'Send Routing Status': `VERCEL_CHANNEL_DISPATCH:${binding.channelId}` });
     if (clean(outbox['Template Name']).toUpperCase() === 'JKM_CREDIT_CONSENT_REQUEST') await updateApplication(token, outbox['Application ID'], { 'Updated At': timestamp, 'Current Stage': 'CONSENT_AND_DOCUMENTS_IN_PROGRESS', 'Credit Consent Status': 'SENT', 'Credit Consent Sent At': timestamp, 'Credit Check Status': 'BLOCKED_CONSENT_REQUIRED', 'Updated By': 'WHATSAPP_OUTBOX_DISPATCHER' });
     return { ok: true, outboxId, channelId: binding.channelId, status: 'SENT', providerMessageId };
   } catch (error) {
     const message = clean(error?.message) || 'Unable to dispatch WhatsApp message';
+    if (providerAccepted) {
+      // Never make a successfully accepted message retryable because logging or
+      // application synchronization failed after the external side effect.
+      await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'SENT', 'Sent At': sentAt, 'Provider Message ID': providerMessageId, 'Error Message': `POST_SEND_LOGGING_FAILED: ${message}` }).catch(() => {});
+      return { ok: true, outboxId, channelId, status: 'SENT', providerMessageId, warning: 'POST_SEND_LOGGING_FAILED' };
+    }
+    if (sendStarted && !providerRejected) {
+      await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'DELIVERY_UNKNOWN', 'Attempt Count': String(attemptCount), 'Error Message': `Verify delivery before retrying: ${message}`, 'Send Routing Status': `DELIVERY_UNKNOWN:${channelId}` }).catch(() => {});
+      return { ok: false, outboxId, channelId, locked: true, status: 'DELIVERY_UNKNOWN', error: message };
+    }
     await updateOutbox(token, outbox.rowNumber, { 'Send Status': 'FAILED', 'Attempt Count': String(attemptCount), 'Error Message': message, 'Send Routing Status': `BLOCKED_OR_FAILED:${channelId || 'UNASSIGNED'}` }).catch(() => {});
     return { ok: false, outboxId, channelId, error: message };
+  } finally {
+    activeDispatches.delete(outboxId);
   }
 }
 
@@ -152,7 +174,7 @@ export default async function handler(req, res) {
     const token = await getAccessToken(req);
     if (!token) throw new Error('Google authorization unavailable');
     const outboxId = clean(req.body?.outboxId || req.body?.['Outbox ID'] || req.query?.outboxId);
-    const rows = objects(await readSheet(token, 'Message_Outbox!A1:AJ1500'));
+    const rows = objects(await readSheet(token, 'Message_Outbox!A:BG'));
     const targets = outboxId ? rows.filter(row => clean(row['Outbox ID']) === outboxId) : rows.filter(row => clean(row['Send Status']).toUpperCase() === 'PENDING').slice(0, 20);
     if (outboxId && !targets.length) return res.status(404).json({ ok: false, error: 'Outbox message was not found' });
     const channels = objects(await readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'));

@@ -10,7 +10,7 @@ const html=fs.readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const vercel=JSON.parse(fs.readFileSync(new URL('../vercel.json',import.meta.url),'utf8'));
 
 test('Administrator settings organize only actionable go-live gaps',()=>{
-  assert.match(html,/app-v2\.js\?v=20260905-customer-actions1/);
+  assert.match(html,/app-v2\.js\?v=20260907-workflow-audit1/);
   assert.match(html,/v2\.css\?v=20260827-operating-layer1/);
   [
     'Go-live readiness',
@@ -65,7 +65,7 @@ test('Synthetic QA records stay traceable but do not distort production metrics'
   assert.match(api,/resource === 'qa'/);
   assert.match(api,/const records = \[\.\.\.businessLeads\]\.reverse/);
   assert.match(api,/const records = \[\.\.\.businessApplications\]\.reverse/);
-  assert.match(api,/businessApplicationIds\.has\(row\['Application ID'\]\) \|\| businessLeadIds\.has\(row\['Lead ID'\]\)/);
+  assert.match(api,/scopedRecordPermitted\(businessScope, row\)/);
   assert.match(app,/const syntheticRows=\(state\.data\.qa\|\|\[\]\)/);
   assert.ok(app.includes('Excluded from daily workspaces, dashboard and business reports'));
   assert.match(app,/!isSyntheticLead\(lead\)&&reportWithin/);
@@ -77,7 +77,7 @@ test('Deployment prevents stale HTML while versioning frontend assets',()=>{
   const index=vercel.headers.find(entry=>entry.source==='/index.html');
   assert.equal(root.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
   assert.equal(index.headers.find(header=>header.key==='Cache-Control').value,'no-store, max-age=0');
-  assert.match(html,/product-business\.js\?v=20260905-active-catalog1/);
+  assert.match(html,/product-business\.js\?v=20260907-workflow-audit1/);
   assert.match(html,/business-architecture\.js\?v=20260829-workflow1/);
   assert.ok(productUi.length>60000,'Product business bundle must not be truncated during deployment');
   assert.ok(businessUi.length>50000,'Business architecture bundle must not be truncated during deployment');

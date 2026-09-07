@@ -9,7 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUTPUT = path.resolve(__dirname, '..', 'api', '_notion-knowledge.generated.js');
 
 const clean = value => String(value ?? '').replace(/\r/g, '').trim();
-const richText = value => Array.isArray(value) ? value.map(item => clean(item?.plain_text || item?.text?.content)).filter(Boolean).join('') : '';
+// Formatting boundaries are not word boundaries: preserve spaces until all runs join.
+const richText = value => Array.isArray(value)
+  ? clean(value.map(item => String(item?.plain_text ?? item?.text?.content ?? '')).join(''))
+  : clean(typeof value === 'string' ? value : '');
 
 export function propertyText(property = {}) {
   if (!property || typeof property !== 'object') return '';
@@ -25,6 +28,10 @@ export function propertyText(property = {}) {
 export function blockPlainText(block = {}) {
   const type = clean(block.type);
   const data = block[type] || {};
+  if (type === 'table_row') {
+    const cells = (data.cells || []).map(richText);
+    return cells.some(Boolean) ? cells.join(' | ') : '';
+  }
   const text = richText(data.rich_text || data.caption || data.title);
   if (!text && type === 'divider') return '---';
   if (!text) return '';
@@ -37,6 +44,7 @@ export function blockPlainText(block = {}) {
 }
 
 export function chunkPageContent(page, maxChars = 1100) {
+  if (!Number.isInteger(maxChars) || maxChars < 2) throw new Error('Knowledge chunk size must be an integer of at least two characters');
   const lines = clean(page.content).split('\n').map(clean).filter(Boolean);
   const chunks = [];
   let buffer = '';
@@ -55,8 +63,20 @@ export function chunkPageContent(page, maxChars = 1100) {
     buffer = '';
   };
   for (const line of lines) {
-    if (buffer && buffer.length + line.length + 1 > maxChars) flush();
-    buffer = buffer ? `${buffer}\n${line}` : line;
+    let remaining = line;
+    if (buffer && buffer.length + remaining.length + 1 > maxChars) flush();
+    while (remaining.length > maxChars) {
+      let boundary = remaining.lastIndexOf(' ', maxChars);
+      if (boundary <= 0) {
+        boundary = maxChars;
+        // Do not split a UTF-16 surrogate pair, e.g. an emoji in a Notion answer.
+        if (/^[\uDC00-\uDFFF]$/.test(remaining[boundary])) boundary -= 1;
+      }
+      buffer = remaining.slice(0, boundary);
+      flush();
+      remaining = remaining.slice(boundary).trimStart();
+    }
+    if (remaining) buffer = buffer ? `${buffer}\n${remaining}` : remaining;
   }
   flush();
   return chunks;
@@ -178,8 +198,9 @@ export async function buildNotionSnapshot({
   pages.sort((a, b) => a.knowledgeId.localeCompare(b.knowledgeId) || a.title.localeCompare(b.title));
   if (pages.length < 10) throw new Error(`Notion sync returned only ${pages.length} Approved pages; refusing to replace the safe snapshot`);
   const chunks = pages
-    .filter(page => !/^Test Case$/i.test(page.type))
+    .filter(page => /^Approved$/i.test(page.status) && !/^Test Case$/i.test(page.type) && !/^KB-TEST-/i.test(page.knowledgeId))
     .flatMap(page => chunkPageContent(page));
+  if (!chunks.length) throw new Error('Notion sync returned no usable Approved knowledge; refusing to replace the safe snapshot');
   const digest = crypto.createHash('sha256').update(JSON.stringify(pages.map(page => ({ ...page, content: page.content })))).digest('hex').slice(0, 12);
   return {
     schemaVersion: 1,

@@ -28,7 +28,7 @@ test('Product photos are stored in the dedicated SharePoint catalog folder and r
   assert.match(api, /Image MIME Type/);
   assert.match(api, /pendingApproval \? 'FALSE' : 'TRUE'/);
   assert.match(api, /CATALOG_IMAGE_UPLOADED/);
-  assert.match(api, /Use a JPG, PNG or WebP product photo so WhatsApp can display it/);
+  assert.match(api, /Use a JPG or PNG product photo so WhatsApp can display it/);
   assert.match(api, /catalogMax: 'AD'/);
 });
 
@@ -38,7 +38,8 @@ test('Public product image route only resolves a catalog-linked SharePoint file'
   assert.match(imageApi, /approvalStatus !== 'APPROVED'/);
   assert.match(imageApi, /!truth\(record\.Active\)/);
   assert.match(imageApi, /!truth\(record\['Image Approved'\]\)/);
-  assert.match(imageApi, /\['image\/jpeg', 'image\/png', 'image\/webp'\]/);
+  assert.match(imageApi, /validProductImageBytes\(bytes, contentType\)/);
+  assert.match(imageApi, /content-length/);
   assert.match(imageApi, /items\/\$\{encodeURIComponent\(fileId\)\}\/content/);
   assert.match(imageApi, /Cache-Control.*public/);
   assert.doesNotMatch(imageApi, /req\.query\?\.fileId/);

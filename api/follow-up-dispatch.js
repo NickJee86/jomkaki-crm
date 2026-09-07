@@ -16,6 +16,7 @@ const PROVIDER_ID = process.env.GOOGLE_WIF_PROVIDER_ID || 'vercel-jomkaki-produc
 const clean = value => String(value ?? '').trim();
 const truth = value => clean(value).toUpperCase() === 'TRUE';
 const digits = value => clean(value).replace(/\D/g, '').replace(/^0/, '60');
+let followUpRunActive = false;
 const objects = rows => {
   const [headers = [], ...values] = rows;
   return values.map((row, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, row[column] ?? ''])) })).filter(row => Object.values(row).some(Boolean));
@@ -79,14 +80,16 @@ async function ensureHeaders(token, sheet, requiredHeaders) {
 async function updateRow(token, sheet, headers, rowNumber, changes) {
   const data = Object.entries(changes).filter(([header]) => headers.includes(header)).map(([header, value]) => ({ range: `${sheet}!${columnName(headers.indexOf(header))}${rowNumber}`, values: [[value ?? '']] }));
   if (!data.length) return;
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'RAW', data }) });
   if (!response.ok) throw new Error(`Unable to update ${sheet} (${response.status})`);
 }
 
 async function appendRow(token, sheet, headers, row) {
   const values = headers.map(header => row[header] ?? '');
-  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A:A`)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(`${sheet}!A:A`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ values: [values] }) });
   if (!response.ok) throw new Error(`Unable to append ${sheet} (${response.status})`);
+  const result = await response.json();
+  return Number(clean(result.updates?.updatedRange).match(/![A-Z]+(\d+)(?::|$)/i)?.[1]) || 0;
 }
 
 const routeFor = (application, lead, channels) => {
@@ -139,16 +142,25 @@ async function sendCloudMessage(route, phone, message, templateName, language) {
     : { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone, type: 'text', text: { preview_url: false, body: message } };
   const response = await fetch(`https://graph.facebook.com/${version}/${route['Phone Number ID']}/messages`, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
   const result = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(clean(result.error?.message) || `Meta API error ${response.status}`);
-  return clean(result.messages?.[0]?.id);
+  if (!response.ok) throw Object.assign(new Error(clean(result.error?.message) || `Meta API error ${response.status}`), { providerRejected: true });
+  const messageId = clean(result.messages?.[0]?.id);
+  if (!messageId) throw new Error('Meta returned no message ID; verify delivery before retrying');
+  return messageId;
 }
 
 export async function runFollowUpDispatch(req, { applicationId = '', dryRun = false } = {}) {
+  if (followUpRunActive && !dryRun) return { checked: 0, summary: { due: 0, sent: 0, queued: 0, blocked: 0, handedOver: 0 }, results: [], skipped: 'DISPATCH_ALREADY_RUNNING' };
+  if (!dryRun) followUpRunActive = true;
+  try { return await dispatchFollowUps(req, { applicationId, dryRun }); }
+  finally { if (!dryRun) followUpRunActive = false; }
+}
+
+async function dispatchFollowUps(req, { applicationId = '', dryRun = false } = {}) {
   if (!SHEET_ID) throw new Error('Spreadsheet is not configured');
   const token = await getAccessToken(req);
   const [applicationRows, leadRows, documentRows, outboxRows, channelRows, settingsRows, activityRows, conversationRows, advisorRows] = await Promise.all([
-    readSheet(token, 'Applications!A1:CZ2000'), readSheet(token, 'Leads!A1:BG2000'), readSheet(token, 'Document_Log!A1:AD2000'),
-    readSheet(token, 'Message_Outbox!A1:BG2000'), readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'), readSheet(token, 'Follow_Up_Settings!A1:Z100', true),
+    readSheet(token, 'Applications!A:CZ'), readSheet(token, 'Leads!A:BG'), readSheet(token, 'Document_Log!A:AD'),
+    readSheet(token, 'Message_Outbox!A:BG'), readSheet(token, 'WhatsApp_Number_Master!A1:AC1000'), readSheet(token, 'Follow_Up_Settings!A1:Z100', true),
     readSheet(token, 'Activity_Log!A1:Z1'), readSheet(token, 'Conversation_State!A1:AP2000', true), readSheet(token, 'SA_Master!A1:O1000', true)
   ]);
   const applications = objects(applicationRows), leads = objects(leadRows), documents = objects(documentRows), outbox = objects(outboxRows), channels = objects(channelRows), conversations = objects(conversationRows), advisors = objects(advisorRows);
@@ -187,8 +199,15 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
     const evaluation = evaluateFollowUp({ application, lead, documents: caseDocuments, settings, at: now });
     const resultIdentity = { recordType: leadOnly ? 'LEAD' : 'APPLICATION', recordId: id, leadId: clean(lead['Lead ID']), applicationId: leadOnly ? '' : id };
     if (!evaluation.eligible || !evaluation.due) { if (applicationId) results.push({ ...resultIdentity, ...evaluation }); continue; }
-    const automationKey = `FOLLOWUP:${id}:${evaluation.ruleId}:${evaluation.nextAttempt}:${new Date(evaluation.dueAt).toISOString().slice(0, 13)}`;
-    if (outbox.some(row => clean(row['Automation Key']) === automationKey && ['SENT', 'QUEUED', 'MANUAL_PENDING', 'DELIVERED', 'READ'].includes(clean(row['Send Status']).toUpperCase()))) {
+    // The key must not change with cron time or a retry schedule. A fresh
+    // customer reply starts a new cycle; a logging failure does not.
+    const automationPrefix = `FOLLOWUP:${id}:${evaluation.ruleId}:${evaluation.nextAttempt}:`;
+    const automationKey = `${automationPrefix}${evaluation.lastReplyAt || 'INITIAL'}`;
+    if (outbox.some(row => {
+      const key = clean(row['Automation Key']);
+      const sameCycle = key === automationKey || (key.startsWith(automationPrefix) && (!evaluation.lastReplyAt || new Date(row['Created At']).valueOf() >= new Date(evaluation.lastReplyAt).valueOf()));
+      return sameCycle && ['SENDING', 'DELIVERY_UNKNOWN', 'SENT', 'QUEUED', 'MANUAL_PENDING', 'DELIVERED', 'READ'].includes(clean(row['Send Status']).toUpperCase());
+    })) {
       results.push({ ...resultIdentity, skipped: 'DUPLICATE', automationKey });
       continue;
     }
@@ -228,12 +247,9 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
       }
     }
     if (dryRun) { results.push({ ...resultIdentity, dueAt: evaluation.dueAt, ruleId: evaluation.ruleId, attempt: evaluation.nextAttempt, message, templateRequired, ready: true }); continue; }
-    let providerMessageId = '', sendStatus = 'MANUAL_PENDING', sendError = '';
-    try {
-      if (cloudMode) { providerMessageId = await sendCloudMessage(route, phone, message, templateName, evaluation.rule.language); sendStatus = 'SENT'; }
-    } catch (error) { sendStatus = 'FAILED'; sendError = clean(error?.message) || 'Follow-up delivery failed'; }
+    let providerMessageId = '', sendStatus = cloudMode ? 'SENDING' : 'MANUAL_PENDING', sendError = '';
     const sentAt = now.toISOString(), outboxId = `FUP-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-    await appendRow(token, 'Message_Outbox', outboxHeaders, {
+    const outboxRowNumber = await appendRow(token, 'Message_Outbox', outboxHeaders, {
       'Outbox ID': outboxId, 'Created At': sentAt, 'Lead ID': lead['Lead ID'], 'Application ID': leadOnly ? '' : id, 'Phone Number': phone,
       'Message Type': templateName ? 'TEMPLATE' : 'TEXT', 'Message Text': message, 'Template Name': templateName, Language: evaluation.rule.language,
       'Send Status': sendStatus, 'Attempt Count': cloudMode ? '1' : '0', 'Sent At': sendStatus === 'SENT' ? sentAt : '', 'Provider Message ID': providerMessageId,
@@ -242,8 +258,14 @@ export async function runFollowUpDispatch(req, { applicationId = '', dryRun = fa
       'Business Unit': application['Business Unit'] || lead['Business Unit'], 'Customer ID': application['Customer ID'] || lead['Customer ID'], 'Team ID': application['Team ID'] || lead['Team ID'] || route['Team ID'],
       'Automation Key': automationKey, 'Follow Up Rule': evaluation.ruleId, 'Follow Up Attempt': String(evaluation.nextAttempt)
     });
-    if (sendStatus === 'FAILED') {
-      await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': 'DELIVERY_FAILED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': sendError, 'Next Follow Up At': new Date(now.valueOf() + 3600000).toISOString(), 'Follow Up Scheduled At': sentAt, 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
+    if (cloudMode) {
+      if (!outboxRowNumber) throw new Error('Unable to confirm the reserved follow-up outbox row; no message was sent');
+      try { providerMessageId = await sendCloudMessage(route, phone, message, templateName, evaluation.rule.language); sendStatus = 'SENT'; }
+      catch (error) { sendStatus = error.providerRejected ? 'FAILED' : 'DELIVERY_UNKNOWN'; sendError = clean(error?.message) || 'Follow-up delivery failed'; }
+      await updateRow(token, 'Message_Outbox', outboxHeaders, outboxRowNumber, { 'Send Status': sendStatus, 'Sent At': sendStatus === 'SENT' ? sentAt : '', 'Provider Message ID': providerMessageId, 'Error Message': sendError });
+    }
+    if (sendStatus === 'FAILED' || sendStatus === 'DELIVERY_UNKNOWN') {
+      await updateRow(token, recordSheet, recordHeaders, application.rowNumber, { 'Follow Up Status': sendStatus === 'DELIVERY_UNKNOWN' ? 'DELIVERY_UNKNOWN' : 'DELIVERY_FAILED', 'Follow Up Rule': evaluation.ruleId, 'Follow Up Pause Reason': sendError, 'Next Follow Up At': sendStatus === 'DELIVERY_UNKNOWN' ? '' : new Date(now.valueOf() + 3600000).toISOString(), 'Follow Up Scheduled At': sentAt, 'Updated At': sentAt, 'Updated By': 'FOLLOW_UP_AUTOMATION' });
       await recordActivity(application, 'FOLLOW_UP_DELIVERY_FAILED', `${evaluation.ruleId} attempt ${evaluation.nextAttempt}: ${sendError}`);
       results.push({ ...resultIdentity, failed: sendError, outboxId });
       continue;

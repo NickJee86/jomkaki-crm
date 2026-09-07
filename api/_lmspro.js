@@ -12,8 +12,8 @@ export const LMS_REQUIRED_FIELDS = [
 ];
 
 export const LMS_REQUIRED_DOCUMENT_GROUPS = {
-  IC_FRONT: ['IC_FRONT'],
-  IC_BACK: ['IC_BACK'],
+  IC_FRONT: ['IC_FRONT', 'IDENTITY_DOCUMENT'],
+  IC_BACK: ['IC_BACK', 'IDENTITY_DOCUMENT'],
   INCOME_PROOF: ['INCOME_PROOF', 'PAYSLIP', 'SALARY_SLIP', 'EPF', 'EPF_STATEMENT']
 };
 
@@ -40,7 +40,13 @@ export function prepareLmsSubmission(application = {}, documents = []) {
   const businessUnit = upper(application['Business Unit'] || application.businessUnit) === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR';
   const requiredFields = businessUnit === 'HANDPHONE' ? LMS_REQUIRED_FIELDS.map(header => header === 'Loan Tenure Years' ? 'Loan Tenure Months' : header) : LMS_REQUIRED_FIELDS;
   const missingFields = requiredFields.filter(header => !clean(application[header]));
-  const accepted = documents.filter(acceptedDocument);
+  const consentVerified = upper(application['Credit Consent Status'] ?? application.creditConsentStatus) === 'VERIFIED';
+  if (!consentVerified) missingFields.push('Verified Credit Consent');
+  const applicationId = value(application, 'Application ID', 'id');
+  const accepted = documents.filter(row => {
+    const linkedApplicationId = value(row, 'Application ID', 'applicationId');
+    return (!linkedApplicationId || linkedApplicationId === applicationId) && acceptedDocument(row);
+  });
   const byType = new Map();
   accepted.forEach(row => {
     const type = upper(row['Document Type'] || row.type);
@@ -62,7 +68,6 @@ export function prepareLmsSubmission(application = {}, documents = []) {
     } : null];
   }));
 
-  const applicationId = value(application, 'Application ID', 'id');
   return {
     ready: missingFields.length === 0 && missingDocuments.length === 0,
     missingFields,
@@ -76,6 +81,11 @@ export function prepareLmsSubmission(application = {}, documents = []) {
       region: value(application, 'Region', 'region'),
       team_id: value(application, 'Team ID', 'teamId'),
       origin_whatsapp_channel_id: value(application, 'Origin WhatsApp Channel ID', 'originChannelId'),
+      credit_consent: {
+        status: upper(application['Credit Consent Status'] ?? application.creditConsentStatus),
+        document_id: value(application, 'Credit Consent Document ID', 'creditConsentDocumentId'),
+        verified_at: value(application, 'Credit Consent Verified At', 'creditConsentVerifiedAt')
+      },
       applicant: {
         name: value(application, 'Applicant Name', 'customer'),
         ic_number: value(application, 'Applicant IC Number', 'applicantIcNumber'),
@@ -97,8 +107,8 @@ export function prepareLmsSubmission(application = {}, documents = []) {
         product_brand: value(application, 'Product Brand', 'brand'),
         product_model: value(application, 'Product Model', 'model'),
         product_variant: value(application, 'Product Variant', 'variant'),
-        product_price_rm: value(application, 'Requested Product Price (RM)', 'requestedPrice'),
-        requested_deposit_rm: value(application, 'Requested Deposit (RM)', 'deposit'),
+        product_price_rm: businessUnit === 'MOTOR' ? value(application, 'Requested Product Price (RM)', 'requestedPrice') : '',
+        requested_deposit_rm: businessUnit === 'MOTOR' ? value(application, 'Requested Deposit (RM)', 'deposit') : '',
         tenure_years: businessUnit === 'MOTOR' ? value(application, 'Loan Tenure Years', 'tenure') : '',
         tenure_months: businessUnit === 'HANDPHONE' ? value(application, 'Loan Tenure Months', 'tenure') : ''
       },
@@ -125,11 +135,15 @@ export function lmsproConfigurationStatus(env = process.env) {
   const authMode = upper(env.LMSPRO_AUTH_MODE);
   const credentialConfigured = Boolean(clean(env.LMSPRO_API_TOKEN) || (clean(env.LMSPRO_CLIENT_ID) && clean(env.LMSPRO_CLIENT_SECRET)));
   const contractConfigured = Boolean(sandboxBaseUrl && clean(env.LMSPRO_SUBMIT_PATH) && authMode && credentialConfigured);
+  const productionRequested = upper(env.LMSPRO_PRODUCTION_ENABLED) === 'TRUE';
   return {
     enabled,
-    sandboxOnly: upper(env.LMSPRO_PRODUCTION_ENABLED) !== 'TRUE',
+    sandboxOnly: !productionRequested,
     contractConfigured,
-    readyForSandbox: enabled && contractConfigured,
-    productionEnabled: enabled && contractConfigured && upper(env.LMSPRO_PRODUCTION_ENABLED) === 'TRUE'
+    configurationReady: enabled && contractConfigured,
+    productionRequested,
+    adapterAvailable: false,
+    readyForSandbox: false,
+    productionEnabled: false
   };
 }

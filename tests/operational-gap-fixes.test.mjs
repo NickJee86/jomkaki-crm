@@ -90,7 +90,7 @@ test('outbox dispatcher supports uploaded document and image media IDs', () => {
 test('pending WhatsApp messages have an automatic five-minute dispatcher', () => {
   assert.ok(vercel.crons.some(item => item.path === '/api/whatsapp-outbox-send' && item.schedule === '*/5 * * * *'));
   assert.match(dispatcher, /Send Status'\]\)\.toUpperCase\(\) === 'PENDING'/);
-  assert.match(dispatcher, /existingStatus === 'SENDING'/);
+  assert.match(dispatcher, /\['SENDING', 'DELIVERY_UNKNOWN'\]\.includes\(existingStatus\)/);
 });
 
 test('staff can recover a delayed queued message without bypassing original-number routing', () => {

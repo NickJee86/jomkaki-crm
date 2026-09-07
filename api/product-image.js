@@ -3,6 +3,15 @@ import { getAccessToken } from './_auth.js';
 const clean = value => String(value ?? '').trim();
 const truth = value => ['TRUE', 'YES', '1', 'Y'].includes(clean(value).toUpperCase());
 const SHEET_ID = process.env.JOMKAKI_SPREADSHEET_ID;
+const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+
+export function validProductImageBytes(bytes, contentType) {
+  const type = clean(contentType).toLowerCase().split(';')[0];
+  if (type === 'image/jpeg') return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (type === 'image/png') return bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (type === 'image/webp') return bytes.length >= 12 && bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP';
+  return false;
+}
 
 async function sharePointToken() {
   const tenant = clean(process.env.SHAREPOINT_TENANT_ID), client = clean(process.env.SHAREPOINT_CLIENT_ID), secret = clean(process.env.SHAREPOINT_CLIENT_SECRET);
@@ -51,10 +60,12 @@ export default async function handler(req, res) {
     const drive = (drives.value || []).find(item => clean(item.name).toLowerCase() === libraryName.toLowerCase()) || (drives.value || []).find(item => item.driveType === 'documentLibrary');
     if (!drive) throw new Error('Product image library was not found');
     const fileResponse = await graph(token, `/drives/${drive.id}/items/${encodeURIComponent(fileId)}/content`);
+    const declaredLength = Number(fileResponse.headers.get('content-length') || 0);
+    if (declaredLength > MAX_PRODUCT_IMAGE_BYTES) throw new Error('Product image is too large');
     const bytes = Buffer.from(await fileResponse.arrayBuffer());
-    if (!bytes.length || bytes.length > 5 * 1024 * 1024) throw new Error('Product image is invalid');
-    const contentType = clean(record['Image MIME Type']) || clean(fileResponse.headers.get('content-type'));
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType.toLowerCase())) throw new Error('Product image type is invalid');
+    if (!bytes.length || bytes.length > MAX_PRODUCT_IMAGE_BYTES) throw new Error('Product image is invalid');
+    const contentType = (clean(record['Image MIME Type']) || clean(fileResponse.headers.get('content-type'))).toLowerCase().split(';')[0];
+    if (!validProductImageBytes(bytes, contentType)) throw new Error('Product image type is invalid');
     res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Length', String(bytes.length));
     res.setHeader('Content-Disposition', `inline; filename="${catalogId.replace(/[^A-Za-z0-9_-]/g, '')}-product-photo"`);
