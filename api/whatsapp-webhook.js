@@ -3319,10 +3319,20 @@ export function selectReusableApplication(applications = [], lead = {}, business
     const rowUnit = canonicalBusinessUnit(row['Business Unit']) || (clean(row['Product Category']).toUpperCase() === 'HANDPHONE' ? 'HANDPHONE' : 'MOTOR');
     return !terminal.has(status) && rowUnit === unit;
   });
-  return active.filter(row => leadId && clean(row['Lead ID']) === leadId).at(-1)
-    || active.filter(row => customerId && clean(row['Customer ID']) === customerId).at(-1)
-    || active.filter(row => phone && digits(row['Phone Number']) === phone).at(-1)
-    || {};
+  // Prefer the current lead's case before considering another lead belonging to
+  // the same customer. Validate the whole selected tier, not just its last row.
+  let matches = active.filter(row => leadId && clean(row['Lead ID']) === leadId);
+  if (!matches.length) matches = active.filter(row => customerId && clean(row['Customer ID']) === customerId);
+  if (!matches.length) matches = active.filter(row => phone && digits(row['Phone Number']) === phone
+    && !(customerId && clean(row['Customer ID']) && clean(row['Customer ID']) !== customerId));
+  if (!matches.length) return {};
+  const conflictingOwner = matches.some(row => customerId && clean(row['Customer ID']) && clean(row['Customer ID']) !== customerId);
+  if (conflictingOwner) throw new Error('Active application customer identity conflicts with its lead; manual data repair is required');
+  if (matches.some(row => !clean(row['Application ID']))) throw new Error('Matched active application has no Application ID; manual data repair is required before creating another application');
+  if (matches.length !== 1) throw new Error('Multiple active applications match this customer and business; manual data repair is required');
+  const applicationId = clean(matches[0]['Application ID']);
+  if (applications.filter(row => clean(row['Application ID']) === applicationId).length !== 1) throw new Error('Application ID is duplicated; manual data repair is required');
+  return matches[0];
 }
 
 const sameCustomerIdentity = (left, right) => {

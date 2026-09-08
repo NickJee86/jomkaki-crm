@@ -43,16 +43,16 @@
       <nav class="nav" aria-label="Primary navigation">
         <p class="nav-label">Workspace</p>
         <button class="nav-item active" data-view="dashboard"><span>HM</span>Home</button>
-        <button class="nav-item" data-view="customers"><span>CU</span>Customers <b id="leadBadge" hidden>0</b></button>
+        <button class="nav-item" data-view="customers" title="Customer lead records in your permitted scope, not a count of unique people."><span>CU</span>Customer leads <b id="leadBadge" hidden>0</b></button>
         <button class="nav-item" data-view="workbench"><span>TK</span>Tasks & Approvals <i id="workBadge" hidden>0</i></button>
         <button class="nav-item" data-view="followup"><span>FU</span>Follow-up</button>
         <button class="nav-item" data-view="products"><span>PR</span>Products & Pricing</button>
         <button class="nav-item" data-view="reports"><span>RP</span>Reports</button>
         <button class="nav-item" data-view="management"><span>MG</span>Management</button>
-        <div class="nav-counts" aria-label="Current workload">
-          <span><b id="applicationBadge">0</b> applications</span>
+        <div class="nav-counts" aria-label="Record totals and conversation workload">
+          <span title="Application records in your permitted scope, including records needing data repair. One customer may have multiple records."><b id="applicationBadge">0</b> Application records</span>
           <span><b id="documentBadge">0</b> files</span>
-          <span><b id="inboxBadge">0</b> unread</span>
+          <span title="Conversations with messages still needing action, grouped by phone where available. Not the number of individual messages."><b id="inboxBadge">0</b> Conversations to handle</span>
         </div>
       </nav>
       <div class="integration-card">
@@ -82,7 +82,7 @@
     </nav>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="./app-v2.js?v=20260907-pipeline-identity"></script>
+  <script src="./app-v2.js?v=20260907-application-reuse-counts"></script>
   <script src="./business-architecture.js?v=20260829-workflow1"></script>
   <script src="./product-business.js?v=20260907-workflow-audit1"></script>
   <script src="./handphone-tenure-v2.js?v=20260814-audit-fix1"></script>

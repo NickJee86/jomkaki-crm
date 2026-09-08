@@ -18,8 +18,8 @@ test('customer inbox groups message rows into one customer conversation', () => 
 test('customer inbox displays the latest message and conversation totals', () => {
   assert.match(app, /<th>Latest message<\/th><th>Conversation<\/th>/);
   assert.match(app, /item\.messageCount===1\?'':'s'/);
-  assert.match(app, /open \/ unread/);
-  assert.match(app, /All customers/);
+  assert.match(app, /message\$\{item\.openMessageCount===1\?'':'s'\} to handle/);
+  assert.match(app, /All conversations/);
 });
 
 test('handled AI replies are not counted as unread customer work', () => {

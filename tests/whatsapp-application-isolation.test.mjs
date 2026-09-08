@@ -23,6 +23,68 @@ test('same-customer reuse preserves the application and resolves its canonical l
   assert.equal(resolveApplicationLead({ 'Application ID': application['Application ID'], 'Lead ID': legacyLead['Lead ID'] }, legacyLead), legacyLead);
 });
 
+test('blank-ID active history fails closed instead of creating another application', () => {
+  const blank = { ...application, 'Application ID': '' };
+  assert.throws(() => selectReusableApplication([blank], canonicalLead, 'MOTOR'), /has no Application ID/);
+  assert.throws(() => selectReusableApplication([blank, { ...blank }], canonicalLead, 'MOTOR'), /has no Application ID/);
+  const validLowerTier = { ...application, 'Lead ID': 'LEAD-INDEPENDENT' };
+  assert.throws(() => selectReusableApplication([blank, validLowerTier], canonicalLead, 'MOTOR'), /has no Application ID/);
+});
+
+test('one lead and business cannot silently select among multiple active applications', () => {
+  const second = { ...application, 'Application ID': 'APP-SYNTHETIC-2', 'Product Model': 'NMAX' };
+  assert.throws(() => selectReusableApplication([application, second], canonicalLead, 'MOTOR'), /Multiple active applications/);
+  assert.throws(() => selectReusableApplication([application, { ...application, 'Lead ID': 'OTHER-LEAD', 'Customer ID': 'OTHER-CUSTOMER', 'Phone Number': '60199990000' }], canonicalLead, 'MOTOR'), /Application ID is duplicated/);
+});
+
+test('exact lead cases take priority over independent manual cases for the same customer', () => {
+  const otherLead = { ...canonicalLead, 'Lead ID': 'LEAD-INDEPENDENT' };
+  const otherCase = { ...application, 'Application ID': 'APP-INDEPENDENT', 'Lead ID': otherLead['Lead ID'], 'Product Model': 'NMAX', 'Created By': 'CRM_MANUAL' };
+  const cases = [otherCase, application];
+  assert.equal(selectReusableApplication(cases, canonicalLead, 'MOTOR'), application);
+  assert.equal(selectReusableApplication(cases, otherLead, 'MOTOR'), otherCase);
+  assert.equal(resolveApplicationLead(otherCase, otherLead, [canonicalLead, otherLead]), otherLead);
+});
+
+test('customer identity takes priority over phone-only history and never borrows another customer', () => {
+  const phoneOnly = { ...application, 'Application ID': 'APP-PHONE-ONLY', 'Lead ID': 'LEAD-PHONE-ONLY', 'Customer ID': '' };
+  const conflictingCustomer = { ...phoneOnly, 'Application ID': 'APP-OTHER-CUSTOMER', 'Customer ID': 'CUSTOMER-OTHER' };
+  assert.equal(selectReusableApplication([phoneOnly, conflictingCustomer, application], routedLead, 'MOTOR'), application);
+  assert.deepEqual(selectReusableApplication([conflictingCustomer], routedLead, 'MOTOR'), {});
+  assert.throws(() => selectReusableApplication([{ ...application, 'Customer ID': 'CUSTOMER-OTHER' }, phoneOnly], canonicalLead, 'MOTOR'), /identity conflicts/);
+});
+
+test('customer and phone fallback tiers reject multiple active cases instead of choosing the last row', () => {
+  const second = { ...application, 'Application ID': 'APP-SECOND', 'Lead ID': 'LEAD-SECOND' };
+  assert.throws(() => selectReusableApplication([application, second], routedLead, 'MOTOR'), /Multiple active applications/);
+  const phoneOnlyLead = { ...routedLead, 'Customer ID': '' };
+  const phoneCases = [application, second].map(row => ({ ...row, 'Customer ID': '' }));
+  assert.throws(() => selectReusableApplication(phoneCases, phoneOnlyLead, 'MOTOR'), /Multiple active applications/);
+});
+
+test('every selected identity tier rejects blank IDs and globally duplicated IDs', () => {
+  const tiers = [
+    { lead: canonicalLead, row: application },
+    { lead: routedLead, row: application },
+    { lead: { ...routedLead, 'Customer ID': '' }, row: { ...application, 'Customer ID': '' } }
+  ];
+  for (const { lead, row } of tiers) {
+    assert.throws(() => selectReusableApplication([{ ...row, 'Application ID': '' }], lead, 'MOTOR'), /has no Application ID/);
+    const foreignDuplicate = { ...row, 'Lead ID': 'LEAD-OTHER', 'Customer ID': 'CUSTOMER-OTHER', 'Phone Number': '60199990000', 'Application Status': 'CLOSED' };
+    assert.throws(() => selectReusableApplication([row, foreignDuplicate], lead, 'MOTOR'), /Application ID is duplicated/);
+  }
+});
+
+test('model changes reuse one valid active application while other customers and business units stay isolated', () => {
+  const sameApplication = { ...application, 'Product Model': 'Y15ZR' };
+  const otherCustomer = { ...application, 'Application ID': 'APP-OTHER', 'Lead ID': 'LEAD-OTHER', 'Customer ID': 'CUSTOMER-OTHER', 'Phone Number': '60199990000' };
+  const otherBusiness = { ...application, 'Application ID': 'APP-HANDPHONE', 'Business Unit': 'HANDPHONE', 'Product Model': 'iPhone 17' };
+  const selected = selectReusableApplication([otherCustomer, otherBusiness, sameApplication], { ...canonicalLead, 'Selected Product Model': 'NMAX' }, 'MOTOR');
+  assert.equal(selected, sameApplication);
+  assert.equal(selectReusableApplication([sameApplication], canonicalLead, 'HANDPHONE')['Application ID'], undefined);
+  assert.equal(selectReusableApplication([otherCustomer], canonicalLead, 'MOTOR')['Application ID'], undefined);
+});
+
 test('phone-only historical identity can reuse an application without inventing customer IDs', () => {
   const phoneLead = { ...routedLead, 'Customer ID': '' };
   const phoneApplication = { ...application, 'Customer ID': '', 'Phone Number': '60123456789' };
