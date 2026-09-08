@@ -1,7 +1,8 @@
 const clean = value => String(value ?? '').trim();
 
 export const WHATSAPP_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-export const WHATSAPP_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+// WebP is a sticker format in the Cloud API, not an image-message format.
+export const WHATSAPP_IMAGE_TYPES = new Set(['image/jpeg', 'image/png']);
 
 export async function validatePublicImageLink(imageUrl, { fetchImpl = fetch, timeoutMs = 3500 } = {}) {
   const url = clean(imageUrl);
@@ -15,8 +16,10 @@ export async function validatePublicImageLink(imageUrl, { fetchImpl = fetch, tim
       headers: { Range: 'bytes=0-1023', 'User-Agent': 'JomKaki-WhatsApp-Media-Check/1.0' },
       signal: controller.signal
     });
-    const contentType = clean(response.headers?.get?.('content-type')).toLowerCase().split(';')[0];
-    const contentLength = Number(response.headers?.get?.('content-length') || 0);
+    const contentType = clean(response.headers?.get?.('content-type')).toLowerCase().split(';')[0].trim();
+    const rangeTotal = clean(response.headers?.get?.('content-range')).match(/^bytes\s+\d+-\d+\/(\d+)$/i)?.[1];
+    // A range response's Content-Length describes only the preview bytes.
+    const contentLength = Number(rangeTotal || response.headers?.get?.('content-length') || 0);
     const supportedType = WHATSAPP_IMAGE_TYPES.has(contentType);
     const supportedSize = !contentLength || contentLength <= WHATSAPP_IMAGE_MAX_BYTES;
     try { await response.body?.cancel?.(); } catch {}

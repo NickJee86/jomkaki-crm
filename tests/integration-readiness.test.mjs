@@ -95,7 +95,7 @@ test('Meta readiness recognises protected multi-channel credentials without requ
   ['verify-secret','app-secret','west-secret','1212389721965743'].forEach(secret=>assert.equal(JSON.stringify(publicRecord).includes(secret),false));
 });
 
-test('LMS reporting distinguishes sandbox preparation from production activation',()=>{
+test('LMS status never claims submission readiness before an adapter exists',()=>{
   const sandboxEnv={
     LMSPRO_ENABLED:'true',
     LMSPRO_SANDBOX_BASE_URL:'https://sandbox.example.invalid',
@@ -104,11 +104,13 @@ test('LMS reporting distinguishes sandbox preparation from production activation
     LMSPRO_API_TOKEN:'sandbox-secret'
   };
   const sandbox=publicIntegrationRecords(sandboxEnv).find(record=>record.id==='LMSPRO');
-  assert.equal(sandbox.status,'SANDBOX_READY');
+  assert.equal(sandbox.status,'CONFIGURED_ADAPTER_REQUIRED');
   assert.equal(sandbox.reportingReady,false);
   assert.equal(sandbox.automaticActionsEnabled,false);
   const production=publicIntegrationRecords({...sandboxEnv,LMSPRO_PRODUCTION_ENABLED:'true'}).find(record=>record.id==='LMSPRO');
-  assert.equal(production.status,'PRODUCTION_READY');
-  assert.equal(production.reportingReady,true);
+  assert.equal(production.status,'ADAPTER_REQUIRED');
+  assert.equal(production.mode,'PRODUCTION_REQUESTED');
+  assert.equal(production.reportingReady,false);
+  assert.equal(production.automaticActionsEnabled,false);
   assert.equal(JSON.stringify(production).includes('sandbox-secret'),false);
 });

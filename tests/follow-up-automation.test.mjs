@@ -38,6 +38,44 @@ test('customer stop requests are detected in Malay, English and Chinese', () => 
   assert.equal(isFollowUpOptOut('jangan hubungi saya lagi'), true);
   assert.equal(isFollowUpOptOut('不要再联系我'), true);
   assert.equal(isFollowUpOptOut('boleh follow up esok'), false);
+  assert.equal(isFollowUpOptOut("don't contact me again"), true);
+  assert.equal(isFollowUpOptOut('don’t contact me again'), true);
+});
+
+test('blank spreadsheet timing cells preserve approved defaults', () => {
+  const settings = normalizeFollowUpSettings([{ 'Rule ID': 'DOCUMENTS_PARTIAL', 'First Delay Hours': '', 'Second Delay Hours': '', 'Max Attempts': '', 'UTC Offset Minutes': '', 'Max Per Run': '' }]);
+  assert.equal(settings.global.utcOffsetMinutes, 480);
+  assert.equal(settings.global.maxPerRun, 20);
+  assert.deepEqual(settings.rules.find(rule => rule.id === 'DOCUMENTS_PARTIAL').delays, [3, 24, 48]);
+  assert.equal(settings.rules.find(rule => rule.id === 'DOCUMENTS_PARTIAL').maxAttempts, 3);
+});
+
+test('overdue reminders still wait for current business hours and active weekdays', () => {
+  const application = { 'Application Status': 'OPEN', 'Last Customer Reply At': '2026-08-25T01:00:00.000Z' };
+  for (const at of ['2026-08-26T12:00:00.000Z', '2026-08-30T02:00:00.000Z']) {
+    const result = evaluateFollowUp({ application, at: new Date(at) });
+    assert.equal(result.eligible, true);
+    assert.equal(result.due, false, at);
+  }
+  assert.equal(evaluateFollowUp({ application, at: new Date('2026-08-26T02:00:00.000Z') }).due, true);
+});
+
+test('blank or older application reply timestamps cannot hide a newer customer reply on the lead', () => {
+  for (const savedAt of ['', '2026-08-25T01:00:00.000Z']) {
+    const result = evaluateFollowUp({ application: { 'Application Status': 'OPEN', 'Last Customer Reply At': savedAt, 'Follow Up Attempts': '2', 'Last Follow Up At': '2026-08-25T02:00:00.000Z' }, lead: { 'Last Customer Reply At': '2026-08-26T01:00:00.000Z' }, at: new Date('2026-08-26T02:00:00.000Z') });
+    assert.equal(result.lastReplyAt, '2026-08-26T01:00:00.000Z');
+    assert.equal(result.attempts, 0);
+    assert.equal(result.due, false);
+  }
+});
+
+test('received consent and pending verification never trigger an unsigned-consent reminder', () => {
+  const pending = classifyFollowUpStage({ 'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION', 'Document Status': 'AI_CHECK_PENDING' });
+  assert.equal(pending.eligible, false);
+  assert.equal(pending.reason, 'VERIFICATION_PENDING');
+  assert.equal(classifyFollowUpStage({ 'Credit Consent Status': 'SIGNED_PENDING_VERIFICATION', 'Missing Documents': 'IC_BACK', documentsReceived: 1 }).ruleId, 'DOCUMENTS_PARTIAL');
+  assert.equal(classifyFollowUpStage({ 'Credit Consent Status': 'DECLINED' }).eligible, false);
+  assert.equal(classifyFollowUpStage({ 'Follow Up Status': 'DELIVERY_UNKNOWN' }).eligible, false);
 });
 
 test('CRM values safely normalize timing and serialize into the settings worksheet', () => {
@@ -270,6 +308,8 @@ test('scheduler heartbeat and automatic-message fields support live health and h
   assert.match(api, /followUpRule: row\['Follow Up Rule'\]/);
   assert.match(api, /row\['Actor Username'\]/);
   assert.match(api, /row\['Occurred At'\]/);
+  assert.match(dispatcher, /sendStatus = 'SENT'/);
+  assert.match(dispatcher, /'Sent At': sendStatus === 'SENT' \? sentAt : ''/);
 });
 
 test('go-live readiness treats the follow-up scheduler as a production dependency', () => {

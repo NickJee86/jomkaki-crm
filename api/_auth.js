@@ -84,17 +84,22 @@ async function dynamicAccountDirectory(req) {
     const accounts = rows.map((values, index) => ({ rowNumber: index + 2, ...Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])) })).filter(row => row.Username).map(row => ({
       id: row['Account ID'], username: row.Username, passwordHash: row['Password Hash'], role: normaliseRole(row.Role), region: normaliseRegion(row.Region), businessAccess: normaliseBusinessAccess(row['Business Access'], row.Role), name: row['Display Name'], saId: row['SA ID'], branchId: row['Branch ID'], mustChangePassword: clean(row['Must Change Password']).toUpperCase() === 'TRUE', failedAttempts: Number(row['Failed Login Attempts'] || 0), lockedUntil: row['Locked Until'], rowNumber: row.rowNumber, active: clean(row.Status).toUpperCase() === 'ACTIVE' && clean(row['Login Enabled']).toUpperCase() === 'TRUE', authSource: 'sheet', authVersion: clean(row['Updated At'])
     }));
-    return { available: true, accounts };
+    return { available: true, accounts, token };
   } catch { return { available: false, accounts: [] }; }
 }
 
-async function dynamicAccounts(req) {
-  return (await dynamicAccountDirectory(req)).accounts;
-}
-
 export function getSession(req) {
-  if (!process.env.CRM_ACCESS_PASSWORD || !process.env.CRM_SESSION_SECRET) return false;
-  const cookies = Object.fromEntries(String(req.headers.cookie || '').split(';').map(item => item.trim().split('=').map(decodeURIComponent)).filter(parts => parts.length === 2));
+  if (!process.env.CRM_SESSION_SECRET) return false;
+  let cookies;
+  try {
+    cookies = Object.fromEntries(String(req.headers.cookie || '').split(';').map(item => {
+      const separator = item.indexOf('=');
+      if (separator < 1) return [];
+      return [decodeURIComponent(item.slice(0, separator).trim()), decodeURIComponent(item.slice(separator + 1).trim())];
+    }).filter(parts => parts.length === 2));
+  } catch {
+    return false;
+  }
   const [payload, suppliedSignature] = String(cookies[COOKIE_NAME] || '').split('.');
   if (!payload || !suppliedSignature || !safeEqual(suppliedSignature, sign(payload))) return false;
   try {
@@ -106,22 +111,22 @@ export function getSession(req) {
 
 export async function authenticate(req, username, password) {
   const wanted = clean(username || 'admin').toLowerCase();
+  if (!wanted || wanted.length > 80 || typeof password !== 'string' || password.length > 256) return false;
   const environmentAccount = environmentAccounts().find(account => account.username.toLowerCase() === wanted && (account.passwordHash ? verifyPassword(password, account.passwordHash) : safeEqual(password || '', account.password)));
   // Preview deployments need an isolated administrator credential so staging
   // access is not coupled to the live Sheet-backed account directory.
   if (process.env.VERCEL_ENV === 'preview' && environmentAccount?.role === 'ADMIN') return environmentAccount;
-  const dynamic = await dynamicAccounts(req);
-  const dynamicAccount = dynamic.find(account => account.username.toLowerCase() === wanted);
+  const directory = await dynamicAccountDirectory(req);
+  const dynamicAccount = directory.accounts.find(account => account.username.toLowerCase() === wanted);
   if (dynamicAccount?.passwordHash) {
     if (!dynamicAccount.active) return false;
     if (dynamicAccount.lockedUntil && new Date(dynamicAccount.lockedUntil).getTime() > Date.now()) return false;
-    const token = await getAccessToken(req);
     if (verifyPassword(password, dynamicAccount.passwordHash)) {
-      if (dynamicAccount.failedAttempts || dynamicAccount.lockedUntil) await updateLoginSecurity(token, dynamicAccount.rowNumber, 0, '');
+      if (dynamicAccount.failedAttempts || dynamicAccount.lockedUntil) await updateLoginSecurity(directory.token, dynamicAccount.rowNumber, 0, '');
       return dynamicAccount;
     }
     const attempts = dynamicAccount.failedAttempts + 1;
-    await updateLoginSecurity(token, dynamicAccount.rowNumber, attempts, attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : '');
+    await updateLoginSecurity(directory.token, dynamicAccount.rowNumber, attempts, attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : '');
     return false;
   }
   if (dynamicAccount && !dynamicAccount.active) return false;
@@ -187,12 +192,14 @@ export async function migrateEnvironmentAccounts(req) {
 }
 
 async function updateLoginSecurity(token, rowNumber, attempts, lockedUntil) {
-  if (!token) return;
+  if (!token) throw new Error('Login security storage is unavailable');
   const data = [{ range: `CRM_User_Access!O${rowNumber}`, values: [[String(attempts)]] }, { range: `CRM_User_Access!P${rowNumber}`, values: [[lockedUntil]] }];
-  await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values:batchUpdate`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ valueInputOption: 'USER_ENTERED', data }) });
+  if (!response.ok) throw new Error('Login security storage is unavailable');
 }
 
 export function setSession(res, account) {
+  if (!process.env.CRM_SESSION_SECRET) throw new Error('CRM session security is not configured');
   const payload = encode({ username: account.username, name: account.name, role: normaliseRole(account.role), region: account.region, businessAccess: normaliseBusinessAccess(account.businessAccess, account.role), saId: account.saId || '', branchId: account.branchId || '', mustChangePassword: !!account.mustChangePassword, authSource: account.authSource || 'environment', authVersion: account.authVersion || 'environment', iat: Date.now(), exp: Date.now() + 28800000 });
   res.setHeader('Set-Cookie', `${COOKIE_NAME}=${encodeURIComponent(`${payload}.${sign(payload)}`)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800`);
 }

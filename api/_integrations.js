@@ -99,7 +99,7 @@ export function integrationReadiness(env = process.env) {
 export function publicIntegrationRecords(env = process.env) {
   const { meta, lms, sharepoint } = integrationReadiness(env);
   const metaStatus = meta.productionEnabled ? 'CONNECTED' : meta.webhookConfigured && meta.sendingConfigured && !meta.phoneVerified ? 'PHONE_VERIFICATION_PENDING' : meta.webhookConfigured ? 'WEBHOOK_READY' : meta.mode === 'MANUAL' ? 'MANUAL_READY' : 'AWAITING_CONFIGURATION';
-  const lmsStatus = lms.productionEnabled ? 'PRODUCTION_READY' : lms.readyForSandbox ? 'SANDBOX_READY' : lms.contractConfigured ? 'CONFIGURED_DISABLED' : 'AWAITING_VENDOR';
+  const lmsStatus = lms.productionRequested ? 'ADAPTER_REQUIRED' : lms.configurationReady ? 'CONFIGURED_ADAPTER_REQUIRED' : lms.contractConfigured ? 'CONFIGURED_DISABLED' : 'AWAITING_VENDOR';
   const sharePointStatus = sharepoint.writeVerified ? 'VERIFIED' : sharepoint.credentialsConfigured ? 'CREDENTIALS_READY' : 'AWAITING_CONFIGURATION';
   return [
     {
@@ -116,11 +116,11 @@ export function publicIntegrationRecords(env = process.env) {
       id: 'LMSPRO',
       name: 'LMSPRO',
       status: lmsStatus,
-      mode: lms.sandboxOnly ? 'SANDBOX_ONLY' : 'PRODUCTION',
+      mode: lms.productionRequested ? 'PRODUCTION_REQUESTED' : 'PREPARATION_ONLY',
       reportingReady: lms.productionEnabled,
       automaticActionsEnabled: lms.productionEnabled,
-      description: lms.productionEnabled ? 'Production submission and decision reporting are enabled.' : 'Payload, readiness and idempotency controls are prepared; no production submission is allowed.',
-      requiredNext: lms.productionEnabled ? 'Monitor submission, approval and rejection metrics.' : 'Obtain the vendor contract, sandbox endpoint, authentication method and test credentials.'
+      description: 'Payload, readiness and idempotency controls are prepared, but no LMSPRO network adapter exists and no submission or decision reporting occurs.',
+      requiredNext: lms.configurationReady ? 'Implement and verify the vendor adapter in a controlled sandbox before enabling any production submission.' : 'Obtain the vendor contract, sandbox endpoint, authentication method and test credentials, then implement the vendor adapter.'
     },
     {
       id: 'SHAREPOINT',

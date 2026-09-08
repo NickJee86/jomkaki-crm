@@ -1,6 +1,7 @@
 const clean = value => String(value ?? '').trim();
 const truth = value => ['TRUE', 'YES', '1', 'ON', 'ENABLED'].includes(clean(value).toUpperCase());
 const numberBetween = (value, fallback, minimum, maximum) => {
+  if (value === undefined || value === null || clean(value) === '') return fallback;
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
 };
@@ -113,10 +114,10 @@ const timestamp = value => {
 const upper = value => clean(value).toUpperCase();
 const splitList = value => clean(value).split(/[,;|]/).map(item => item.trim()).filter(Boolean);
 const closedApplication = application => ['COMPLETED', 'REJECTED', 'CANCELLED', 'CLOSED'].includes(upper(application['Application Status'] ?? application.status));
-const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'BLOCKED_CHANNEL'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
+const humanControlled = application => ['PAUSED', 'STOPPED', 'HANDED_OVER', 'BLOCKED_CHANNEL', 'DELIVERY_UNKNOWN'].includes(upper(application['Follow Up Status'] ?? application.followUpStatus)) || ['AI_TO_SA_HANDOVER', 'AI_EXCEPTION_TO_STAFF', 'AI_EXCEPTION_STAFF_MANUAL', 'HUMAN_MANAGED', 'MANUAL_ASSIGNED'].includes(upper(application['Processing Mode'] ?? application.processingMode));
 
 export function isFollowUpOptOut(text = '') {
-  const value = clean(text).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  const value = clean(text).toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9\u4e00-\u9fff\s]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!value) return false;
   return /(?:^|\s)(?:stop|unsubscribe|cancel follow ?up|do not contact|dont contact|jangan hubungi|jangan contact|tak mahu mesej|taknak mesej|tak mau mesej|berhenti mesej|jangan follow ?up)(?:\s|$)/i.test(value)
     || /(?:不要再联系|不要联系|别再联系|停止联系|不要再发|别再发信息)/.test(value);
@@ -137,12 +138,15 @@ export function classifyFollowUpStage(application = {}, documents = []) {
   const cad = upper(application['CAD Status'] ?? application.cadStatus);
   if (/(ADDITIONAL|MISSING|REQUIRED|PENDING_DOCUMENT)/.test(cad)) return { eligible: true, ruleId: 'CAD_ADDITIONAL_DOCUMENTS' };
   const consent = upper(application['Credit Consent Status'] ?? application.creditConsentStatus);
-  if (['QUEUED', 'SENT', 'SIGNED_PENDING_VERIFICATION', 'REJECTED_RESUBMISSION_REQUIRED'].includes(consent) && consent !== 'VERIFIED') return { eligible: true, ruleId: 'CONSENT_UNSIGNED' };
+  if (['DECLINED', 'WITHDRAWN'].includes(consent)) return { eligible: false, reason: 'CONSENT_DECLINED' };
+  if (['SENT', 'REJECTED_RESUBMISSION_REQUIRED'].includes(consent)) return { eligible: true, ruleId: 'CONSENT_UNSIGNED' };
   const missingFields = splitList(application['Missing Application Fields'] ?? application.missingApplicationFields);
   if (missingFields.length) return { eligible: true, ruleId: 'INFORMATION_INCOMPLETE', missingFields };
   const missingDocuments = splitList(application['Missing Documents'] ?? application.missingDocuments);
   const received = Number(application.documentsReceived ?? 0) || documents.filter(document => clean(document['Application ID'] ?? document.applicationId) === clean(application['Application ID'] ?? application.id)).length;
   const documentsComplete = upper(application['Minimum Documents Complete'] ?? application.minimumDocumentsComplete) === 'TRUE' || upper(application.aiDocumentsComplete) === 'TRUE';
+  const pendingVerification = ['AI_CHECK_PENDING', 'PENDING_AI', 'PENDING_VERIFICATION'].includes(upper(application['Document Status'] ?? application.documentStatus));
+  if (!missingDocuments.length && (pendingVerification || consent === 'SIGNED_PENDING_VERIFICATION')) return { eligible: false, reason: 'VERIFICATION_PENDING' };
   if (!documentsComplete || missingDocuments.length) return { eligible: true, ruleId: received > 0 ? 'DOCUMENTS_PARTIAL' : 'DOCUMENTS_NOT_STARTED', missingDocuments };
   const applicationStatus = upper(application['Application Status'] ?? application.status);
   const lmsStatus = upper(application['LMS Submission Status'] ?? application.lmsSubmissionStatus);
@@ -190,7 +194,8 @@ export function evaluateFollowUp({ application = {}, lead = {}, documents = [], 
   if (!stage.eligible) return stage;
   const rule = normalized.rules.find(item => item.id === stage.ruleId);
   if (!rule?.enabled) return { eligible: false, reason: 'RULE_DISABLED', ruleId: stage.ruleId };
-  const lastReplyAt = clean(application['Last Customer Reply At'] ?? application.lastCustomerReplyAt ?? lead['Last Customer Reply At'] ?? lead.lastCustomerReplyAt ?? lead['Last Inbound At'] ?? lead.lastInboundAt);
+  const lastReplyAt = [application['Last Customer Reply At'], application.lastCustomerReplyAt, lead['Last Customer Reply At'], lead.lastCustomerReplyAt, lead['Last Inbound At'], lead.lastInboundAt]
+    .map(clean).filter(value => timestamp(value) > 0).sort((left, right) => timestamp(right) - timestamp(left))[0] || '';
   const lastFollowUpAt = clean(application['Last Follow Up At'] ?? application.lastFollowUpAt);
   let attempts = numberBetween(application['Follow Up Attempts'] ?? application.followUpAttempts, 0, 0, 999);
   if (normalized.global.replyResetsAttempts && timestamp(lastReplyAt) > timestamp(lastFollowUpAt)) attempts = 0;
@@ -202,10 +207,12 @@ export function evaluateFollowUp({ application = {}, lead = {}, documents = [], 
   const base = attempts > 0 && lastFollowUpAt ? lastFollowUpAt : (lastReplyAt || application['Updated At'] || application.updated || application['Created At'] || application.created || at);
   const delay = rule.delays[Math.min(attempts, rule.delays.length - 1)];
   const calculated = new Date(timestamp(base) + delay * 3600000);
-  const dueAt = moveToFollowUpBusinessWindow(recoveringTemplate ? at : (explicitNext || calculated), normalized.global);
+  const dueAt = moveToFollowUpBusinessWindow(recoveringTemplate && timestamp(lastReplyAt) <= timestamp(lastFollowUpAt || application['Updated At'] || application.updated) ? at : (explicitNext || calculated), normalized.global);
+  // A reminder that became due earlier must still obey today's send window.
+  const sendWindowOpen = moveToFollowUpBusinessWindow(at, normalized.global).valueOf() === new Date(at).valueOf();
   return {
     eligible: true,
-    due: dueAt.valueOf() <= new Date(at).valueOf(),
+    due: sendWindowOpen && dueAt.valueOf() <= new Date(at).valueOf(),
     dueAt: dueAt.toISOString(),
     ruleId: rule.id,
     rule,

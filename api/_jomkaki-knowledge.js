@@ -260,7 +260,9 @@ const expandedKnowledgeTerms = value => {
 };
 
 const syncedKnowledgeForRuntime = ({ text = '', intent = '', businessUnit = '' } = {}) => {
-  const chunks = Array.isArray(NOTION_SYNCED_KNOWLEDGE?.chunks) ? NOTION_SYNCED_KNOWLEDGE.chunks : [];
+  const chunks = Array.isArray(NOTION_SYNCED_KNOWLEDGE?.chunks)
+    ? NOTION_SYNCED_KNOWLEDGE.chunks.filter(chunk => !/^Test Case$/i.test(String(chunk?.type || '')) && !/^KB-TEST-/i.test(String(chunk?.knowledgeId || '')))
+    : [];
   if (!chunks.length) return '';
   const query = `${intent} ${businessUnit} ${text}`;
   const terms = expandedKnowledgeTerms(query);
